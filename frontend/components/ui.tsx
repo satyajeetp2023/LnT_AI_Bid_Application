@@ -1,0 +1,2 @@
+export function Card({children,className=""}:{children:React.ReactNode,className?:string}){return <section className={`rounded-md border border-slate-200 bg-white shadow-sm ${className}`}>{children}</section>}
+export function Badge({children,tone="blue"}:{children:React.ReactNode,tone?:"blue"|"green"|"amber"|"grey"}){const c={blue:"bg-blue-50 text-blue-700",green:"bg-emerald-50 text-emerald-700",amber:"bg-amber-50 text-amber-700",grey:"bg-slate-100 text-slate-600"}[tone];return <span className={`rounded px-2 py-1 text-xs font-semibold ${c}`}>{children}</span>}

@@ -1,0 +1,2 @@
+import {render,screen,fireEvent} from "@testing-library/react";import {test,expect} from "vitest";import {UploadZone} from "./UploadZone";
+test("queues and validates files",()=>{render(<UploadZone bidId={1} onComplete={()=>{}}/>);const input=document.querySelector("input[type=file]")!;fireEvent.change(input,{target:{files:[new File(["a"],"a.pdf"),new File(["b"],"b.exe")]}});expect(screen.getByText("a.pdf")).toBeInTheDocument();expect(screen.getByText("Unsupported file type",{exact:false})).toBeInTheDocument()});
