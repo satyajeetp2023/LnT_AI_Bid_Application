@@ -1,44 +1,96 @@
-from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, Header
+from datetime import date,timedelta
+from fastapi import APIRouter,Depends,File,Header,HTTPException,Query,Request,UploadFile
 from fastapi.responses import Response
-from sqlalchemy import select
+from sqlalchemy import func,select
 from sqlalchemy.orm import Session
-from app.database.session import get_db
-from app.models import AuditEvent, BidDocument, User
-from app.schemas.bids import BidCreate,BidRead,DocumentRead
-from app.security.auth import current_user,require_write
-from app.services.bids import create_bid,list_bids
-from app.services.documents import upload_document
-from app.storage.base import LocalSecureStorage
 from app.core.config import get_settings
+from app.database.session import get_db
+from app.models import AuditEvent,BidDocument,BidProject,ProjectMembership,User
+from app.schemas.bids import BidCreate,BidRead,BidUpdate,ClassificationUpdate,DocumentRead,NotesUpdate,RevisionCreate
+from app.security.auth import Permission,current_user,is_admin,require_permission,require_project_access
+from app.services.bids import create_bid,list_bids,update_bid
+from app.services.documents import DOCUMENT_CATEGORIES,archive,classify,mark_revision,update_notes,upload_document
+from app.storage.base import LocalSecureStorage
 router=APIRouter()
 def user_dep(db:Session=Depends(get_db),x_user_id:int=Header(default=1,alias="X-User-ID")): return current_user(db,x_user_id)
+def metadata(request:Request): return {"ip":request.client.host if request.client else None,"user_agent":request.headers.get("user-agent")}
+def get_bid(db,id):
+ bid=db.get(BidProject,id)
+ if not bid: raise HTTPException(404,"Bid project not found")
+ return bid
+def get_doc(db,id):
+ doc=db.get(BidDocument,id)
+ if not doc: raise HTTPException(404,"Document not found")
+ return doc
 @router.get("/health")
 def health(db:Session=Depends(get_db)): db.execute(select(1)); return {"status":"ok","database":"connected"}
+@router.get("/config/upload")
+def upload_config():
+ c=get_settings(); return {"max_file_size_mb":c.max_file_size_mb,"max_batch_size_mb":c.max_batch_size_mb,"max_files_per_batch":c.max_files_per_batch,"allowed_extensions":sorted(c.allowed_extensions),"document_categories":DOCUMENT_CATEGORIES}
 @router.get("/auth/me")
 def me(user:User=Depends(user_dep)): return {"id":user.id,"name":user.full_name,"roles":[r.name.value for r in user.roles]}
 @router.get("/bids",response_model=list[BidRead])
-def bids(db:Session=Depends(get_db),user:User=Depends(user_dep)): return list_bids(db)
+def bids(db:Session=Depends(get_db),user:User=Depends(user_dep)): return list_bids(db,user)
 @router.post("/bids",response_model=BidRead,status_code=201)
-def add_bid(payload:BidCreate,db:Session=Depends(get_db),user:User=Depends(user_dep)): require_write(user); return create_bid(db,payload,user.id)
-@router.get("/bids/{bid_id}/documents",response_model=list[DocumentRead])
-def documents(bid_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)): return db.scalars(select(BidDocument).where(BidDocument.bid_project_id==bid_id).order_by(BidDocument.uploaded_at.desc())).all()
+def add_bid(payload:BidCreate,db:Session=Depends(get_db),user:User=Depends(user_dep)): require_permission(user,Permission.CREATE_BID); return create_bid(db,payload,user.id)
+@router.get("/bids/{bid_id}",response_model=BidRead)
+def bid_detail(bid_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)): require_project_access(db,user,bid_id,Permission.VIEW_DOCUMENT); return get_bid(db,bid_id)
+@router.patch("/bids/{bid_id}",response_model=BidRead)
+def edit_bid(bid_id:int,payload:BidUpdate,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)): require_project_access(db,user,bid_id,Permission.EDIT_BID); return update_bid(db,get_bid(db,bid_id),payload,user.id,metadata(request))
+@router.get("/dashboard/summary")
+def dashboard(db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ visible=list_bids(db,user); ids=[b.id for b in visible]; today=date.today(); due=today+timedelta(days=30)
+ docs=[] if not ids else db.scalars(select(BidDocument).where(BidDocument.bid_project_id.in_(ids),BidDocument.document_status!="Archived")).all()
+ return {"active_bids":sum(b.bid_status not in {"Closed","Cancelled","Lost","Won"} for b in visible),"bids_due_soon":sum(today<=b.tender_due_date<=due for b in visible),"documents_uploaded":len(docs),"documents_requiring_review":sum(d.document_status=="Needs Review" for d in docs),"recent_bids":[BidRead.model_validate(b).model_dump(mode="json") for b in visible[:10]]}
+@router.post("/bids/{bid_id}/members")
+def add_member(bid_id:int,payload:dict,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.MANAGE_MEMBERS); target_id=int(payload.get("user_id",0)); role=str(payload.get("role","")).strip()
+ if not db.get(User,target_id) or not role: raise HTTPException(422,"Valid user_id and project role are required")
+ member=db.scalar(select(ProjectMembership).where(ProjectMembership.bid_project_id==bid_id,ProjectMembership.user_id==target_id))
+ if member: member.role=role
+ else: member=ProjectMembership(bid_project_id=bid_id,user_id=target_id,role=role);db.add(member)
+ db.flush();db.add(AuditEvent(user_id=user.id,bid_project_id=bid_id,event_type="project.membership_changed",entity_type="ProjectMembership",entity_id=str(member.id),request_metadata=metadata(request),details={"member_user_id":target_id,"role":role}));db.commit();return {"id":member.id,"user_id":target_id,"role":role}
+@router.get("/bids/{bid_id}/documents")
+def documents(bid_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep),search:str|None=None,category:str|None=None,extension:str|None=None,status:str|None=None,uploader:int|None=None,uploaded_date:date|None=None,page:int=Query(1,ge=1),page_size:int=Query(20,ge=1,le=100)):
+ require_project_access(db,user,bid_id,Permission.VIEW_DOCUMENT); q=select(BidDocument).where(BidDocument.bid_project_id==bid_id)
+ if search: q=q.where(BidDocument.original_filename.ilike(f"%{search}%"))
+ if category: q=q.where(BidDocument.document_category==category)
+ if extension: q=q.where(BidDocument.file_extension==extension)
+ if status: q=q.where(BidDocument.document_status==status)
+ if uploader: q=q.where(BidDocument.uploaded_by==uploader)
+ if uploaded_date: q=q.where(func.date(BidDocument.uploaded_at)==uploaded_date)
+ total=db.scalar(select(func.count()).select_from(q.subquery())) or 0; rows=db.scalars(q.order_by(BidDocument.uploaded_at.desc()).offset((page-1)*page_size).limit(page_size)).all()
+ return {"items":[DocumentRead.model_validate(x).model_dump(mode="json") for x in rows],"total":total,"page":page,"page_size":page_size}
 @router.post("/bids/{bid_id}/documents",response_model=list[DocumentRead])
 async def upload(bid_id:int,files:list[UploadFile]=File(...),db:Session=Depends(get_db),user:User=Depends(user_dep)):
-    require_write(user); cfg=get_settings()
-    if len(files)>cfg.max_files_per_batch: raise HTTPException(413,"Too many files in batch")
-    result=[]; total=0
-    for file in files:
-        data=await file.read(); total+=len(data)
-        if total>cfg.max_batch_size_mb*1024*1024: raise HTTPException(413,"Batch exceeds configured size limit")
-        result.append(upload_document(db,bid_id,file.filename or "",file.content_type,data,user.id))
-    return result
+ require_project_access(db,user,bid_id,Permission.UPLOAD_DOCUMENT); cfg=get_settings()
+ if len(files)>cfg.max_files_per_batch: raise HTTPException(413,"Too many files in batch")
+ result=[]; total=0
+ for file in files:
+  data=await file.read(); total+=len(data)
+  if total>cfg.max_batch_size_mb*1024*1024: raise HTTPException(413,"Batch exceeds configured size limit")
+  result.append(upload_document(db,bid_id,file.filename or "",file.content_type,data,user.id))
+ return result
+@router.patch("/documents/{document_id}/classification",response_model=DocumentRead)
+def reclassify(document_id:int,payload:ClassificationUpdate,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ doc=get_doc(db,document_id); require_project_access(db,user,doc.bid_project_id,Permission.CLASSIFY_DOCUMENT); return classify(db,doc,payload.document_category,payload.document_subcategory,payload.information_tags,user.id,metadata(request))
+@router.patch("/documents/{document_id}/notes",response_model=DocumentRead)
+def notes(document_id:int,payload:NotesUpdate,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ doc=get_doc(db,document_id); require_project_access(db,user,doc.bid_project_id,Permission.CLASSIFY_DOCUMENT); return update_notes(db,doc,payload.notes,user.id,metadata(request))
+@router.post("/documents/{document_id}/archive",response_model=DocumentRead)
+def archive_doc(document_id:int,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ doc=get_doc(db,document_id); require_project_access(db,user,doc.bid_project_id,Permission.ARCHIVE_DOCUMENT); return archive(db,doc,user.id,metadata(request))
+@router.post("/documents/{document_id}/revision",response_model=DocumentRead)
+def revision(document_id:int,payload:RevisionCreate,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ doc=get_doc(db,document_id); original=get_doc(db,payload.revision_of_document_id); require_project_access(db,user,doc.bid_project_id,Permission.CLASSIFY_DOCUMENT); return mark_revision(db,doc,original,user.id,metadata(request))
+@router.get("/documents/{document_id}/revisions",response_model=list[DocumentRead])
+def revisions(document_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ doc=get_doc(db,document_id); require_project_access(db,user,doc.bid_project_id,Permission.VIEW_DOCUMENT); root=doc.revision_of_document_id or doc.id; return db.scalars(select(BidDocument).where((BidDocument.id==root)|(BidDocument.revision_of_document_id==root)).order_by(BidDocument.revision_no)).all()
 @router.get("/documents/{document_id}/download")
-def download(document_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)):
-    doc=db.get(BidDocument,document_id)
-    if not doc or not doc.storage_path: raise HTTPException(404,"Document content not available")
-    data=LocalSecureStorage(get_settings().storage_root).read(doc.storage_path); db.add(AuditEvent(user_id=user.id,event_type="document.downloaded",entity_type="BidDocument",entity_id=str(doc.id))); db.commit(); return Response(data,media_type=doc.mime_type,headers={"Content-Disposition":f'attachment; filename="{doc.original_filename}"'})
+def download(document_id:int,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ doc=get_doc(db,document_id); require_project_access(db,user,doc.bid_project_id,Permission.DOWNLOAD_DOCUMENT)
+ if not doc.storage_path: raise HTTPException(404,"Document content not available")
+ data=LocalSecureStorage(get_settings().storage_root).read(doc.storage_path); db.add(AuditEvent(user_id=user.id,bid_project_id=doc.bid_project_id,event_type="document.downloaded",entity_type="BidDocument",entity_id=str(doc.id),request_metadata=metadata(request))); db.commit(); safe=doc.original_filename.replace('"',''); return Response(data,media_type=doc.mime_type,headers={"Content-Disposition":f'attachment; filename="{safe}"'})
 @router.get("/audit")
-def audit(db:Session=Depends(get_db),user:User=Depends(user_dep)):
-    if "System Admin" not in {r.name.value for r in user.roles}: raise HTTPException(403,"Administrator access required")
-    return db.scalars(select(AuditEvent).order_by(AuditEvent.timestamp.desc()).limit(200)).all()
-
+def audit(db:Session=Depends(get_db),user:User=Depends(user_dep),page:int=1,page_size:int=50):
+ require_permission(user,Permission.VIEW_AUDIT); rows=db.scalars(select(AuditEvent).order_by(AuditEvent.timestamp.desc()).offset((page-1)*page_size).limit(min(page_size,100))).all(); return [{"id":x.id,"timestamp":x.timestamp,"user":x.user.full_name if x.user else None,"event_type":x.event_type,"entity_type":x.entity_type,"entity_id":x.entity_id,"bid_project_id":x.bid_project_id,"request_metadata":x.request_metadata,"details":x.details} for x in rows]

@@ -1,6 +1,5 @@
 import os
-os.environ["DATABASE_URL"]="sqlite+pysqlite:///:memory:"
-os.environ["STORAGE_ROOT"]="/tmp/railbid-test-storage"
+os.environ["DATABASE_URL"]="sqlite+pysqlite:///:memory:";os.environ["STORAGE_ROOT"]="/tmp/railbid-test-storage"
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -9,15 +8,13 @@ from sqlalchemy.pool import StaticPool
 from app.database.session import Base,get_db
 from app.main import app
 from app.models import Role,RoleName,User
-engine=create_engine("sqlite+pysqlite://",connect_args={"check_same_thread":False},poolclass=StaticPool)
-TestingSession=sessionmaker(engine,expire_on_commit=False)
+engine=create_engine("sqlite+pysqlite://",connect_args={"check_same_thread":False},poolclass=StaticPool);TestingSession=sessionmaker(engine,expire_on_commit=False)
 @pytest.fixture(autouse=True)
-def database():
+def database(tmp_path):
  Base.metadata.create_all(engine)
  with TestingSession() as db:
-  admin=Role(name=RoleName.SYSTEM_ADMIN); readonly=Role(name=RoleName.READ_ONLY); db.add_all([admin,readonly]);db.flush();db.add_all([User(id=1,email="admin@test",full_name="Admin",roles=[admin]),User(id=2,email="read@test",full_name="Reader",roles=[readonly])]);db.commit()
- yield
- Base.metadata.drop_all(engine)
+  roles={n:Role(name=n) for n in [RoleName.SYSTEM_ADMIN,RoleName.BID_MANAGER,RoleName.PROPOSAL_ENGINEER,RoleName.READ_ONLY]};db.add_all(roles.values());db.flush();db.add_all([User(id=1,email="admin@test",full_name="Admin",roles=[roles[RoleName.SYSTEM_ADMIN]]),User(id=2,email="reader@test",full_name="Reader",roles=[roles[RoleName.READ_ONLY]]),User(id=3,email="manager@test",full_name="Manager",roles=[roles[RoleName.BID_MANAGER]])]);db.commit()
+ yield;Base.metadata.drop_all(engine)
 def override_db():
  with TestingSession() as db: yield db
 app.dependency_overrides[get_db]=override_db

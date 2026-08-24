@@ -1,12 +1,27 @@
+from enum import StrEnum
 from fastapi import Header, HTTPException
+from sqlalchemy import select
 from sqlalchemy.orm import Session
-from app.models import User
+from app.models import ProjectMembership, RoleName, User
 
-WRITE_ROLES={"System Admin","Bid Manager","Proposal Engineer"}
-def current_user(db: Session, x_user_id: int=Header(default=1)) -> User:
-    user=db.get(User,x_user_id)
-    if not user or not user.is_active: raise HTTPException(401,"Invalid development identity")
-    return user
-def require_write(user: User):
-    if not ({r.name.value for r in user.roles} & WRITE_ROLES): raise HTTPException(403,"This role has read-only access")
+class Permission(StrEnum):
+    CREATE_BID="create_bid"; EDIT_BID="edit_bid"; UPLOAD_DOCUMENT="upload_document"; VIEW_DOCUMENT="view_document"; DOWNLOAD_DOCUMENT="download_document"; CLASSIFY_DOCUMENT="classify_document"; ARCHIVE_DOCUMENT="archive_document"; MANAGE_MEMBERS="manage_project_members"; VIEW_AUDIT="view_audit_log"
 
+ROLE_PERMISSIONS={
+ RoleName.SYSTEM_ADMIN:set(Permission),
+ RoleName.BID_MANAGER:{Permission.CREATE_BID,Permission.EDIT_BID,Permission.UPLOAD_DOCUMENT,Permission.VIEW_DOCUMENT,Permission.DOWNLOAD_DOCUMENT,Permission.CLASSIFY_DOCUMENT,Permission.ARCHIVE_DOCUMENT,Permission.MANAGE_MEMBERS},
+ RoleName.PROPOSAL_ENGINEER:{Permission.UPLOAD_DOCUMENT,Permission.VIEW_DOCUMENT,Permission.DOWNLOAD_DOCUMENT,Permission.CLASSIFY_DOCUMENT},
+ RoleName.PLANNING:{Permission.VIEW_DOCUMENT,Permission.DOWNLOAD_DOCUMENT}, RoleName.ENGINEERING:{Permission.VIEW_DOCUMENT,Permission.DOWNLOAD_DOCUMENT}, RoleName.CONTRACTS:{Permission.VIEW_DOCUMENT,Permission.DOWNLOAD_DOCUMENT,Permission.CLASSIFY_DOCUMENT}, RoleName.COMMERCIAL:{Permission.VIEW_DOCUMENT,Permission.DOWNLOAD_DOCUMENT}, RoleName.PROCUREMENT:{Permission.VIEW_DOCUMENT,Permission.DOWNLOAD_DOCUMENT}, RoleName.FINANCE:{Permission.VIEW_DOCUMENT,Permission.DOWNLOAD_DOCUMENT}, RoleName.MANAGEMENT_REVIEWER:{Permission.VIEW_DOCUMENT,Permission.DOWNLOAD_DOCUMENT}, RoleName.READ_ONLY:{Permission.VIEW_DOCUMENT,Permission.DOWNLOAD_DOCUMENT},
+}
+def current_user(db:Session,x_user_id:int=Header(default=1,alias="X-User-ID"))->User:
+ user=db.get(User,x_user_id)
+ if not user or not user.is_active: raise HTTPException(401,"Invalid development identity")
+ return user
+def is_admin(user:User)->bool: return any(r.name==RoleName.SYSTEM_ADMIN for r in user.roles)
+def require_permission(user:User,permission:Permission)->None:
+ if not any(permission in ROLE_PERMISSIONS.get(r.name,set()) for r in user.roles): raise HTTPException(403,f"Permission denied: {permission.value}")
+def require_project_access(db:Session,user:User,project_id:int,permission:Permission)->None:
+ require_permission(user,permission)
+ if is_admin(user): return
+ member=db.scalar(select(ProjectMembership).where(ProjectMembership.bid_project_id==project_id,ProjectMembership.user_id==user.id))
+ if not member: raise HTTPException(403,"You are not assigned to this bid project")
