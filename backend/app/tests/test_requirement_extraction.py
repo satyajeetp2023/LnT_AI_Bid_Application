@@ -31,7 +31,7 @@ def test_txt_extraction_api_traceability_dedupe_and_review_safety(client,bid_pay
  bid=create(client,bid_payload)
  text=b"7.4.2 The Bidder shall submit the technical design report for approval.\nThe corridor is located in India.\nThe system shall maintain operations during normal service."
  document=client.post(f"/api/v1/bids/{bid['id']}/documents",files=[("files",("requirements.txt",text,"text/plain"))]).json()[0]
- first=client.post(f"/api/v1/documents/{document['id']}/extract-requirements",json={"force":False})
+ first=client.post(f"/api/v1/documents/{document['id']}/extract-requirements")
  assert first.status_code==200;summary=first.json();assert summary["created"]==1 and summary["low_confidence_skipped"]==1 and summary["no_text"] is False
  assert "requirement.extraction_completed" in {event["event_type"] for event in client.get("/api/v1/audit").json()}
  listed=client.get(f"/api/v1/bids/{bid['id']}/requirements").json();assert listed["total"]==1;item=listed["items"][0]
@@ -39,7 +39,7 @@ def test_txt_extraction_api_traceability_dedupe_and_review_safety(client,bid_pay
  assert item["extraction_method"]=="Rule Based" and 0<=item["extraction_confidence"]<=1
  assert item["review_status"]=="Not Reviewed" and item["compliance_status"]=="Not Assessed" and item["priority"]=="Medium" and item["is_mandatory"] is True
  reviewed=client.patch(f"/api/v1/requirements/{item['id']}",json={"review_status":"Reviewed"}).json();assert reviewed["reviewed_at"] is not None
- rerun=client.post(f"/api/v1/documents/{document['id']}/extract-requirements",json={"force":True}).json();assert rerun["created"]==0 and rerun["skipped_duplicates"]==1
+ rerun=client.post(f"/api/v1/documents/{document['id']}/extract-requirements").json();assert rerun["created"]==0 and rerun["skipped_duplicates"]==1
  persisted=client.get(f"/api/v1/requirements/{item['id']}").json();assert persisted["review_status"]=="Reviewed"
  manual=client.post(f"/api/v1/bids/{bid['id']}/requirements",json=payload(title="Manual protected requirement"));assert manual.status_code==201
  assert client.post(f"/api/v1/documents/{document['id']}/extract-requirements").json()["created"]==0

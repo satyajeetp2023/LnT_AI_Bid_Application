@@ -84,6 +84,5 @@ class RequirementUpdate(BaseModel):
   return v
 class RequirementRead(RequirementFields):
  id:int;bid_project_id:int;extraction_method:str;extraction_confidence:Decimal|None;created_by:int;created_at:datetime;updated_at:datetime;reviewed_by:int|None;reviewed_at:datetime|None;source_original_filename:str|None=None;source_document_title:str|None=None;source_document_category:str|None=None;model_config=ConfigDict(from_attributes=True)
-class RequirementExtractionRequest(BaseModel): force:bool=False
 class RequirementExtractionSummary(BaseModel):
  document_id:int;created:int;skipped_duplicates:int;low_confidence_skipped:int;no_text:bool;extractor_version:str
