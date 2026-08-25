@@ -21,5 +21,7 @@ def list_requirements(db:Session,project_id:int,filters:dict,page:int,page_size:
 def update_requirement(db:Session,requirement:BidRequirement,payload,user_id:int,request_metadata:dict):
  values=payload.model_dump(exclude_unset=True);validate_source(db,requirement.bid_project_id,values.get("source_document_id")) if "source_document_id" in values else None
  for field,value in values.items():setattr(requirement,field,value)
- if "review_status" in values and values["review_status"]=="Reviewed":requirement.reviewed_by=user_id;requirement.reviewed_at=datetime.now(timezone.utc)
+ if "review_status" in values:
+  if values["review_status"]=="Reviewed":requirement.reviewed_by=user_id;requirement.reviewed_at=datetime.now(timezone.utc)
+  else:requirement.reviewed_by=None;requirement.reviewed_at=None
  db.add(AuditEvent(user_id=user_id,bid_project_id=requirement.bid_project_id,event_type="requirement.updated",entity_type="BidRequirement",entity_id=str(requirement.id),request_metadata=request_metadata,details={"requirement_id":requirement.id,"changed_fields":list(values)}));db.commit();return requirement

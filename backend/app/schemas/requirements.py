@@ -42,6 +42,11 @@ class RequirementFields(BaseModel):
 class RequirementCreate(RequirementFields): pass
 class RequirementUpdate(BaseModel):
  source_document_id:int|None=None; requirement_category:str|None=None; requirement_type:str|None=None; requirement_title:str|None=Field(None,min_length=2,max_length=300); requirement_text:str|None=Field(None,min_length=2,max_length=20000); source_page:str|None=None; source_clause:str|None=None; source_section:str|None=None; source_excerpt:str|None=None; responsible_function:str|None=None; responsible_person:str|None=None; due_date:date|None=None; priority:str|None=None; requirement_status:str|None=None; is_mandatory:bool|None=None; compliance_status:str|None=None; review_status:str|None=None; notes:str|None=None
+ @field_validator("requirement_category","requirement_title","requirement_text","priority","requirement_status","is_mandatory","compliance_status","review_status")
+ @classmethod
+ def required_fields_cannot_be_null(cls,v):
+  if v is None: raise ValueError("Required requirement fields cannot be null")
+  return v
  @field_validator("requirement_category")
  @classmethod
  def category_valid(cls,v):

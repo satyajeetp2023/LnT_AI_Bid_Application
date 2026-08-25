@@ -18,3 +18,30 @@ def test_cross_project_access_denied_and_pagination(client,bid_payload):
  page=client.get(f"/api/v1/bids/{bid['id']}/requirements",params={"page":1,"page_size":2}).json();assert page["total"]==3 and len(page["items"])==2
  assert client.get(f"/api/v1/bids/{bid['id']}/requirements",headers={"X-User-ID":"2"}).status_code==403
  assert client.get(f"/api/v1/requirements/{page['items'][0]['id']}",headers={"X-User-ID":"2"}).status_code==403
+
+def test_patch_rejects_null_required_fields_but_clears_nullable_fields(client,bid_payload):
+ bid=create(client,bid_payload);document=upload(client,bid["id"],"source.pdf",b"technical specification").json()[0]
+ item=client.post(f"/api/v1/bids/{bid['id']}/requirements",json=payload(document["id"])).json()
+ for field in ("requirement_title","requirement_category","priority"):
+  response=client.patch(f"/api/v1/requirements/{item['id']}",json={field:None})
+  assert response.status_code==422
+ cleared=client.patch(f"/api/v1/requirements/{item['id']}",json={"source_document_id":None,"due_date":None})
+ assert cleared.status_code==200
+ assert cleared.json()["source_document_id"] is None and cleared.json()["due_date"] is None
+
+def test_needs_review_summary_counts_unreviewed_and_clarification_only(client,bid_payload):
+ bid=create(client,bid_payload)
+ first=client.post(f"/api/v1/bids/{bid['id']}/requirements",json=payload(title="First requirement")).json()
+ second=client.post(f"/api/v1/bids/{bid['id']}/requirements",json=payload(title="Second requirement")).json()
+ third=client.post(f"/api/v1/bids/{bid['id']}/requirements",json=payload(title="Third requirement")).json()
+ assert client.get(f"/api/v1/bids/{bid['id']}/requirements").json()["summary"]["needs_review"]==3
+ assert client.patch(f"/api/v1/requirements/{second['id']}",json={"review_status":"Needs Clarification"}).status_code==200
+ reviewed=client.patch(f"/api/v1/requirements/{third['id']}",json={"review_status":"Reviewed"})
+ assert reviewed.status_code==200
+ assert reviewed.json()["reviewed_by"]==1 and reviewed.json()["reviewed_at"] is not None
+ summary=client.get(f"/api/v1/bids/{bid['id']}/requirements").json()["summary"]
+ assert summary["needs_review"]==2
+ reset=client.patch(f"/api/v1/requirements/{third['id']}",json={"review_status":"Not Reviewed"})
+ assert reset.status_code==200
+ assert reset.json()["reviewed_by"] is None and reset.json()["reviewed_at"] is None
+ assert client.get(f"/api/v1/bids/{bid['id']}/requirements").json()["summary"]["needs_review"]==3
