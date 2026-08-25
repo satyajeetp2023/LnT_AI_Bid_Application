@@ -1,18 +1,18 @@
 "use client";
-import {use,useCallback,useEffect,useState} from "react";
+import Link from "next/link";import {use,useCallback,useEffect,useState} from "react";
 import {Card,Badge} from "@/components/ui";
 import {UploadOutcome,UploadZone} from "@/features/documents/UploadZone";
 import {API,request} from "@/services/api";
 import type {Document,Page} from "@/types";
 
-const steps=["Bid Details","Upload Documents","Requirements Extracted","Gaps Identified","Bid Preparation","Review","Submission","Bid Result"];
+const steps=["Bid Details","Upload Documents","Requirement Register","Gaps Identified","Bid Preparation","Review","Submission","Bid Result"];
 const categories=["Notice / Invitation","Instructions to Bidders","Bid Data Sheet","Conditions of Contract","Employer's Requirements","Technical Specifications","BOQ / Price Schedule","Drawings","Forms / Formats / Schedules","Qualification Requirements","Evaluation Criteria","Scope of Work","Addendum / Corrigendum","Pre-Bid Clarification","Reference Document","Other"];
 const empty:UploadOutcome={total:0,stored:0,duplicates:0,unsupported:0,failed:0,requiringClassification:0};
 
 export default function BidDocuments({params}:{params:Promise<{id:string}>}){
  const {id}=use(params),[outcome,setOutcome]=useState(empty),[refresh,setRefresh]=useState(0);
  return <div className="mx-auto max-w-7xl"><h1 className="text-2xl font-bold text-navy">Tender Document Workspace</h1>
-  <div className="my-5 grid grid-cols-2 gap-2 lg:grid-cols-8">{steps.map((s,i)=><div key={s} className={`rounded border p-3 ${i<2?"border-blue-200 bg-white":"bg-slate-100 text-slate-400"}`}><div className="text-[10px] font-bold">STEP {i+1}</div><div className="mt-1 text-xs font-semibold">{s}</div>{i>1&&<div className="mt-1 text-[9px] uppercase">Coming Soon</div>}</div>)}</div>
+  <div className="my-5 grid grid-cols-2 gap-2 lg:grid-cols-8">{steps.map((s,i)=><div key={s} className={`rounded border p-3 ${i<3?"border-blue-200 bg-white":"bg-slate-100 text-slate-400"}`}><div className="text-[10px] font-bold">STEP {i+1}</div><div className="mt-1 text-xs font-semibold">{i===2?<Link className="text-blue-700" href={`/bids/${id}/requirements`}>{s}</Link>:s}</div>{i>2&&<div className="mt-1 text-[9px] uppercase">Coming Soon</div>}</div>)}</div>
   <Card className="p-5"><h2 className="mb-4 font-bold text-navy">Bulk Document Upload</h2><UploadZone bidId={Number(id)} onComplete={x=>{setOutcome(x);setRefresh(n=>n+1)}}/></Card>
   {outcome.total+outcome.unsupported>0&&<div className="my-5 grid gap-3 md:grid-cols-6">{[["Files Selected",outcome.total+outcome.unsupported],["Stored",outcome.stored],["Require Classification",outcome.requiringClassification],["Duplicates",outcome.duplicates],["Unsupported",outcome.unsupported],["Failed",outcome.failed]].map(([a,b])=><Card className="p-4" key={a}><div className="text-2xl font-bold text-navy">{b}</div><div className="text-xs text-slate-500">{a}</div></Card>)}</div>}
   <Repository bidId={Number(id)} refresh={refresh}/>

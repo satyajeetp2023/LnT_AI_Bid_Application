@@ -5,10 +5,12 @@ from sqlalchemy import func,select
 from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.database.session import get_db
-from app.models import AuditEvent,BidDocument,BidProject,ProjectMembership,User
+from app.models import AuditEvent,BidDocument,BidProject,BidRequirement,ProjectMembership,User
+from app.schemas.requirements import RequirementCreate,RequirementRead,RequirementUpdate
 from app.schemas.bids import AutoClassifyRequest,BidCreate,BidRead,BidUpdate,ClassificationUpdate,DocumentMetadataUpdate,DocumentRead,NotesUpdate,RevisionCreate
 from app.security.auth import Permission,current_user,is_admin,require_permission,require_project_access
 from app.services.bids import create_bid,list_bids,update_bid
+from app.services.requirements import create_requirement,list_requirements,update_requirement
 from app.services.documents import DOCUMENT_CATEGORIES,archive,classify,mark_revision,update_document_metadata,update_notes,upload_document
 from app.services.document_classification import auto_classify_document
 from app.storage.base import LocalSecureStorage
@@ -101,6 +103,25 @@ def download(document_id:int,request:Request,db:Session=Depends(get_db),user:Use
  doc=get_doc(db,document_id); require_project_access(db,user,doc.bid_project_id,Permission.DOWNLOAD_DOCUMENT)
  if not doc.storage_path: raise HTTPException(404,"Document content not available")
  data=LocalSecureStorage(get_settings().storage_root).read(doc.storage_path); db.add(AuditEvent(user_id=user.id,bid_project_id=doc.bid_project_id,event_type="document.downloaded",entity_type="BidDocument",entity_id=str(doc.id),request_metadata=metadata(request))); db.commit(); safe=doc.original_filename.replace('"',''); return Response(data,media_type=doc.mime_type,headers={"Content-Disposition":f'attachment; filename="{safe}"'})
+@router.post("/bids/{bid_id}/requirements",response_model=RequirementRead,status_code=201)
+def add_requirement(bid_id:int,payload:RequirementCreate,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.REQUIREMENT_MANAGE);get_bid(db,bid_id);return create_requirement(db,bid_id,payload,user.id,metadata(request))
+@router.get("/bids/{bid_id}/requirements")
+def requirements(bid_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep),search:str|None=None,category:str|None=None,requirement_type:str|None=None,priority:str|None=None,requirement_status:str|None=None,compliance_status:str|None=None,responsible_function:str|None=None,source_document_id:int|None=None,due_date:date|None=None,page:int=Query(1,ge=1),page_size:int=Query(20,ge=1,le=100)):
+ require_project_access(db,user,bid_id,Permission.REQUIREMENT_VIEW);rows,total=list_requirements(db,bid_id,locals(),page,page_size);base=BidRequirement.bid_project_id==bid_id
+ count=lambda condition:db.scalar(select(func.count()).select_from(BidRequirement).where(base,condition)) or 0
+ summary={"total":count(BidRequirement.id>0),"critical":count(BidRequirement.priority=="Critical"),"open":count(BidRequirement.requirement_status=="Open"),"needs_review":count(BidRequirement.review_status=="Needs Clarification"),"non_compliant":count(BidRequirement.compliance_status=="Non-Compliant")}
+ return {"items":[RequirementRead.model_validate(x).model_dump(mode="json") for x in rows],"total":total,"page":page,"page_size":page_size,"summary":summary}
+@router.get("/requirements/{requirement_id}",response_model=RequirementRead)
+def requirement_detail(requirement_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ item=db.get(BidRequirement,requirement_id)
+ if not item:raise HTTPException(404,"Requirement not found")
+ require_project_access(db,user,item.bid_project_id,Permission.REQUIREMENT_VIEW);return item
+@router.patch("/requirements/{requirement_id}",response_model=RequirementRead)
+def edit_requirement(requirement_id:int,payload:RequirementUpdate,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ item=db.get(BidRequirement,requirement_id)
+ if not item:raise HTTPException(404,"Requirement not found")
+ require_project_access(db,user,item.bid_project_id,Permission.REQUIREMENT_MANAGE);return update_requirement(db,item,payload,user.id,metadata(request))
 @router.get("/audit")
 def audit(db:Session=Depends(get_db),user:User=Depends(user_dep),page:int=1,page_size:int=50):
  require_permission(user,Permission.VIEW_AUDIT); rows=db.scalars(select(AuditEvent).order_by(AuditEvent.timestamp.desc()).offset((page-1)*page_size).limit(min(page_size,100))).all(); return [{"id":x.id,"timestamp":x.timestamp,"user":x.user.full_name if x.user else None,"event_type":x.event_type,"entity_type":x.entity_type,"entity_id":x.entity_id,"bid_project_id":x.bid_project_id,"request_metadata":x.request_metadata,"details":x.details} for x in rows]

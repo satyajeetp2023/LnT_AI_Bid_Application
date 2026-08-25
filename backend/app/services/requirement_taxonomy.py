@@ -1,0 +1,8 @@
+REQUIREMENT_CATEGORIES=["Submission Requirement","Technical Requirement","Commercial Requirement","Contractual Requirement","Qualification Requirement","Financial Requirement","Planning / Scheduling Requirement","Design Requirement","Procurement Requirement","Construction Requirement","Testing & Commissioning Requirement","Safety Requirement","Quality Requirement","Environmental / Social Requirement","Interface Requirement","Statutory / Approval Requirement","Security / Guarantee Requirement","Insurance Requirement","Documentation Requirement","Other"]
+REQUIREMENT_TYPES=["Information","Document Submission","Form / Format","Certificate","Declaration","Undertaking","Eligibility Criterion","Evaluation Criterion","Technical Compliance","Commercial Compliance","Milestone","Schedule","Resource Requirement","Experience Requirement","Financial Criterion","Guarantee / Security","Approval","Drawing","Method Statement","Plan","Report","Other"]
+PRIORITIES=["Critical","High","Medium","Low"]
+REQUIREMENT_STATUSES=["Open","In Progress","Ready for Review","Closed","Not Applicable"]
+COMPLIANCE_STATUSES=["Not Assessed","Compliant","Partially Compliant","Non-Compliant","Not Applicable"]
+REVIEW_STATUSES=["Not Reviewed","Reviewed","Needs Clarification"]
+EXTRACTION_METHODS=["Manual","Rule Based","AI Extracted"]
+RESPONSIBLE_FUNCTIONS=["Bid Management","Planning","Engineering","Contracts","Commercial","Procurement","Finance","Construction","Quality","Safety","Testing & Commissioning","Interface","Design","Management","Other"]
