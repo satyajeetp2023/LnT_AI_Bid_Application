@@ -30,5 +30,18 @@ class BidRequirement(Base):
  def source_document_title(self): return self.source_document.document_title if self.source_document else None
  @property
  def source_document_category(self): return self.source_document.document_category if self.source_document else None
+class BidMissingInput(Base):
+ __tablename__="bid_missing_inputs"
+ id:Mapped[int]=mapped_column(primary_key=True); bid_project_id:Mapped[int]=mapped_column(ForeignKey("bid_projects.id",ondelete="CASCADE"),index=True); requirement_id:Mapped[int|None]=mapped_column(ForeignKey("bid_requirements.id",ondelete="SET NULL"),index=True); requirement:Mapped[BidRequirement|None]=relationship(); source_document_id:Mapped[int|None]=mapped_column(ForeignKey("bid_documents.id",ondelete="SET NULL"),index=True); source_document:Mapped[BidDocument|None]=relationship(); missing_input_title:Mapped[str]=mapped_column(String(300)); missing_input_description:Mapped[str]=mapped_column(Text); input_category:Mapped[str]=mapped_column(String(100)); input_type:Mapped[str]=mapped_column(String(100)); responsible_function:Mapped[str|None]=mapped_column(String(100),index=True); responsible_person:Mapped[str|None]=mapped_column(String(200)); requested_from:Mapped[str|None]=mapped_column(String(200)); required_by_date:Mapped[date|None]=mapped_column(Date,index=True); priority:Mapped[str]=mapped_column(String(20),default="Medium",index=True); status:Mapped[str]=mapped_column(String(40),default="Open",index=True); impact_if_missing:Mapped[str|None]=mapped_column(Text); resolution_notes:Mapped[str|None]=mapped_column(Text); source_page:Mapped[str|None]=mapped_column(String(50)); source_clause:Mapped[str|None]=mapped_column(String(100)); source_section:Mapped[str|None]=mapped_column(String(200)); source_excerpt:Mapped[str|None]=mapped_column(Text); created_by:Mapped[int]=mapped_column(ForeignKey("users.id")); created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=now); updated_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=now,onupdate=now); resolved_by:Mapped[int|None]=mapped_column(ForeignKey("users.id")); resolved_at:Mapped[datetime|None]=mapped_column(DateTime(timezone=True))
+ @property
+ def requirement_title(self): return self.requirement.requirement_title if self.requirement else None
+ @property
+ def requirement_category(self): return self.requirement.requirement_category if self.requirement else None
+ @property
+ def requirement_status(self): return self.requirement.requirement_status if self.requirement else None
+ @property
+ def source_original_filename(self): return self.source_document.original_filename if self.source_document else None
+ @property
+ def source_document_title(self): return self.source_document.document_title if self.source_document else None
 class AuditEvent(Base):
  __tablename__="audit_events"; id:Mapped[int]=mapped_column(primary_key=True); user_id:Mapped[int|None]=mapped_column(ForeignKey("users.id")); user:Mapped[User|None]=relationship(); bid_project_id:Mapped[int|None]=mapped_column(ForeignKey("bid_projects.id"),index=True); event_type:Mapped[str]=mapped_column(String(80),index=True); entity_type:Mapped[str]=mapped_column(String(80)); entity_id:Mapped[str]=mapped_column(String(80)); timestamp:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=now,index=True); request_metadata:Mapped[dict]=mapped_column(JSON,default=dict); details:Mapped[dict]=mapped_column(JSON,default=dict)
