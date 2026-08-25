@@ -39,8 +39,16 @@ def test_manual_classification_protected_and_force_reclassification(client,bid_p
  bid=create(client,bid_payload);uploaded=client.post(f"/api/v1/bids/{bid['id']}/documents",files=[("files",("technical_specifications.txt",b"technical specification technical requirements specification","text/plain"))]).json()[0]
  manual=client.patch(f"/api/v1/documents/{uploaded['id']}/metadata",json={"document_category":"Reference Document"}).json();assert manual["classification_status"]=="manually_classified"
  assert client.post(f"/api/v1/documents/{uploaded['id']}/auto-classify",json={"force":False}).status_code==409
- forced=client.post(f"/api/v1/documents/{uploaded['id']}/auto-classify",json={"force":True});assert forced.status_code==200 and forced.json()["document_category"]=="Technical Specifications" and forced.json()["classification_status"]=="classified"
+ forced=client.post(f"/api/v1/documents/{uploaded['id']}/auto-classify",json={"force":True});assert forced.status_code==200 and forced.json()["document_category"]=="Technical Specifications" and forced.json()["classification_status"]=="classified" and forced.json()["document_status"]=="Uploaded"
 def test_unsupported_content_classification_is_safe(client,bid_payload):
  bid=create(client,bid_payload);response=client.post(f"/api/v1/bids/{bid['id']}/documents",files=[("files",("site_photo.png",b"not-real-image-content","image/png"))])
- assert response.status_code==200;document=response.json()[0];assert document["classification_status"]=="needs_review" and document["classification_confidence"] is None
+ assert response.status_code==200;document=response.json()[0];assert document["classification_status"]=="needs_review" and document["classification_confidence"] is None and document["document_status"]=="Needs Review"
  assert client.get(f"/api/v1/documents/{document['id']}/download").content==b"not-real-image-content"
+def test_failed_forced_reclassification_clears_stale_manual_prediction(client,bid_payload,monkeypatch):
+ bid=create(client,bid_payload);uploaded=client.post(f"/api/v1/bids/{bid['id']}/documents",files=[("files",("conditions.txt",b"general conditions of contract gcc","text/plain"))]).json()[0]
+ manual=client.patch(f"/api/v1/documents/{uploaded['id']}/metadata",json={"document_category":"Conditions of Contract","document_type":"GCC"}).json();assert manual["classification_status"]=="manually_classified"
+ def fail_classification(*args,**kwargs): raise RuntimeError("controlled test failure")
+ monkeypatch.setattr("app.services.document_classification.RuleBasedDocumentIntelligenceProvider.classify",fail_classification)
+ failed=client.post(f"/api/v1/documents/{uploaded['id']}/auto-classify",json={"force":True});assert failed.status_code==200
+ result=failed.json();assert result["document_category"] is None and result["document_type"] is None and result["classification_confidence"] is None
+ assert result["classification_status"]=="needs_review" and result["document_status"]=="Needs Review"

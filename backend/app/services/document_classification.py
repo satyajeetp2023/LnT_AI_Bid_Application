@@ -108,12 +108,16 @@ def auto_classify_document(db: Session, document: BidDocument, storage: StorageP
         document.document_type = result.document_type
         document.classification_confidence = Decimal(str(result.confidence)) if result.confidence is not None else None
         document.classification_status = result.status
+        document.document_status = "Uploaded" if result.status == "classified" else "Needs Review"
         details = {"predicted_category": result.category, "predicted_type": result.document_type, "confidence": result.confidence, "classification_status": result.status, "classifier_version": provider.version, "forced": force}
         event_type = "document.auto_classified"
     except Exception as exc:
         logger.warning("Document auto-classification failed for document %s: %s", document.id, type(exc).__name__)
+        document.document_category = None
+        document.document_type = None
         document.classification_status = "needs_review"
         document.classification_confidence = None
+        document.document_status = "Needs Review"
         details = {"predicted_category": None, "predicted_type": None, "confidence": None, "classification_status": "needs_review", "classifier_version": provider.version, "forced": force, "failure_reason": type(exc).__name__}
         event_type = "document.auto_classification_failed"
     db.add(AuditEvent(user_id=user_id, bid_project_id=document.bid_project_id, event_type=event_type, entity_type="BidDocument", entity_id=str(document.id), request_metadata=request_metadata or {}, details=details))
