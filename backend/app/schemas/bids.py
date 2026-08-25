@@ -20,7 +20,15 @@ class BidUpdate(BaseModel):
 class BidRead(BidBase):
  id:int; created_by:int; created_at:datetime; updated_at:datetime; model_config=ConfigDict(from_attributes=True)
 class DocumentRead(BaseModel):
- id:int; bid_project_id:int; original_filename:str; file_extension:str; mime_type:str; file_size:int; checksum:str; uploaded_by:int; uploader_name:str|None=None; document_status:str; document_category:str|None; document_subcategory:str|None; information_tags:list; revision_no:int; is_latest_revision:bool; revision_of_document_id:int|None; duplicate_of_document_id:int|None; uploaded_at:datetime; notes:str|None; model_config=ConfigDict(from_attributes=True)
+ id:int; bid_project_id:int; original_filename:str; file_extension:str; mime_type:str; file_size:int; checksum:str; uploaded_by:int; uploader_name:str|None=None; document_status:str; document_category:str|None; document_type:str|None; document_number:str|None; document_title:str|None; revision:str|None; document_date:date|None; classification_status:str|None; classification_confidence:Decimal|None; is_latest_version:bool|None; remarks:str|None; document_subcategory:str|None; information_tags:list; revision_no:int; is_latest_revision:bool; revision_of_document_id:int|None; duplicate_of_document_id:int|None; uploaded_at:datetime; notes:str|None; model_config=ConfigDict(from_attributes=True)
+class DocumentMetadataUpdate(BaseModel):
+ document_category:str|None=None
+ document_type:str|None=Field(None,max_length=100)
+ document_number:str|None=Field(None,max_length=100)
+ document_title:str|None=Field(None,max_length=300)
+ revision:str|None=Field(None,max_length=50)
+ document_date:date|None=None
+ remarks:str|None=Field(None,max_length=5000)
 class ClassificationUpdate(BaseModel):
  document_category:str; document_subcategory:str|None=None; information_tags:list[str]=Field(default_factory=list,max_length=25)
 class NotesUpdate(BaseModel): notes:str|None=Field(None,max_length=5000)

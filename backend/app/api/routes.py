@@ -6,10 +6,10 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.database.session import get_db
 from app.models import AuditEvent,BidDocument,BidProject,ProjectMembership,User
-from app.schemas.bids import BidCreate,BidRead,BidUpdate,ClassificationUpdate,DocumentRead,NotesUpdate,RevisionCreate
+from app.schemas.bids import BidCreate,BidRead,BidUpdate,ClassificationUpdate,DocumentMetadataUpdate,DocumentRead,NotesUpdate,RevisionCreate
 from app.security.auth import Permission,current_user,is_admin,require_permission,require_project_access
 from app.services.bids import create_bid,list_bids,update_bid
-from app.services.documents import DOCUMENT_CATEGORIES,archive,classify,mark_revision,update_notes,upload_document
+from app.services.documents import DOCUMENT_CATEGORIES,archive,classify,mark_revision,update_document_metadata,update_notes,upload_document
 from app.storage.base import LocalSecureStorage
 router=APIRouter()
 def user_dep(db:Session=Depends(get_db),x_user_id:int=Header(default=1,alias="X-User-ID")): return current_user(db,x_user_id)
@@ -74,6 +74,9 @@ async def upload(bid_id:int,files:list[UploadFile]=File(...),db:Session=Depends(
 @router.patch("/documents/{document_id}/classification",response_model=DocumentRead)
 def reclassify(document_id:int,payload:ClassificationUpdate,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
  doc=get_doc(db,document_id); require_project_access(db,user,doc.bid_project_id,Permission.CLASSIFY_DOCUMENT); return classify(db,doc,payload.document_category,payload.document_subcategory,payload.information_tags,user.id,metadata(request))
+@router.patch("/documents/{document_id}/metadata",response_model=DocumentRead)
+def edit_document_metadata(document_id:int,payload:DocumentMetadataUpdate,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ doc=get_doc(db,document_id); require_project_access(db,user,doc.bid_project_id,Permission.CLASSIFY_DOCUMENT); return update_document_metadata(db,doc,payload,user.id,metadata(request))
 @router.patch("/documents/{document_id}/notes",response_model=DocumentRead)
 def notes(document_id:int,payload:NotesUpdate,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
  doc=get_doc(db,document_id); require_project_access(db,user,doc.bid_project_id,Permission.CLASSIFY_DOCUMENT); return update_notes(db,doc,payload.notes,user.id,metadata(request))
