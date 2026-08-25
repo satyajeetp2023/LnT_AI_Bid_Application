@@ -1,3 +1,4 @@
+from dataclasses import asdict
 from datetime import date,timedelta
 from fastapi import APIRouter,Depends,File,Header,HTTPException,Query,Request,UploadFile
 from fastapi.responses import Response
@@ -6,11 +7,12 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.database.session import get_db
 from app.models import AuditEvent,BidDocument,BidProject,BidRequirement,ProjectMembership,User
-from app.schemas.requirements import RequirementCreate,RequirementRead,RequirementUpdate
+from app.schemas.requirements import RequirementCreate,RequirementExtractionRequest,RequirementExtractionSummary,RequirementRead,RequirementUpdate
 from app.schemas.bids import AutoClassifyRequest,BidCreate,BidRead,BidUpdate,ClassificationUpdate,DocumentMetadataUpdate,DocumentRead,NotesUpdate,RevisionCreate
 from app.security.auth import Permission,current_user,is_admin,require_permission,require_project_access
 from app.services.bids import create_bid,list_bids,update_bid
 from app.services.requirements import create_requirement,list_requirements,update_requirement
+from app.services.requirement_extraction import extract_requirements_from_document
 from app.services.documents import DOCUMENT_CATEGORIES,archive,classify,mark_revision,update_document_metadata,update_notes,upload_document
 from app.services.document_classification import auto_classify_document
 from app.storage.base import LocalSecureStorage
@@ -86,6 +88,12 @@ def auto_classify(document_id:int,request:Request,payload:AutoClassifyRequest=Au
  if doc.duplicate_of_document_id or not doc.storage_path: raise HTTPException(422,"Document content is not available for classification")
  if doc.classification_status=="manually_classified" and not payload.force: raise HTTPException(409,"Manual classification is protected; set force=true to replace it")
  return auto_classify_document(db,doc,LocalSecureStorage(get_settings().storage_root),user.id,force=payload.force,request_metadata=metadata(request))
+@router.post("/documents/{document_id}/extract-requirements",response_model=RequirementExtractionSummary)
+def extract_document_requirements(document_id:int,request:Request,payload:RequirementExtractionRequest=RequirementExtractionRequest(),db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ doc=get_doc(db,document_id);require_project_access(db,user,doc.bid_project_id,Permission.REQUIREMENT_MANAGE)
+ if doc.duplicate_of_document_id or not doc.storage_path:raise HTTPException(422,"Document content is not available for requirement extraction")
+ try:return asdict(extract_requirements_from_document(db,doc,LocalSecureStorage(get_settings().storage_root),user.id,metadata(request)))
+ except ValueError as exc:raise HTTPException(422,str(exc)) from None
 @router.patch("/documents/{document_id}/notes",response_model=DocumentRead)
 def notes(document_id:int,payload:NotesUpdate,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
  doc=get_doc(db,document_id); require_project_access(db,user,doc.bid_project_id,Permission.CLASSIFY_DOCUMENT); return update_notes(db,doc,payload.notes,user.id,metadata(request))
