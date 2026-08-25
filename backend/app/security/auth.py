@@ -5,9 +5,9 @@ from sqlalchemy.orm import Session
 from app.models import ProjectMembership, RoleName, User
 
 class Permission(StrEnum):
-    CREATE_BID="create_bid"; EDIT_BID="edit_bid"; UPLOAD_DOCUMENT="upload_document"; VIEW_DOCUMENT="view_document"; DOWNLOAD_DOCUMENT="download_document"; CLASSIFY_DOCUMENT="classify_document"; ARCHIVE_DOCUMENT="archive_document"; MANAGE_MEMBERS="manage_project_members"; VIEW_AUDIT="view_audit_log"; REQUIREMENT_VIEW="requirement_view"; REQUIREMENT_MANAGE="requirement_manage"; MISSING_INPUT_VIEW="missing_input_view"; MISSING_INPUT_MANAGE="missing_input_manage"
+    CREATE_BID="create_bid"; EDIT_BID="edit_bid"; UPLOAD_DOCUMENT="upload_document"; VIEW_DOCUMENT="view_document"; DOWNLOAD_DOCUMENT="download_document"; CLASSIFY_DOCUMENT="classify_document"; ARCHIVE_DOCUMENT="archive_document"; MANAGE_MEMBERS="manage_project_members"; VIEW_AUDIT="view_audit_log"; REQUIREMENT_VIEW="requirement_view"; REQUIREMENT_MANAGE="requirement_manage"; MISSING_INPUT_VIEW="missing_input_view"; MISSING_INPUT_MANAGE="missing_input_manage"; PRE_BID_QUERY_VIEW="pre_bid_query_view"; PRE_BID_QUERY_MANAGE="pre_bid_query_manage"
 
-VIEW={Permission.MISSING_INPUT_VIEW};MANAGE={Permission.MISSING_INPUT_VIEW,Permission.MISSING_INPUT_MANAGE}
+VIEW={Permission.MISSING_INPUT_VIEW,Permission.PRE_BID_QUERY_VIEW};MANAGE={Permission.MISSING_INPUT_VIEW,Permission.MISSING_INPUT_MANAGE,Permission.PRE_BID_QUERY_VIEW,Permission.PRE_BID_QUERY_MANAGE}
 ROLE_PERMISSIONS={
  RoleName.SYSTEM_ADMIN:set(Permission),
  RoleName.BID_MANAGER:{Permission.CREATE_BID,Permission.EDIT_BID,Permission.UPLOAD_DOCUMENT,Permission.VIEW_DOCUMENT,Permission.DOWNLOAD_DOCUMENT,Permission.CLASSIFY_DOCUMENT,Permission.ARCHIVE_DOCUMENT,Permission.MANAGE_MEMBERS,Permission.REQUIREMENT_VIEW,Permission.REQUIREMENT_MANAGE}|MANAGE,
