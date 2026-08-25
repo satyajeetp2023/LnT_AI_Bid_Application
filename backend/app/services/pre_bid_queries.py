@@ -16,9 +16,15 @@ def validate_links(db:Session,project_id:int,requirement_id:int|None,missing_inp
   document=db.get(BidDocument,document_id)
   if not document or document.bid_project_id!=project_id:raise HTTPException(422,"Source document must belong to this bid project")
 
+def normalize_workflow(item:BidPreBidQuery):
+ if item.status=="Submitted" and item.submitted_date is None:item.submitted_date=date.today()
+ if item.status=="Responded":
+  if not (item.employer_response or "").strip():raise HTTPException(422,"Employer response is required when status is Responded")
+  if item.response_date is None:item.response_date=date.today()
+
 def create_pre_bid_query(db:Session,project_id:int,payload,user_id:int,request_metadata:dict):
  validate_links(db,project_id,payload.requirement_id,payload.missing_input_id,payload.source_document_id)
- item=BidPreBidQuery(**payload.model_dump(),bid_project_id=project_id,created_by=user_id)
+ item=BidPreBidQuery(**payload.model_dump(),bid_project_id=project_id,created_by=user_id);normalize_workflow(item)
  if item.status in CLOSED_STATUSES:item.closed_by=user_id;item.closed_at=datetime.now(timezone.utc)
  db.add(item);db.flush();db.add(AuditEvent(user_id=user_id,bid_project_id=project_id,event_type="pre_bid_query.created",entity_type="BidPreBidQuery",entity_id=str(item.id),request_metadata=request_metadata,details={"pre_bid_query_id":item.id}));db.commit();return item
 
@@ -36,6 +42,7 @@ def list_pre_bid_queries(db:Session,project_id:int,filters:dict,page:int,page_si
 def update_pre_bid_query(db:Session,item:BidPreBidQuery,payload,user_id:int,request_metadata:dict):
  values=payload.model_dump(exclude_unset=True);validate_links(db,item.bid_project_id,values.get("requirement_id",item.requirement_id),values.get("missing_input_id",item.missing_input_id),values.get("source_document_id",item.source_document_id));previous=item.status
  for field,value in values.items():setattr(item,field,value)
+ normalize_workflow(item)
  if "status" in values:
   if item.status in CLOSED_STATUSES:item.closed_by=user_id;item.closed_at=datetime.now(timezone.utc)
   else:item.closed_by=None;item.closed_at=None
