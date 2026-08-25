@@ -41,5 +41,6 @@ def update_missing_input(db:Session,item:BidMissingInput,payload,user_id:int,req
  db.add(AuditEvent(user_id=user_id,bid_project_id=item.bid_project_id,event_type=event,entity_type="BidMissingInput",entity_id=str(item.id),request_metadata=request_metadata,details={"missing_input_id":item.id,"changed_fields":list(values)}));db.commit();return item
 
 def missing_input_summary(db:Session,project_id:int):
- base=BidMissingInput.bid_project_id==project_id;today=date.today();count=lambda condition:db.scalar(select(func.count()).select_from(BidMissingInput).where(base,condition)) or 0
- return {"total":count(BidMissingInput.id>0),"critical":count(BidMissingInput.priority=="Critical"),"open":count(BidMissingInput.status.in_(OPEN_STATUSES)),"overdue":count(BidMissingInput.required_by_date<today,BidMissingInput.status.not_in(RESOLVED_STATUSES)) if False else count((BidMissingInput.required_by_date<today)&(BidMissingInput.status.not_in(RESOLVED_STATUSES))),"requested":count(BidMissingInput.status=="Requested"),"resolved":count(BidMissingInput.status=="Resolved")}
+ base=BidMissingInput.bid_project_id==project_id;today=date.today()
+ def count(condition):return db.scalar(select(func.count()).select_from(BidMissingInput).where(base,condition)) or 0
+ return {"total":count(BidMissingInput.id>0),"critical":count(BidMissingInput.priority=="Critical"),"open":count(BidMissingInput.status.in_(OPEN_STATUSES)),"overdue":count((BidMissingInput.required_by_date<today)&(BidMissingInput.status.notin_(RESOLVED_STATUSES))),"requested":count(BidMissingInput.status=="Requested"),"resolved":count(BidMissingInput.status=="Resolved")}
