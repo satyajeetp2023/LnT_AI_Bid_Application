@@ -5,8 +5,9 @@ from sqlalchemy import func,or_,select
 from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.models import AuditEvent,BidDocument
+from app.services.document_classification import auto_classify_document
+from app.services.document_taxonomy import DOCUMENT_CATEGORIES
 from app.storage.base import LocalSecureStorage
-DOCUMENT_CATEGORIES=["Notice / Invitation","Instructions to Bidders","Bid Data Sheet","Conditions of Contract","Employer's Requirements","Technical Specifications","BOQ / Price Schedule","Drawings","Forms / Formats / Schedules","Qualification Requirements","Evaluation Criteria","Scope of Work","Addendum / Corrigendum","Pre-Bid Clarification","Reference Document","Other"]
 def audit(db,user_id,project_id,event,doc,metadata=None,details=None): db.add(AuditEvent(user_id=user_id,bid_project_id=project_id,event_type=event,entity_type="BidDocument",entity_id=str(doc.id),request_metadata=metadata or {},details=details or {}))
 def upload_document(db:Session,project_id:int,filename:str,content_type:str|None,content:bytes,user_id:int):
  cfg=get_settings(); safe=Path(filename).name; ext=Path(safe).suffix.lower().lstrip(".")
@@ -16,7 +17,9 @@ def upload_document(db:Session,project_id:int,filename:str,content_type:str|None
  doc=BidDocument(bid_project_id=project_id,original_filename=safe,file_extension=ext,mime_type=content_type or mimetypes.guess_type(safe)[0] or "application/octet-stream",file_size=len(content),checksum=checksum,uploaded_by=user_id,document_status="Duplicate" if duplicate else "Needs Review",classification_status="pending",is_latest_version=True,duplicate_of_document_id=duplicate.id if duplicate else None,information_tags=[])
  if not duplicate:
   stored=f"{uuid.uuid4().hex}.{ext}"; doc.stored_filename=stored; doc.storage_path=LocalSecureStorage(cfg.storage_root).save(project_id,stored,content)
- db.add(doc); db.flush(); audit(db,user_id,project_id,"document.uploaded",doc,details={"duplicate":bool(duplicate),"filename":safe}); db.commit(); return doc
+ db.add(doc); db.flush(); audit(db,user_id,project_id,"document.uploaded",doc,details={"duplicate":bool(duplicate),"filename":safe}); db.commit()
+ if not duplicate: auto_classify_document(db,doc,LocalSecureStorage(cfg.storage_root),user_id)
+ return doc
 def classify(db,doc,category,subcategory,tags,user_id,metadata):
  if category not in DOCUMENT_CATEGORIES: raise HTTPException(422,"Unsupported document category")
  doc.document_category=category; doc.document_subcategory=subcategory; doc.information_tags=list(dict.fromkeys(tags)); doc.document_status="Needs Review" if category=="Other" else "Uploaded"; doc.classification_status="manually_classified"; audit(db,user_id,doc.bid_project_id,"document.reclassified",doc,metadata,{"category":category,"tags":doc.information_tags}); db.commit(); return doc

@@ -1,0 +1,18 @@
+DOCUMENT_CATEGORIES = [
+    "Notice / Invitation",
+    "Instructions to Bidders",
+    "Bid Data Sheet",
+    "Conditions of Contract",
+    "Employer's Requirements",
+    "Technical Specifications",
+    "BOQ / Price Schedule",
+    "Drawings",
+    "Forms / Formats / Schedules",
+    "Qualification Requirements",
+    "Evaluation Criteria",
+    "Scope of Work",
+    "Addendum / Corrigendum",
+    "Pre-Bid Clarification",
+    "Reference Document",
+    "Other",
+]

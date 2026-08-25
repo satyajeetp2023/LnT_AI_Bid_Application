@@ -29,9 +29,18 @@ def test_membership_change_is_audited(client,bid_payload):
  bid=create(client,bid_payload);response=client.post(f"/api/v1/bids/{bid['id']}/members",json={"user_id":2,"role":"Read Only"});assert response.status_code==200;events=client.get("/api/v1/audit").json();assert "project.membership_changed" in {e["event_type"] for e in events}
 def test_document_metadata_defaults_and_manual_update(client,bid_payload):
  bid=create(client,bid_payload);uploaded=upload(client,bid["id"],"notice.pdf").json()[0]
- assert uploaded["classification_status"]=="pending" and uploaded["is_latest_version"] is True
+ assert uploaded["classification_status"]=="needs_review" and uploaded["is_latest_version"] is True
  response=client.patch(f"/api/v1/documents/{uploaded['id']}/metadata",json={"document_category":"Notice / Invitation","document_type":"NIT","document_number":"NIT-01","document_title":"Notice Inviting Tender","revision":"R0","document_date":"2026-08-25","remarks":"Manually reviewed"})
  assert response.status_code==200;updated=response.json();assert updated["classification_status"]=="manually_classified" and updated["document_number"]=="NIT-01"
  persisted=client.get(f"/api/v1/bids/{bid['id']}/documents").json()["items"][0]
  assert persisted["document_title"]=="Notice Inviting Tender" and persisted["remarks"]=="Manually reviewed"
  assert client.get(f"/api/v1/documents/{uploaded['id']}/download").content==b"tender"
+def test_manual_classification_protected_and_force_reclassification(client,bid_payload):
+ bid=create(client,bid_payload);uploaded=client.post(f"/api/v1/bids/{bid['id']}/documents",files=[("files",("technical_specifications.txt",b"technical specification technical requirements specification","text/plain"))]).json()[0]
+ manual=client.patch(f"/api/v1/documents/{uploaded['id']}/metadata",json={"document_category":"Reference Document"}).json();assert manual["classification_status"]=="manually_classified"
+ assert client.post(f"/api/v1/documents/{uploaded['id']}/auto-classify",json={"force":False}).status_code==409
+ forced=client.post(f"/api/v1/documents/{uploaded['id']}/auto-classify",json={"force":True});assert forced.status_code==200 and forced.json()["document_category"]=="Technical Specifications" and forced.json()["classification_status"]=="classified"
+def test_unsupported_content_classification_is_safe(client,bid_payload):
+ bid=create(client,bid_payload);response=client.post(f"/api/v1/bids/{bid['id']}/documents",files=[("files",("site_photo.png",b"not-real-image-content","image/png"))])
+ assert response.status_code==200;document=response.json()[0];assert document["classification_status"]=="needs_review" and document["classification_confidence"] is None
+ assert client.get(f"/api/v1/documents/{document['id']}/download").content==b"not-real-image-content"

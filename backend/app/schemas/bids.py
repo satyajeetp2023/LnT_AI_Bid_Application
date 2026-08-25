@@ -33,3 +33,4 @@ class ClassificationUpdate(BaseModel):
  document_category:str; document_subcategory:str|None=None; information_tags:list[str]=Field(default_factory=list,max_length=25)
 class NotesUpdate(BaseModel): notes:str|None=Field(None,max_length=5000)
 class RevisionCreate(BaseModel): revision_of_document_id:int
+class AutoClassifyRequest(BaseModel): force:bool=False

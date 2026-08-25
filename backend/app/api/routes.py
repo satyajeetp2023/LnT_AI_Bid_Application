@@ -6,10 +6,11 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.database.session import get_db
 from app.models import AuditEvent,BidDocument,BidProject,ProjectMembership,User
-from app.schemas.bids import BidCreate,BidRead,BidUpdate,ClassificationUpdate,DocumentMetadataUpdate,DocumentRead,NotesUpdate,RevisionCreate
+from app.schemas.bids import AutoClassifyRequest,BidCreate,BidRead,BidUpdate,ClassificationUpdate,DocumentMetadataUpdate,DocumentRead,NotesUpdate,RevisionCreate
 from app.security.auth import Permission,current_user,is_admin,require_permission,require_project_access
 from app.services.bids import create_bid,list_bids,update_bid
 from app.services.documents import DOCUMENT_CATEGORIES,archive,classify,mark_revision,update_document_metadata,update_notes,upload_document
+from app.services.document_classification import auto_classify_document
 from app.storage.base import LocalSecureStorage
 router=APIRouter()
 def user_dep(db:Session=Depends(get_db),x_user_id:int=Header(default=1,alias="X-User-ID")): return current_user(db,x_user_id)
@@ -77,6 +78,12 @@ def reclassify(document_id:int,payload:ClassificationUpdate,request:Request,db:S
 @router.patch("/documents/{document_id}/metadata",response_model=DocumentRead)
 def edit_document_metadata(document_id:int,payload:DocumentMetadataUpdate,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
  doc=get_doc(db,document_id); require_project_access(db,user,doc.bid_project_id,Permission.CLASSIFY_DOCUMENT); return update_document_metadata(db,doc,payload,user.id,metadata(request))
+@router.post("/documents/{document_id}/auto-classify",response_model=DocumentRead)
+def auto_classify(document_id:int,request:Request,payload:AutoClassifyRequest=AutoClassifyRequest(),db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ doc=get_doc(db,document_id); require_project_access(db,user,doc.bid_project_id,Permission.CLASSIFY_DOCUMENT)
+ if doc.duplicate_of_document_id or not doc.storage_path: raise HTTPException(422,"Document content is not available for classification")
+ if doc.classification_status=="manually_classified" and not payload.force: raise HTTPException(409,"Manual classification is protected; set force=true to replace it")
+ return auto_classify_document(db,doc,LocalSecureStorage(get_settings().storage_root),user.id,force=payload.force,request_metadata=metadata(request))
 @router.patch("/documents/{document_id}/notes",response_model=DocumentRead)
 def notes(document_id:int,payload:NotesUpdate,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
  doc=get_doc(db,document_id); require_project_access(db,user,doc.bid_project_id,Permission.CLASSIFY_DOCUMENT); return update_notes(db,doc,payload.notes,user.id,metadata(request))
