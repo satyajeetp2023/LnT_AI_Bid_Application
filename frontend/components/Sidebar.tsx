@@ -21,19 +21,19 @@ export function Sidebar(){
  ];
  const item=(x:any)=>{
   const selected=x.h?(x.h==="/"?p===x.h:p===x.h||p.startsWith(x.h+"/")):false;
-  if(x.h)return <Link key={x.n} href={x.h} className={`flex h-9 items-center gap-3 rounded-sm px-3 text-[12px] transition ${selected?"bg-[#e2b635] font-semibold text-[#263442]":"text-slate-200 hover:bg-white/10 hover:text-white"}`}><x.i size={14.5} strokeWidth={selected?2.2:1.8}/><span className="truncate">{x.n}</span></Link>;
-  return <div key={x.n} aria-disabled="true" className="flex h-9 items-center justify-between rounded-sm px-3 text-[11.5px] text-slate-400"><span className="flex min-w-0 items-center gap-3"><x.i size={14}/><span className="truncate">{x.n}</span></span><LockKeyhole size={9.5}/></div>;
+  if(x.h)return <Link key={x.n} href={x.h} className={`relative flex h-[34px] items-center gap-3 rounded-[2px] px-3 text-[11.8px] transition ${selected?"bg-[#e2b635] font-semibold text-[#263442] shadow-[inset_3px_0_0_#b18412]":"text-slate-200 hover:bg-white/8 hover:text-white"}`}><x.i size={14} strokeWidth={selected?2.2:1.8}/><span className="truncate">{x.n}</span></Link>;
+  return <div key={x.n} aria-disabled="true" className="flex h-[34px] items-center justify-between rounded-[2px] px-3 text-[11.2px] text-slate-400"><span className="flex min-w-0 items-center gap-3"><x.i size={13.5}/><span className="truncate">{x.n}</span></span><LockKeyhole size={9}/></div>;
  };
- return <aside className="fixed bottom-0 left-0 top-16 z-40 hidden w-[212px] flex-col border-r border-[#445565] bg-[#304354] text-white md:flex">
-  <nav className="flex-1 overflow-y-auto px-3 py-4">
+ return <aside className="fixed bottom-0 left-0 top-[58px] z-40 hidden w-[204px] flex-col border-r border-[#445565] bg-[#304354] text-white md:flex">
+  <nav className="flex-1 overflow-y-auto px-3 py-3.5">
    <div className="nav-label">Navigation</div>
    <div className="space-y-0.5">{management.map(item)}</div>
-   <div className="mt-3 space-y-0.5">{workspace.map(item)}</div>
+   <div className="mt-2.5 space-y-0.5">{workspace.map(item)}</div>
    <div className="mt-1 space-y-0.5">{future.map(item)}</div>
   </nav>
   <div className="border-t border-white/10 p-3">
-   <Link href="/settings" className="flex h-9 items-center gap-3 rounded-sm px-3 text-[12px] text-slate-200 hover:bg-white/10 hover:text-white"><Settings size={14.5}/>Settings</Link>
-   <div className="px-3 pt-2 text-[9px] font-semibold italic tracking-wide text-[#e2b635]">Engineering the Change</div>
+   <Link href="/settings" className="flex h-[34px] items-center gap-3 rounded-[2px] px-3 text-[11.8px] text-slate-200 hover:bg-white/10 hover:text-white"><Settings size={14}/>Settings</Link>
+   <div className="px-3 pt-2 text-[8.5px] font-semibold italic tracking-wide text-[#e2b635]">Engineering the Change</div>
   </div>
  </aside>
 }
