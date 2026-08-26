@@ -1,2 +1,2 @@
-export const API=process.env.NEXT_PUBLIC_API_URL||"http://localhost:8000/api/v1";
+export const API=process.env.NEXT_PUBLIC_API_URL||"http://127.0.0.1:8000/api/v1";
 export async function request<T>(path:string,init?:RequestInit):Promise<T>{const r=await fetch(API+path,{...init,headers:{"X-User-ID":"1",...(init?.body instanceof FormData?{}:{"Content-Type":"application/json"}),...init?.headers}});if(!r.ok){const e=await r.json().catch(()=>({detail:"Request failed"}));throw new Error(e.detail||"Request failed")}return r.json()}
