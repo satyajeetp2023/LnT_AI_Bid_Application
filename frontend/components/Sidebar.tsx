@@ -20,7 +20,7 @@ export function Sidebar(){
   {n:"Schedules",i:FileCheck2},{n:"Bid Preparation",i:FileCheck2},{n:"Review & Approval",i:ShieldCheck},{n:"Submission",i:FileCheck2},{n:"Bid Results",i:BarChart3},{n:"Historical Intelligence",i:History},{n:"Reports & Analytics",i:BarChart3}
  ];
  const item=(x:any)=>{
-  const selected=x.h?(x.h==="/"?p===x.h:p===x.h||p.startsWith(x.h+"/")):false;
+  const selected=x.h?(x.h==="/"?p===x.h:x.h==="/bids"?p==="/bids":x.h==="/bids/new"?p==="/bids/new":p===x.h||p.startsWith(x.h+"/")):false;
   if(x.h)return <Link key={x.n} href={x.h} className={`relative flex h-[34px] items-center gap-3 rounded-[2px] px-3 text-[11.8px] transition ${selected?"bg-[#e2b635] font-semibold text-[#263442] shadow-[inset_3px_0_0_#b18412]":"text-slate-200 hover:bg-white/8 hover:text-white"}`}><x.i size={14} strokeWidth={selected?2.2:1.8}/><span className="truncate">{x.n}</span></Link>;
   return <div key={x.n} aria-disabled="true" className="flex h-[34px] items-center justify-between rounded-[2px] px-3 text-[11.2px] text-slate-400"><span className="flex min-w-0 items-center gap-3"><x.i size={13.5}/><span className="truncate">{x.n}</span></span><LockKeyhole size={9}/></div>;
  };
