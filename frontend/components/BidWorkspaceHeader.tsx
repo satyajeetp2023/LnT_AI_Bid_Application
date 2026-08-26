@@ -3,5 +3,33 @@ import Link from "next/link";
 import {CalendarDays,MapPin} from "lucide-react";
 import type {Bid} from "@/types";
 import {StatusBadge} from "@/components/design-system";
+
 const steps=["Documents","Requirement Register","Missing Inputs","Pre-Bid Queries","Review","Submission"];
-export function BidWorkspaceHeader({bid,active}:{bid:Bid|null;active:"Documents"|"Requirement Register"|"Missing Inputs"|"Pre-Bid Queries"}){if(!bid)return <div className="mb-5 h-32 animate-pulse rounded-md border bg-white"/>;return <section className="mb-5 overflow-hidden rounded-md border border-slate-200 bg-white"><div className="border-l-4 border-blue-700 px-5 py-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><div className="text-xs font-bold uppercase tracking-wider text-blue-700">Bid Workspace</div><h2 className="mt-1 text-xl font-bold text-slate-900">{bid.tender_name}</h2><div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500"><span className="font-semibold text-slate-700">Bid ID: {bid.bid_id}</span><span>{bid.client}</span>{bid.location&&<span className="flex items-center gap-1"><MapPin size={12}/>{bid.location}</span>}<span className="flex items-center gap-1"><CalendarDays size={12}/>Submission: {new Date(bid.tender_due_date+"T00:00:00").toLocaleDateString()}</span></div></div><StatusBadge tone={bid.bid_status==="Draft"?"grey":"green"}>{bid.bid_status}</StatusBadge></div></div><nav aria-label="Bid workflow" className="grid border-t bg-slate-50 md:grid-cols-6">{steps.map((step,index)=>{const available=index<4,selected=step===active;const route=index===0?"documents":index===1?"requirements":index===2?"missing-inputs":"pre-bid-queries";return available?<Link key={step} href={`/bids/${bid.id}/${route}`} className={`border-r px-3 py-3 text-center text-xs font-semibold ${selected?"bg-blue-700 text-white":"text-slate-600 hover:bg-blue-50 hover:text-blue-700"}`}>{index+1}. {step}</Link>:<div key={step} aria-disabled="true" className="border-r px-3 py-3 text-center text-xs text-slate-400"><span>{index+1}. {step}</span><span className="ml-1 text-[9px] uppercase">Soon</span></div>})}</nav></section>}
+
+export function BidWorkspaceHeader({bid,active}:{bid:Bid|null;active:"Documents"|"Requirement Register"|"Missing Inputs"|"Pre-Bid Queries"}){
+ if(!bid)return <div className="mb-4 h-20 animate-pulse rounded-sm border border-slate-200 bg-white"/>;
+ return <section className="mb-4 overflow-hidden rounded-sm border border-slate-200 bg-white">
+  <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+   <div className="min-w-0">
+    <div className="flex flex-wrap items-center gap-2">
+     <h2 className="truncate text-[16px] font-semibold text-[#243241]">{bid.tender_name}</h2>
+     <StatusBadge tone={bid.bid_status==="Draft"?"grey":"green"}>{bid.bid_status}</StatusBadge>
+    </div>
+    <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-[10.5px] text-slate-500">
+     <span className="font-semibold text-slate-700">Bid ID: {bid.bid_id}</span>
+     <span>{bid.client}</span>
+     {bid.location&&<span className="flex items-center gap-1"><MapPin size={11}/>{bid.location}</span>}
+     <span className="flex items-center gap-1"><CalendarDays size={11}/>Submission: {new Date(bid.tender_due_date+"T00:00:00").toLocaleDateString()}</span>
+    </div>
+   </div>
+   <div className="text-[10px] font-semibold uppercase tracking-[.14em] text-[#8a6a16]">Bid Workspace</div>
+  </div>
+  <nav aria-label="Bid workflow" className="grid border-t border-slate-200 bg-[#f6f7f8] md:grid-cols-6">
+   {steps.map((step,index)=>{
+    const available=index<4,selected=step===active;
+    const route=index===0?"documents":index===1?"requirements":index===2?"missing-inputs":"pre-bid-queries";
+    return available?<Link key={step} href={`/bids/${bid.id}/${route}`} className={`border-r border-slate-200 px-3 py-2 text-center text-[10.5px] font-semibold ${selected?"bg-[#d5aa35] text-[#243241]":"text-slate-600 hover:bg-[#fbf7eb] hover:text-[#8a6a16]"}`}>{index+1}. {step}</Link>:<div key={step} aria-disabled="true" className="border-r border-slate-200 px-3 py-2 text-center text-[10.5px] text-slate-400">{index+1}. {step}</div>
+   })}
+  </nav>
+ </section>
+}
