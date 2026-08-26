@@ -4,8 +4,8 @@ import {LTConstructionLogo} from "@/components/LTConstructionLogo";
 export function Header(){
  return <header className="fixed inset-x-0 top-0 z-50 flex h-[58px] items-center justify-between border-b border-[#44505a] bg-[#354654] px-4 text-white shadow-sm">
   <div className="flex min-w-0 items-center gap-3">
-   <div className="flex h-10 items-center bg-white px-3">
-    <LTConstructionLogo className="h-[27px] w-auto object-contain"/>
+   <div className="flex h-11 w-[168px] shrink-0 items-center justify-center bg-white px-2.5">
+    <LTConstructionLogo className="h-[34px] w-[150px] object-contain"/>
    </div>
    <div className="hidden h-7 w-px bg-white/20 sm:block"/>
    <div className="min-w-0">
