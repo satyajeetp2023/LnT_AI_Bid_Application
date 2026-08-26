@@ -1,21 +1,21 @@
-import {Bell,HelpCircle} from "lucide-react";
-import {LTConstructionLogo} from "@/components/LTConstructionLogo";
+import {Bell,HelpCircle,Search} from "lucide-react";
 
 export function Header(){
- return <header className="flex h-16 items-center justify-between border-b border-slate-200 bg-white px-4 shadow-[0_1px_2px_rgba(15,23,42,.03)] md:px-6">
-  <div className="flex min-w-0 items-center gap-3">
-   <LTConstructionLogo className="h-8 w-auto object-contain md:hidden"/>
-   <div className="min-w-0">
-    <div className="truncate text-[11px] font-bold uppercase tracking-[.16em] text-[#005596]">Railway SBG</div>
-    <div className="truncate text-sm font-semibold text-slate-700">Bid Intelligence &amp; Readiness Workspace</div>
+ return <header className="flex h-16 items-center justify-between border-b border-[#435363] bg-[#394957] px-5 text-white md:px-6">
+  <div className="min-w-0">
+   <div className="flex items-center gap-3">
+    <span className="text-[14px] font-semibold text-[#d5aa35]">L&amp;T Bid Intelligence</span>
+    <span className="hidden h-5 w-px bg-white/20 sm:block"/>
+    <span className="hidden text-[11px] text-slate-300 sm:inline">Prepare. Compete. Win.</span>
    </div>
   </div>
-  <div className="flex items-center gap-2 sm:gap-3">
-   <button aria-label="Help" className="rounded-md p-2 text-slate-500 hover:bg-slate-100 hover:text-[#005596]"><HelpCircle size={17}/></button>
-   <button aria-label="Notifications" className="rounded-md p-2 text-slate-500 hover:bg-slate-100 hover:text-[#005596]"><Bell size={17}/></button>
-   <div className="hidden h-7 w-px bg-slate-200 sm:block"/>
-   <div className="hidden text-right md:block"><div className="text-xs font-semibold text-slate-800">Bid Workspace User</div><div className="text-[10px] text-slate-500">Development Access</div></div>
-   <div className="grid h-9 w-9 place-items-center rounded-full bg-[#005596] text-[10px] font-bold text-white shadow-sm">BW</div>
+  <div className="flex items-center gap-1.5 sm:gap-2">
+   <button aria-label="Search" className="rounded p-2 text-slate-300 hover:bg-white/10 hover:text-white"><Search size={17}/></button>
+   <button aria-label="Notifications" className="relative rounded p-2 text-slate-300 hover:bg-white/10 hover:text-white"><Bell size={17}/><span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-[#d5aa35]"/></button>
+   <button aria-label="Help" className="rounded p-2 text-slate-300 hover:bg-white/10 hover:text-white"><HelpCircle size={17}/></button>
+   <div className="mx-1 hidden h-7 w-px bg-white/15 sm:block"/>
+   <div className="hidden text-right md:block"><div className="text-[11px] font-semibold text-white">Arun Kumar</div><div className="text-[9px] text-slate-300">Bid Manager</div></div>
+   <div className="grid h-8 w-8 place-items-center rounded-full bg-[#d5aa35] text-[10px] font-bold text-[#283746]">AK</div>
   </div>
  </header>
 }
