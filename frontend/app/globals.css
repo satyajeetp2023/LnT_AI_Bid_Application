@@ -1,18 +1,18 @@
 @tailwind base;@tailwind components;@tailwind utilities;
 *{box-sizing:border-box}
-html{background:#f4f7fa}
-body{margin:0;background:#f4f7fa;color:#172b3a;font-family:"Segoe UI",Arial,Helvetica,sans-serif;-webkit-font-smoothing:antialiased}
-.field{display:flex;flex-direction:column;gap:.4rem}
-.field label{font-size:.69rem;font-weight:700;color:#486072;text-transform:uppercase;letter-spacing:.045em}
-.field input,.field select,.field textarea{border:1px solid #cbd5e1;border-radius:6px;background:white;padding:.65rem .75rem;font-size:.875rem;line-height:1.25rem;outline:none;color:#1f3344}
-.field input:hover,.field select:hover,.field textarea:hover{border-color:#9fb5c7}
-.field input:focus,.field select:focus,.field textarea:focus{border-color:#005596;box-shadow:0 0 0 3px rgba(0,85,150,.11)}
-.error{font-size:.72rem;color:#b42318}
-.nav-label{padding:.25rem .75rem .5rem;font-size:.61rem;font-weight:800;text-transform:uppercase;letter-spacing:.15em;color:#82a7c3}
+html{background:#eef2f5}
+body{margin:0;background:#eef2f5;color:#243241;font-family:"Segoe UI",Arial,Helvetica,sans-serif;-webkit-font-smoothing:antialiased}
+.field{display:flex;flex-direction:column;gap:.32rem}
+.field label{font-size:.66rem;font-weight:700;color:#5d6b78;text-transform:uppercase;letter-spacing:.045em}
+.field input,.field select,.field textarea{border:1px solid #c7d0d8;border-radius:3px;background:#fff;padding:.56rem .65rem;font-size:.82rem;line-height:1.2rem;outline:none;color:#243241}
+.field input:hover,.field select:hover,.field textarea:hover{border-color:#aab6c0}
+.field input:focus,.field select:focus,.field textarea:focus{border-color:#c69b2d;box-shadow:0 0 0 2px rgba(213,170,53,.16)}
+.error{font-size:.7rem;color:#b42318}
+.nav-label{padding:.2rem .75rem .45rem;font-size:.58rem;font-weight:800;text-transform:uppercase;letter-spacing:.15em;color:#93a3b1}
 button,a,select,input,textarea{transition:background-color .15s,border-color .15s,color .15s,box-shadow .15s}
 button{font-family:inherit}
 table{border-collapse:separate;border-spacing:0}
-table thead th{font-weight:700}
+table thead th{font-weight:700;background:#f5f7f9;color:#52606c}
 table tbody tr{transition:background-color .12s}
-table tbody tr:hover{background:#f7fafc}
-::selection{background:#d8eaf7;color:#073353}
+table tbody tr:hover{background:#faf7ef}
+::selection{background:#f2dfaa;color:#273543}
