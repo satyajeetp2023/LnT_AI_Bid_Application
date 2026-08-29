@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import AuditEvent,BidProject,BidRequirement,ScheduleScopeItem
+from app.services.project_type_activity_library import project_type_activity_library
 from app.services.p6_xer import parse_xer
 
 
@@ -80,7 +81,63 @@ def _is_blocking(item:ScheduleScopeItem)->bool:
     return True
 
 
+def sync_scope_from_project_type(db:Session,bid_id:int,user_id:int):
+    project=db.get(BidProject,bid_id)
+    if not project:return {"created":0,"updated":0}
+    templates=project_type_activity_library(project.project_type)
+    existing=db.scalars(select(ScheduleScopeItem).where(
+        ScheduleScopeItem.bid_project_id==bid_id,
+        ScheduleScopeItem.source_type=="Project-Type Knowledge",
+    )).all()
+    by_ref={(x.source_reference or "",x.activity_name.lower()):x for x in existing}
+    created=updated=0
+    for template in templates:
+        key=(project.project_type,template.activity.lower())
+        parent=by_ref.get(key)
+        if not parent:
+            parent=ScheduleScopeItem(
+                bid_project_id=bid_id,
+                activity_name=template.activity,
+                activity_level="Activity Family",
+                source_type="Project-Type Knowledge",
+                source_reference=project.project_type,
+                source_excerpt=f"Suggested from project-type library with confidence {template.confidence:.2f}.",
+                mandatory=False,
+                match_keywords=sorted(set(template.keywords)|_terms(template.activity)),
+                created_by=user_id,
+            )
+            db.add(parent);db.flush();created+=1
+            by_ref[key]=parent
+        else:
+            parent.match_keywords=sorted(set(template.keywords)|_terms(template.activity))
+            updated+=1
+        for subactivity in template.subactivities:
+            child_key=(parent.id,subactivity.lower())
+            child=db.scalar(select(ScheduleScopeItem).where(
+                ScheduleScopeItem.bid_project_id==bid_id,
+                ScheduleScopeItem.parent_id==parent.id,
+                ScheduleScopeItem.source_type=="Project-Type Knowledge",
+                ScheduleScopeItem.activity_name==subactivity,
+            ))
+            if child:continue
+            db.add(ScheduleScopeItem(
+                bid_project_id=bid_id,
+                parent_id=parent.id,
+                activity_name=subactivity,
+                activity_level="Sub-Activity",
+                source_type="Project-Type Knowledge",
+                source_reference=project.project_type,
+                source_excerpt=f"Suggested child activity under {template.activity}.",
+                mandatory=False,
+                match_keywords=_keywords(subactivity," ".join(template.keywords)),
+                created_by=user_id,
+            ));created+=1
+    db.flush()
+    return {"created":created,"updated":updated}
+
+
 def sync_scope_from_requirements(db:Session,bid_id:int,user_id:int,request_metadata:dict|None=None):
+    project_sync=sync_scope_from_project_type(db,bid_id,user_id)
     requirements=db.scalars(select(BidRequirement).where(
         BidRequirement.bid_project_id==bid_id,
         BidRequirement.requirement_category.in_(SCOPE_CATEGORIES),
@@ -123,10 +180,10 @@ def sync_scope_from_requirements(db:Session,bid_id:int,user_id:int,request_metad
     db.add(AuditEvent(
         user_id=user_id,bid_project_id=bid_id,event_type="schedule.scope_catalog_synced",
         entity_type="BidProject",entity_id=str(bid_id),request_metadata=request_metadata or {},
-        details={"created":created,"updated":updated,"requirements_considered":len(requirements)},
+        details={"created":created,"updated":updated,"requirements_considered":len(requirements),"project_type_created":project_sync["created"],"project_type_updated":project_sync["updated"]},
     ))
     db.commit()
-    return {"created":created,"updated":updated,"requirements_considered":len(requirements)}
+    return {"created":created,"updated":updated,"requirements_considered":len(requirements),"project_type":project_sync}
 
 
 def add_scope_item(
@@ -215,11 +272,12 @@ def evaluate_scope_coverage(db:Session,bid_id:int,xer_content:bytes,user_id:int,
             "possible_match":sum(1 for x in rows if x["coverage_status"]=="Possible Match"),
             "missing":sum(1 for x in rows if x["coverage_status"]=="Missing"),
             "blocking":len(blocking),
+            "knowledge_warnings":sum(1 for x in rows if x["source_type"]=="Project-Type Knowledge" and x["coverage_status"]!="Covered"),
             "explained_missing":sum(1 for x in rows if x["coverage_status"]=="Missing" and not x["blocking"]),
         },
         "ready":len(blocking)==0 and len(rows)>0,
         "grade":"Complete" if len(blocking)==0 and rows else "Action Required" if rows else "No Scope Catalog",
-        "methodology":"phase6-schedule-scope-coverage-v1",
+        "methodology":"phase6-schedule-scope-coverage-v2",
         "note":"Expected activities are independently sourced from bid scope. Missing or ambiguous coverage must be explained; 'To Be Added' remains a blocker until a revised schedule contains the activity.",
     }
 
