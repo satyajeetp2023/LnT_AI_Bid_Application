@@ -80,6 +80,7 @@ def detect_submission_formats(db:Session,bid_id:int):
             "confidence":confidence,
             "template_document_id":template.id if template else None,
             "template_document":(template.document_title or template.original_filename) if template else None,
+            "template_extension":template.file_extension.lower() if template else None,
             "template_match_confidence":template_confidence,
             "status":"Template Located" if template else "Template Missing",
             "next_action":"Review the located employer template and confirm the required fields before controlled population." if template else "Locate or obtain the employer-provided blank template / prescribed layout before preparing the submission.",
@@ -95,5 +96,5 @@ def detect_submission_formats(db:Session,bid_id:int):
             "template_located":sum(1 for x in items if x["template_document_id"] is not None),
             "template_missing":sum(1 for x in items if x["template_document_id"] is None),
         },
-        "version":"phase5-submission-format-intelligence-v2",
+        "version":"phase5-submission-format-intelligence-v3",
     }
