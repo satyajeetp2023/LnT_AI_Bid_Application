@@ -88,6 +88,23 @@ def build_schedule_optimization_advisor(
         if rel.get("pred_task_id"):succs[rel.get("pred_task_id")].append(rel)
 
     task_resources=Counter(x.get("task_id") for x in assignments if x.get("task_id"))
+    active_task_ids={x.get("task_id") for x in tasks if x.get("task_id") and x.get("task_type") not in milestone_types}
+    assigned_task_ids={x.get("task_id") for x in assignments if x.get("task_id")}
+    covered_active=len(active_task_ids&assigned_task_ids)
+    coverage_ratio=covered_active/max(1,len(active_task_ids))
+    resource_types=Counter()
+    resource_map={x.get("rsrc_id"):x for x in tables.get("RSRC",[]) if x.get("rsrc_id")}
+    for assignment in assignments:
+        resource=resource_map.get(assignment.get("rsrc_id")) or {}
+        rtype=resource.get("rsrc_type") or resource.get("resource_type") or "Unspecified"
+        resource_types[str(rtype)]+=1
+    if not assignments:
+        loading_status="Not Resource Loaded"
+    elif coverage_ratio>=.90:
+        loading_status="Broadly Resource Loaded"
+    else:
+        loading_status="Partially Resource Loaded"
+
     milestone_types={"TT_Mile","TT_FinMile","TT_StartMile","TT_FinishMile"}
     complete_statuses={"TK_Complete","Complete","Completed"}
 
@@ -199,6 +216,15 @@ def build_schedule_optimization_advisor(
 
     table_inventory=_table_inventory(tables)
     return {
+        "resource_loading":{
+            "status":loading_status,
+            "activities_with_assignments":covered_active,
+            "eligible_activities":len(active_task_ids),
+            "coverage_ratio":round(coverage_ratio,3),
+            "assignment_count":len(assignments),
+            "resource_types":[{"name":k,"count":v} for k,v in resource_types.most_common()],
+            "note":"Resource loading is optional. Resource-based recommendations are applied only where assignments exist.",
+        },
         "parameter_inventory":{
             "tables":table_inventory,
             "table_count":len(table_inventory),
@@ -215,7 +241,7 @@ def build_schedule_optimization_advisor(
             "high_adjustment_potential":sum(1 for x in candidates if x["adjustment_potential"]=="High"),
             "medium_adjustment_potential":sum(1 for x in candidates if x["adjustment_potential"]=="Medium"),
             "candidates":candidates,
-            "methodology":"phase6-schedule-optimization-advisor-v2",
+            "methodology":"phase6-schedule-optimization-advisor-v3",
             "note":"The advisor identifies activities worth reviewing for schedule refinement. It never changes the schedule automatically.",
         },
     }
