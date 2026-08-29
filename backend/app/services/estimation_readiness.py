@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.models import BidMissingInput,BidRequirement
 from app.services.missing_input_taxonomy import RESOLVED_STATUSES
+from app.services.responsibility_assignment import suggest_responsible_function
 
 
 def calculate_estimation_readiness(db:Session,bid_id:int):
@@ -47,7 +48,7 @@ def calculate_estimation_readiness(db:Session,bid_id:int):
             "title":r.requirement_title,
             "category":r.requirement_category,
             "priority":r.priority,
-            "responsible_function":r.responsible_function,
+            "responsible_function":r.responsible_function or suggest_responsible_function(r.requirement_category,r.requirement_text),
             "source_document":r.source_document_title or r.source_original_filename,
             "source_page":r.source_page,
             "source_clause":r.source_clause,
@@ -84,6 +85,6 @@ def calculate_estimation_readiness(db:Session,bid_id:int):
             "review_completion_weight":25,
             "compliance_assessment_weight":20,
             "blocker_control_weight":10,
-            "version":"phase3-readiness-rule-v1",
+            "version":"phase3-readiness-rule-v2",
         },
     }
