@@ -282,7 +282,6 @@ def _consolidate_rows(rows:list[dict]):
             "why_expected":x.get("why_expected"),
             "mandatory":x.get("mandatory"),
         } for x in cluster]
-        group_blocking=any(x.get("blocking") for x in cluster)
         coverage_values={x.get("coverage_status") for x in cluster}
         group_coverage=(
             "Covered" if "Covered" in coverage_values else
@@ -290,12 +289,23 @@ def _consolidate_rows(rows:list[dict]):
             "Missing" if "Missing" in coverage_values else
             "Not Checked"
         )
+        group_mandatory=any(bool(x.get("mandatory")) for x in cluster)
+        cleared_dispositions={"Confirmed Covered","Covered Elsewhere","Not Applicable","Explained-Excluded"}
+        if not group_mandatory or group_coverage=="Covered":
+            group_blocking=False
+        elif group_coverage=="Possible Match":
+            group_blocking=canonical.get("disposition_status")!="Confirmed Covered"
+        elif group_coverage=="Missing":
+            group_blocking=canonical.get("disposition_status") not in cleared_dispositions
+        else:
+            group_blocking=True
         group={
             **canonical,
             "group_id":f"scope-{canonical['id']}",
             "canonical_item_id":canonical["id"],
             "evidence_count":len(cluster),
             "evidence":evidence,
+            "mandatory":group_mandatory,
             "group_blocking":group_blocking,
             "group_coverage_status":group_coverage,
             "member_item_ids":[x["id"] for x in cluster],
@@ -530,7 +540,7 @@ def evaluate_scope_coverage(db:Session,bid_id:int,xer_content:bytes,user_id:int,
         },
         "ready":len(blocking_groups)==0 and len(groups)>0,
         "grade":"Complete" if len(blocking_groups)==0 and groups else "Action Required" if groups else "No Scope Catalog",
-        "methodology":"phase6-schedule-scope-coverage-v6",
+        "methodology":"phase6-schedule-scope-coverage-v7",
         "note":"Expected activities are independently sourced from bid scope. Missing or ambiguous coverage must be explained; 'To Be Added' remains a blocker until a revised schedule contains the activity.",
     }
 
