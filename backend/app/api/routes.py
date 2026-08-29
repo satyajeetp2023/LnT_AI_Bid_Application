@@ -20,6 +20,7 @@ from app.services.template_structure_parser import parse_xlsx_template
 from app.services.template_population_plan import build_population_plan
 from app.services.template_draft_generator import generate_controlled_xlsx_draft
 from app.services.prepared_artifacts import approve_artifact,artifact_dict,create_prepared_artifact,get_prepared_artifact,list_prepared_artifacts,mark_artifact_ready
+from app.services.submission_readiness import build_submission_package,submission_readiness
 from app.services.documents import DOCUMENT_CATEGORIES,archive,classify,mark_revision,update_document_metadata,update_notes,upload_document
 from app.services.document_classification import auto_classify_document
 from app.storage.base import LocalSecureStorage
@@ -144,6 +145,22 @@ def save_template_draft(document_id:int,request:Request,payload:dict|None=None,c
  except ValueError as exc:raise HTTPException(422,str(exc)) from None
  item=create_prepared_artifact(db,doc,data,summary,storage,user.id,metadata(request))
  return artifact_dict(item)
+
+@router.get("/bids/{bid_id}/submission-readiness")
+def get_submission_readiness(bid_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.PREPARED_ARTIFACT_VIEW);get_bid(db,bid_id)
+ return submission_readiness(db,bid_id)
+
+@router.post("/bids/{bid_id}/submission-package")
+def generate_submission_package(bid_id:int,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.PREPARED_ARTIFACT_MANAGE);bid=get_bid(db,bid_id)
+ storage=LocalSecureStorage(get_settings().storage_root)
+ try:data,summary=build_submission_package(db,bid_id,storage)
+ except ValueError as exc:raise HTTPException(422,str(exc)) from None
+ db.add(AuditEvent(user_id=user.id,bid_project_id=bid_id,event_type="submission.package_generated",entity_type="BidProject",entity_id=str(bid_id),request_metadata=metadata(request),details=summary))
+ db.commit()
+ safe=bid.bid_id.replace('"','')
+ return Response(data,media_type="application/zip",headers={"Content-Disposition":f'attachment; filename="{safe}_submission_package.zip"'})
 
 @router.get("/bids/{bid_id}/prepared-artifacts")
 def prepared_artifacts(bid_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)):
