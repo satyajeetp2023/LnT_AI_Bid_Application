@@ -43,6 +43,11 @@ def _lifecycle_stages(text:str):
 
 
 
+def _number(value,default=0.0):
+    try:return float(value)
+    except (TypeError,ValueError):return default
+
+
 def _terms(text:str)->set[str]:
     return {x for x in re.findall(r"[a-z0-9]+",str(text or "").lower()) if len(x)>2 and x not in STOP}
 
@@ -519,8 +524,8 @@ def _schedule_precision_recommendations(groups:list[dict],tasks:list[dict]):
         expected_names=sorted({x.get("activity_name") for x in matched_groups if x.get("activity_name")})
         sub_names=sorted({x.get("activity_name") for x in matched_groups if x.get("activity_level") in {"Sub-Activity","BOQ Sub-Activity"}})
         duration=max(
-            float(task.get("target_drtn_hr_cnt") or 0),
-            float(task.get("remain_drtn_hr_cnt") or 0),
+            _number(task.get("target_drtn_hr_cnt")),
+            _number(task.get("remain_drtn_hr_cnt")),
         )
         reasons=[];score=0
         if len(expected_names)>=3:
