@@ -53,13 +53,23 @@ def list_pre_bid_queries(db:Session,project_id:int,filters:dict,page:int,page_si
 
 def update_pre_bid_query(db:Session,item:BidPreBidQuery,payload,user_id:int,request_metadata:dict):
  values=payload.model_dump(exclude_unset=True);validate_links(db,item.bid_project_id,values.get("requirement_id",item.requirement_id),values.get("missing_input_id",item.missing_input_id),values.get("source_document_id",item.source_document_id));previous=item.status
+ approval_sensitive={"query_title","query_text","query_category","priority","responsible_function","responsible_person","requirement_id","missing_input_id","source_document_id","source_page","source_clause","source_section","source_excerpt","impact_if_unresolved"}
+ materially_changed=bool(approval_sensitive&set(values))
  for field,value in values.items():setattr(item,field,value)
+ if previous=="Approved" and materially_changed:
+  item.status="Ready for Review";item.approved_by=None;item.approved_at=None
  normalize_workflow(item)
  if "status" in values:
   if item.status in CLOSED_STATUSES:item.closed_by=user_id;item.closed_at=datetime.now(timezone.utc)
   else:item.closed_by=None;item.closed_at=None
  event="pre_bid_query.closed" if item.status in CLOSED_STATUSES and previous not in CLOSED_STATUSES else "pre_bid_query.updated"
  db.add(AuditEvent(user_id=user_id,bid_project_id=item.bid_project_id,event_type=event,entity_type="BidPreBidQuery",entity_id=str(item.id),request_metadata=request_metadata,details={"pre_bid_query_id":item.id,"changed_fields":list(values)}));db.commit();return item
+
+def approve_pre_bid_query(db:Session,item:BidPreBidQuery,user_id:int,request_metadata:dict):
+ if item.status!="Ready for Review":raise HTTPException(422,"Only queries Ready for Review can be approved")
+ item.status="Approved";item.approved_by=user_id;item.approved_at=datetime.now(timezone.utc)
+ db.add(AuditEvent(user_id=user_id,bid_project_id=item.bid_project_id,event_type="pre_bid_query.approved",entity_type="BidPreBidQuery",entity_id=str(item.id),request_metadata=request_metadata,details={"pre_bid_query_id":item.id}))
+ db.commit();return item
 
 def pre_bid_query_summary(db:Session,project_id:int):
  base=BidPreBidQuery.bid_project_id==project_id;today=date.today()
