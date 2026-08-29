@@ -20,6 +20,9 @@ AUTHORITATIVE_ANSWER_CATEGORIES={"Pre-Bid Clarification","Addendum / Corrigendum
 REFERENCE_RE=re.compile(r"\b(?:drawing(?:\s+no\.?)?|drg\.?\s*no\.?|annexure|annex|appendix)\s*[:#-]?\s*([A-Z0-9][A-Z0-9./_-]{2,})",re.I)
 NUMBER_RE=re.compile(r"\b\d+(?:\.\d+)?\s*(?:days?|months?|years?|km|m|mm|kv|mw|mva|%|nos?\.?|units?)?\b",re.I)
 UNDEFINED_RE=re.compile(r"\b(?:TBD|TBA)\b|to be advised|to be confirmed|details? to be provided|information to be provided|not specified|not defined|shall be intimated|will be intimated",re.I)
+CONTRACTOR_SCOPE_RE=re.compile(r"contractor\s+shall|bidder\s+shall|contractor'?s?\s+scope|to be provided by (?:the )?contractor|to be supplied by (?:the )?contractor",re.I)
+EMPLOYER_SCOPE_RE=re.compile(r"employer\s+shall|employer'?s?\s+scope|to be provided by (?:the )?employer|to be supplied by (?:the )?employer|free[- ]issue|by others",re.I)
+
 
 
 def _compact(text:str)->str:
@@ -80,6 +83,50 @@ def _undefined_particulars(requirements:list[BidRequirement],blocked:set[int])->
             confidence=.93,knowledge_check=check,
         ))
         blocked.add(req.id)
+    return out
+
+def _scope_conflicts(requirements:list[BidRequirement],blocked:set[int])->list[SuggestedPreBidQuery]:
+    out=[]
+    for i,left in enumerate(requirements):
+        if left.id in blocked or not left.source_document_id:continue
+        left_text=left.requirement_text or ""
+        left_contractor=bool(CONTRACTOR_SCOPE_RE.search(left_text))
+        left_employer=bool(EMPLOYER_SCOPE_RE.search(left_text))
+        if left_contractor==left_employer:continue
+        left_terms=_terms(f"{left.requirement_title} {left_text}")
+        if len(left_terms)<5:continue
+        for right in requirements[i+1:]:
+            if right.id in blocked or not right.source_document_id or right.source_document_id==left.source_document_id:continue
+            right_text=right.requirement_text or ""
+            right_contractor=bool(CONTRACTOR_SCOPE_RE.search(right_text))
+            right_employer=bool(EMPLOYER_SCOPE_RE.search(right_text))
+            if right_contractor==right_employer:continue
+            if left_contractor==right_contractor:continue
+            right_terms=_terms(f"{right.requirement_title} {right_text}")
+            common=left_terms&right_terms
+            similarity=len(common)/max(1,min(len(left_terms),len(right_terms)))
+            if len(common)<5 or similarity<.55:continue
+            right_source=right.source_document.document_title or right.source_document.original_filename if right.source_document else None
+            left_source=left.source_document.document_title or left.source_document.original_filename if left.source_document else None
+            check=KnowledgeCheck(
+                "related_evidence_found",round(min(.96,similarity),2),1,
+                (right.source_excerpt or right_text)[:1200],right_source,right.source_page,right.source_clause
+            )
+            query_text=f"Tender documents appear to assign responsibility for the same/similar scope differently. {left_source or 'One tender document'} states: '{left_text[:500]}'. {right_source or 'Another tender document'} states: '{right_text[:500]}'. Kindly clarify the final scope allocation and identify whether the subject item/activity is in the Contractor's scope, Employer's scope, or by others."
+            out.append(SuggestedPreBidQuery(
+                source_kind="Scope Ownership Conflict",source_id=left.id,
+                query_title=f"Conflicting scope responsibility: {left.requirement_title[:180]}",
+                query_text=query_text,query_category="Contractual" if left.requirement_category=="Contractual Requirement" else _category(left.requirement_category),
+                priority="High",responsible_function=left.responsible_function or "Contracts",
+                requirement_id=left.id,missing_input_id=None,source_document_id=left.source_document_id,
+                source_page=left.source_page,source_clause=left.source_clause,source_section=left.source_section,
+                source_excerpt=left.source_excerpt or left_text,
+                impact_if_unresolved="Unclear scope ownership may cause pricing omissions, duplication, interface gaps or post-award disputes.",
+                rationale="Two similar requirements from different tender documents appear to allocate the same scope to different parties.",
+                confidence=round(min(.94,.72+similarity*.22),2),knowledge_check=check,
+            ))
+            blocked.add(left.id);blocked.add(right.id)
+            break
     return out
 
 def _conflicting_requirements(requirements:list[BidRequirement],blocked:set[int])->list[SuggestedPreBidQuery]:
@@ -303,6 +350,7 @@ class RuleBasedPreBidQuerySuggestionProvider:
         blocked=set(existing_requirements)|{s.requirement_id for s in suggestions if s.requirement_id is not None}
         suggestions.extend(_missing_references(db,bid_id,all_requirements,blocked))
         suggestions.extend(_undefined_particulars(all_requirements,blocked))
+        suggestions.extend(_scope_conflicts(all_requirements,blocked))
         suggestions.extend(_conflicting_requirements(all_requirements,blocked))
 
         suggestions.sort(key=lambda x:({"Critical":0,"High":1,"Medium":2,"Low":3}.get(x.priority,4),-x.confidence,x.query_title.lower()))
@@ -317,5 +365,5 @@ def suggest_pre_bid_queries(db:Session,bid_id:int):
         "knowledge_provider":getattr(provider.knowledge,"version","unknown"),
         "items":[x.as_dict() for x in items],
         "answered":answered,
-        "summary":{"suggested":len(items),"answered_in_tender":len(answered),"automatic_discoveries":sum(1 for x in items if x.source_kind in {"Missing Reference","Undefined Tender Particular","Cross-Document Conflict"})},
+        "summary":{"suggested":len(items),"answered_in_tender":len(answered),"automatic_discoveries":sum(1 for x in items if x.source_kind in {"Missing Reference","Undefined Tender Particular","Scope Ownership Conflict","Cross-Document Conflict"})},
     }
