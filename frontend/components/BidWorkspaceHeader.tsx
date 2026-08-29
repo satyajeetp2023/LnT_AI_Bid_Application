@@ -6,7 +6,7 @@ import {StatusBadge} from "@/components/design-system";
 
 const steps=["Documents","Requirement Register","Missing Inputs","Pre-Bid Queries","Review","Submission"];
 
-export function BidWorkspaceHeader({bid,active}:{bid:Bid|null;active:"Documents"|"Requirement Register"|"Missing Inputs"|"Pre-Bid Queries"}){
+export function BidWorkspaceHeader({bid,active}:{bid:Bid|null;active:"Documents"|"Requirement Register"|"Missing Inputs"|"Pre-Bid Queries"|"Review"}){
  if(!bid)return null;
  return <section className="mb-3 overflow-hidden border border-slate-200 bg-white">
   <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2">
@@ -22,7 +22,7 @@ export function BidWorkspaceHeader({bid,active}:{bid:Bid|null;active:"Documents"
    <div className="text-[9px] font-semibold uppercase tracking-[.16em] text-[#8a6a16]">Bid Workspace</div>
   </div>
   <nav aria-label="Bid workflow" className="flex overflow-x-auto border-t border-slate-200 bg-[#f7f8f9] md:grid md:grid-cols-6">
-   {steps.map((step,index)=>{const available=index<4,selected=step===active;const route=index===0?"documents":index===1?"requirements":index===2?"missing-inputs":"pre-bid-queries";return available?<Link key={step} href={`/bids/${bid.id}/${route}`} className={`min-w-[145px] shrink-0 border-r border-slate-200 px-3 py-2 text-center text-[9.5px] md:min-w-0 md:py-1.5 font-semibold ${selected?"border-b-2 border-b-[#e2b635] bg-white text-[#243241]":"text-slate-500 hover:bg-white hover:text-[#243241]"}`}>{index+1}. {step}</Link>:<div key={step} aria-disabled="true" className="min-w-[145px] shrink-0 border-r border-slate-200 px-3 py-2 text-center text-[9.5px] text-slate-400 md:min-w-0 md:py-1.5">{index+1}. {step}</div>})}
+   {steps.map((step,index)=>{const available=index<5,selected=step===active;const route=index===0?"documents":index===1?"requirements":index===2?"missing-inputs":index===3?"pre-bid-queries":"review-approval";return available?<Link key={step} href={`/bids/${bid.id}/${route}`} className={`min-w-[145px] shrink-0 border-r border-slate-200 px-3 py-2 text-center text-[9.5px] md:min-w-0 md:py-1.5 font-semibold ${selected?"border-b-2 border-b-[#e2b635] bg-white text-[#243241]":"text-slate-500 hover:bg-white hover:text-[#243241]"}`}>{index+1}. {step}</Link>:<div key={step} aria-disabled="true" className="min-w-[145px] shrink-0 border-r border-slate-200 px-3 py-2 text-center text-[9.5px] text-slate-400 md:min-w-0 md:py-1.5">{index+1}. {step}</div>})}
   </nav>
  </section>
 }
