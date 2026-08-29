@@ -239,6 +239,50 @@ def sync_scope_from_requirements(db:Session,bid_id:int,user_id:int,request_metad
     return {"created":created,"updated":updated,"requirements_considered":len(requirements),"project_type":project_sync}
 
 
+def schedule_scope_catalog(db:Session,bid_id:int):
+    items=db.scalars(select(ScheduleScopeItem).where(
+        ScheduleScopeItem.bid_project_id==bid_id
+    ).order_by(ScheduleScopeItem.id)).all()
+    by_id={x.id:x for x in items}
+    rows=[]
+    for item in items:
+        row=_scope_item_dict(item)
+        parent=by_id.get(item.parent_id) if item.parent_id else None
+        row["parent_activity_name"]=parent.activity_name if parent else None
+        row["catalog_authority"]=(
+            "Contractual / BOQ"
+            if item.source_type in {"BOQ","Contract / Technical Requirement"} and item.mandatory else
+            "Bid Scope Evidence"
+            if item.source_type in {"BOQ","Contract / Technical Requirement","Manual"} else
+            "Knowledge Suggestion"
+        )
+        rows.append(row)
+    authority_order={"Contractual / BOQ":0,"Bid Scope Evidence":1,"Knowledge Suggestion":2}
+    level_order={"Activity Family":0,"Activity":1,"BOQ Scope":1,"Sub-Activity":2,"BOQ Sub-Activity":2}
+    rows.sort(key=lambda x:(
+        authority_order.get(x["catalog_authority"],2),
+        level_order.get(x["activity_level"],3),
+        x["parent_activity_name"] or x["activity_name"],
+        x["activity_name"],
+    ))
+    return {
+        "items":rows,
+        "summary":{
+            "total":len(rows),
+            "mandatory":sum(1 for x in rows if x["mandatory"]),
+            "activity_families":sum(1 for x in rows if x["activity_level"]=="Activity Family"),
+            "activities":sum(1 for x in rows if x["activity_level"] in {"Activity","BOQ Scope"}),
+            "subactivities":sum(1 for x in rows if x["activity_level"] in {"Sub-Activity","BOQ Sub-Activity"}),
+            "contract_items":sum(1 for x in rows if x["source_type"]=="Contract / Technical Requirement"),
+            "boq_items":sum(1 for x in rows if x["source_type"]=="BOQ"),
+            "project_type_items":sum(1 for x in rows if x["source_type"]=="Project-Type Knowledge"),
+            "manual_items":sum(1 for x in rows if x["source_type"]=="Manual"),
+        },
+        "version":"phase6-expected-activity-universe-v1",
+        "note":"This catalog is built independently of the uploaded schedule. Contract/BOQ evidence is stronger than project-type knowledge suggestions.",
+    }
+
+
 def add_scope_item(
     db:Session,bid_id:int,payload:dict,user_id:int,request_metadata:dict|None=None
 ):
