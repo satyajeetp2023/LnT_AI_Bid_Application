@@ -61,10 +61,8 @@ def submission_readiness(db:Session,bid_id:int):
         formats.append(row)
 
         message=f'{item["format_name"]}: {status}'
-        if item["mandatory"] and status!="Approved":
+        if status!="Approved":
             blockers.append(message)
-        elif status!="Approved":
-            warnings.append(message)
 
     estimation=calculate_estimation_readiness(db,bid_id)
     if estimation["grade"]!="Ready":
@@ -95,7 +93,8 @@ def submission_readiness(db:Session,bid_id:int):
             "detected_formats":len(formats),
             "mandatory_formats":sum(1 for x in formats if x["mandatory"]),
             "approved_formats":sum(1 for x in formats if x["status"]=="Approved"),
-            "mandatory_blockers":len(blockers),
+            "format_blockers":len(blockers),
+            "mandatory_blockers":sum(1 for x in formats if x["mandatory"] and x["status"]!="Approved"),
             "warnings":len(warnings),
             "approved_artifacts":len(approved_current),
         },
@@ -103,7 +102,7 @@ def submission_readiness(db:Session,bid_id:int):
             "overall_score":estimation["overall_score"],
             "grade":estimation["grade"],
         },
-        "version":"phase5-submission-readiness-v1",
+        "version":"phase5-submission-readiness-v2",
     }
 
 
