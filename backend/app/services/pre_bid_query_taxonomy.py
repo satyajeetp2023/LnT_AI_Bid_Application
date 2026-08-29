@@ -1,6 +1,6 @@
 QUERY_CATEGORIES=["Technical","Commercial","Contractual","Qualification","Financial","Planning / Scheduling","Design","Procurement / Vendor","Construction","Testing & Commissioning","Safety","Quality","Environmental / Social","Interface","Statutory / Approval","Security / Guarantee","Insurance","Documentation","Management Decision","Other"]
 PRIORITIES=["Critical","High","Medium","Low"]
-STATUSES=["Draft","Ready for Review","Submitted","Responded","Closed","Withdrawn"]
+STATUSES=["Draft","Ready for Review","Approved","Submitted","Responded","Closed","Withdrawn"]
 RESPONSIBLE_FUNCTIONS=["Bid Management","Planning","Engineering","Contracts","Commercial","Procurement","Finance","Construction","Quality","Safety","Testing & Commissioning","Interface","Design","Management","Other"]
-OPEN_STATUSES=["Draft","Ready for Review","Submitted"]
+OPEN_STATUSES=["Draft","Ready for Review","Approved","Submitted"]
 CLOSED_STATUSES=["Closed","Withdrawn"]
