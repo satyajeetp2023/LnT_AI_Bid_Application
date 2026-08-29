@@ -617,8 +617,10 @@ def _schedule_precision_recommendations(groups:list[dict],tasks:list[dict]):
     }
 
 
-def evaluate_scope_coverage_from_tables(db:Session,bid_id:int,tables:dict[str,list[dict]],user_id:int,request_metadata:dict|None=None):
+def evaluate_scope_coverage_from_tables(db:Session,bid_id:int,tables:dict[str,list[dict]],user_id:int,request_metadata:dict|None=None,capabilities:dict|None=None):
     tasks=tables.get("TASK",[])
+    capabilities=capabilities or {}
+    float_available=bool(capabilities.get("float",any(str(x.get("total_float_hr_cnt") or "").strip() for x in tasks)))
     search_index=_activity_search_index(tables)
     candidate_matches={}
     items=db.scalars(select(ScheduleScopeItem).where(
@@ -681,7 +683,7 @@ def evaluate_scope_coverage_from_tables(db:Session,bid_id:int,tables:dict[str,li
         if not code or code in matched_codes:continue
         task_type=task.get("task_type")
         duration=max(_number(task.get("target_drtn_hr_cnt")),_number(task.get("remain_drtn_hr_cnt")))
-        total_float=_number(task.get("total_float_hr_cnt"))
+        total_float=_number(task.get("total_float_hr_cnt")) if float_available else None
         context=search_by_code.get(code) or {}
         score=10
         reasons=["No expected contract/BOQ/project-scope item currently maps to this schedule activity."]
@@ -689,9 +691,9 @@ def evaluate_scope_coverage_from_tables(db:Session,bid_id:int,tables:dict[str,li
             score+=10;reasons.append("This is a milestone and should have a clear scope or contractual purpose.")
         if duration>160:
             score+=15;reasons.append(f"Long duration: {duration:.0f} hours.")
-        if total_float<=0:
+        if float_available and total_float is not None and total_float<=0:
             score+=20;reasons.append(f"Critical/negative float screening: {total_float:.0f} hours.")
-        elif total_float<=40:
+        elif float_available and total_float is not None and total_float<=40:
             score+=10;reasons.append(f"Near-critical float screening: {total_float:.0f} hours.")
         unmapped.append({
             "task_id":task.get("task_id"),
