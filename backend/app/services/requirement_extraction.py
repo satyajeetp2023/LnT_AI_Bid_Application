@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.models import AuditEvent, BidDocument, BidRequirement
 from app.storage.base import StorageProvider
+from app.services.responsibility_assignment import suggest_responsible_function
 
 EXTRACTOR_VERSION = "phase1-requirement-rule-v1"
 MIN_CONFIDENCE = .60
@@ -136,7 +137,7 @@ def extract_requirements_from_document(db:Session,document:BidDocument,storage:S
     for candidate in candidates:
         signature=(_normalized(candidate.text),str(candidate.page or ""),candidate.clause or "")
         if signature in signatures:duplicates+=1;continue
-        requirement=BidRequirement(bid_project_id=document.bid_project_id,source_document_id=document.id,requirement_category=candidate.category,requirement_type=candidate.requirement_type,requirement_title=candidate.text[:297]+("..." if len(candidate.text)>297 else ""),requirement_text=candidate.text,source_page=str(candidate.page) if candidate.page else None,source_clause=candidate.clause,source_section=candidate.section,source_excerpt=candidate.text,priority=candidate.priority,requirement_status="Open",is_mandatory=candidate.is_mandatory,compliance_status="Not Assessed",review_status="Not Reviewed",extraction_method="Rule Based",extraction_confidence=Decimal(str(candidate.confidence)),created_by=user_id)
+        requirement=BidRequirement(bid_project_id=document.bid_project_id,source_document_id=document.id,requirement_category=candidate.category,requirement_type=candidate.requirement_type,requirement_title=candidate.text[:297]+("..." if len(candidate.text)>297 else ""),requirement_text=candidate.text,source_page=str(candidate.page) if candidate.page else None,source_clause=candidate.clause,source_section=candidate.section,source_excerpt=candidate.text,responsible_function=suggest_responsible_function(candidate.category,candidate.text),priority=candidate.priority,requirement_status="Open",is_mandatory=candidate.is_mandatory,compliance_status="Not Assessed",review_status="Not Reviewed",extraction_method="Rule Based",extraction_confidence=Decimal(str(candidate.confidence)),created_by=user_id)
         db.add(requirement);signatures.add(signature);created+=1
     no_text=not any(unit.text.strip() for unit in units)
     summary=ExtractionSummary(document.id,created,duplicates,low,no_text)
