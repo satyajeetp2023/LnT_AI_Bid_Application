@@ -1,0 +1,53 @@
+CATEGORY_OWNER={
+ "Submission Requirement":"Bid Management",
+ "Technical Requirement":"Engineering",
+ "Commercial Requirement":"Commercial",
+ "Contractual Requirement":"Contracts",
+ "Qualification Requirement":"Bid Management",
+ "Financial Requirement":"Finance",
+ "Planning / Scheduling Requirement":"Planning",
+ "Design Requirement":"Design",
+ "Procurement Requirement":"Procurement",
+ "Construction Requirement":"Construction",
+ "Testing & Commissioning Requirement":"Testing & Commissioning",
+ "Safety Requirement":"Safety",
+ "Quality Requirement":"Quality",
+ "Environmental / Social Requirement":"Safety",
+ "Interface Requirement":"Interface",
+ "Statutory / Approval Requirement":"Engineering",
+ "Security / Guarantee Requirement":"Commercial",
+ "Insurance Requirement":"Commercial",
+ "Documentation Requirement":"Bid Management",
+ "Other":"Bid Management",
+}
+
+KEYWORD_OWNER_RULES=(
+ ("tax", "Commercial"),
+ ("gst", "Commercial"),
+ ("payment", "Commercial"),
+ ("price", "Commercial"),
+ ("bank guarantee", "Commercial"),
+ ("performance security", "Commercial"),
+ ("insurance", "Commercial"),
+ ("programme", "Planning"),
+ ("schedule", "Planning"),
+ ("milestone", "Planning"),
+ ("design", "Design"),
+ ("drawing", "Design"),
+ ("vendor", "Procurement"),
+ ("manufacturer", "Procurement"),
+ ("procurement", "Procurement"),
+ ("testing", "Testing & Commissioning"),
+ ("commissioning", "Testing & Commissioning"),
+ ("safety", "Safety"),
+ ("quality", "Quality"),
+ ("interface", "Interface"),
+ ("eligibility", "Bid Management"),
+ ("qualification", "Bid Management"),
+)
+
+def suggest_responsible_function(category:str|None,text:str|None=None)->str:
+ lower=(text or "").lower()
+ for signal,owner in KEYWORD_OWNER_RULES:
+  if signal in lower:return owner
+ return CATEGORY_OWNER.get(category or "Other","Bid Management")
