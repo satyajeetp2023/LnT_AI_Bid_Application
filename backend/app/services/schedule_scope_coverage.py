@@ -120,12 +120,20 @@ def sync_scope_from_project_type(db:Session,bid_id:int,user_id:int,scope_text:st
     project=db.get(BidProject,bid_id)
     if not project:return {"created":0,"updated":0}
     templates=project_type_activity_library(project.project_type,scope_text)
+    desired_names={x.activity for x in templates}
+    for template in templates:desired_names.update(template.subactivities)
     existing=db.scalars(select(ScheduleScopeItem).where(
         ScheduleScopeItem.bid_project_id==bid_id,
         ScheduleScopeItem.source_type=="Project-Type Knowledge",
     )).all()
+    created=updated=pruned=0
+    stale=[x for x in existing if x.activity_name not in desired_names]
+    for item in sorted(stale,key=lambda x:0 if x.parent_id is not None else 1):
+        db.delete(item);pruned+=1
+    if stale:db.flush()
+    existing=[x for x in existing if x.activity_name in desired_names]
     by_ref={(x.source_reference or "",x.activity_name.lower()):x for x in existing}
-    created=updated=0
+
     for template in templates:
         key=(project.project_type,template.activity.lower())
         parent=by_ref.get(key)
@@ -168,7 +176,7 @@ def sync_scope_from_project_type(db:Session,bid_id:int,user_id:int,scope_text:st
                 created_by=user_id,
             ));created+=1
     db.flush()
-    return {"created":created,"updated":updated}
+    return {"created":created,"updated":updated,"pruned":pruned}
 
 
 def sync_scope_from_requirements(db:Session,bid_id:int,user_id:int,request_metadata:dict|None=None):
@@ -248,7 +256,7 @@ def sync_scope_from_requirements(db:Session,bid_id:int,user_id:int,request_metad
     db.add(AuditEvent(
         user_id=user_id,bid_project_id=bid_id,event_type="schedule.scope_catalog_synced",
         entity_type="BidProject",entity_id=str(bid_id),request_metadata=request_metadata or {},
-        details={"created":created,"updated":updated,"requirements_considered":len(requirements),"project_type_created":project_sync["created"],"project_type_updated":project_sync["updated"]},
+        details={"created":created,"updated":updated,"requirements_considered":len(requirements),"project_type_created":project_sync["created"],"project_type_updated":project_sync["updated"],"project_type_pruned":project_sync["pruned"]},
     ))
     db.commit()
     return {"created":created,"updated":updated,"requirements_considered":len(requirements),"project_type":project_sync}
