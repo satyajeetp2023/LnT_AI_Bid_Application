@@ -1,4 +1,4 @@
-from app.services.schedule_scope_coverage import _terms,_is_blocking,_lifecycle_stages
+from app.services.schedule_scope_coverage import _terms,_is_blocking,_lifecycle_stages,_activity_search_index,_match
 
 class Dummy:
     mandatory=True
@@ -27,3 +27,23 @@ def test_contract_lifecycle_decomposition():
     assert "Construction / Installation" in stages
     assert "Testing" in stages
     assert "Commissioning" in stages
+
+
+class ScopeDummy:
+    activity_name="OHE mast erection"
+    match_keywords=["ohe","mast","erection"]
+
+
+def test_scope_match_uses_wbs_context_when_task_name_is_abbreviated():
+    tables={
+        "PROJWBS":[{"wbs_id":"1","wbs_name":"OHE Works","parent_wbs_id":""}],
+        "TASK":[{"task_id":"10","task_code":"A100","task_name":"Mast ER","wbs_id":"1"}],
+        "TASKACTV":[],
+        "ACTVCODE":[],
+        "ACTVTYPE":[],
+    }
+    index=_activity_search_index(tables)
+    task,score,candidates=_match(ScopeDummy(),index)
+    assert task["task_code"]=="A100"
+    assert score>=0.25
+    assert candidates[0]["wbs_path"]=="OHE Works"
