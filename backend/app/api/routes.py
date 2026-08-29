@@ -244,6 +244,48 @@ def sync_schedule_scope(bid_id:int,request:Request,db:Session=Depends(get_db),us
  require_project_access(db,user,bid_id,Permission.REQUIREMENT_MANAGE);get_bid(db,bid_id)
  return sync_scope_from_requirements(db,bid_id,user.id,metadata(request))
 
+@router.post("/documents/{document_id}/detect-schedule")
+def detect_schedule_document(document_id:int,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ doc=get_doc(db,document_id);require_project_access(db,user,doc.bid_project_id,Permission.CLASSIFY_DOCUMENT)
+ if doc.duplicate_of_document_id or not doc.storage_path:
+  return {"detected":False,"reason":"Document content is not available"}
+ ext=doc.file_extension.lower()
+ if ext not in SCHEDULE_EXTENSIONS:
+  return {"detected":False,"reason":"File type is not supported for schedule ingestion"}
+ content=LocalSecureStorage(get_settings().storage_root).read(doc.storage_path)
+ ingestion=ingest_schedule(ext,content)
+ filename=(doc.original_filename or "").lower()
+ filename_signal=any(x in filename for x in ("schedule","programme","program","primavera","baseline","work plan","time schedule"))
+ detected=bool(ingestion["detected"] or filename_signal)
+ if detected and doc.classification_status!="manually_classified":
+  doc.document_category="Forms / Formats / Schedules"
+  doc.document_type=f"Schedule - {ingestion['source_kind']}"
+  doc.classification_confidence=Decimal(str(.98 if ingestion["detected"] else .62))
+  doc.classification_status="classified" if ingestion["detected"] else "needs_review"
+ db.add(AuditEvent(user_id=user.id,bid_project_id=doc.bid_project_id,event_type="schedule.document_detected",entity_type="BidDocument",entity_id=str(doc.id),request_metadata=metadata(request),details={"detected":detected,"structured":bool(ingestion["detected"]),"source_kind":ingestion["source_kind"],"fidelity":ingestion["fidelity"],"capabilities":ingestion["capabilities"]}))
+ db.commit()
+ return {"detected":detected,"structured":bool(ingestion["detected"]),"source_kind":ingestion["source_kind"],"fidelity":ingestion["fidelity"],"capabilities":ingestion["capabilities"],"limitations":ingestion["limitations"]}
+
+@router.get("/bids/{bid_id}/schedule-documents")
+def schedule_documents(bid_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.VIEW_DOCUMENT);get_bid(db,bid_id)
+ rows=db.scalars(select(BidDocument).where(
+  BidDocument.bid_project_id==bid_id,
+  BidDocument.document_status!="Archived",
+ ).order_by(BidDocument.uploaded_at.desc())).all()
+ result=[]
+ for doc in rows:
+  dtype=(doc.document_type or "").lower()
+  name=(doc.original_filename or "").lower()
+  candidate=(
+   dtype.startswith("schedule -")
+   or doc.file_extension.lower()=="xer"
+   or any(x in name for x in ("schedule","programme","program","primavera","baseline","time schedule"))
+  )
+  if not candidate:continue
+  result.append(DocumentRead.model_validate(doc).model_dump(mode="json"))
+ return result
+
 @router.post("/documents/{document_id}/extract-boq-scope")
 def extract_document_boq_scope(document_id:int,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
  doc=get_doc(db,document_id);require_project_access(db,user,doc.bid_project_id,Permission.REQUIREMENT_MANAGE)
