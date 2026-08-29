@@ -25,7 +25,7 @@ from app.services.p6_xer import analyze_xer
 from app.services.schedule_requirement_alignment import align_schedule_to_requirements
 from app.services.p6_schedule_comparison import compare_xer
 from app.services.p6_schedule_optimizer import activity_parameter_profile,build_schedule_optimization_advisor
-from app.services.schedule_scope_coverage import add_scope_item,disposition_scope_item,evaluate_scope_coverage,sync_scope_from_requirements
+from app.services.schedule_scope_coverage import add_scope_item,disposition_scope_item,evaluate_scope_coverage,schedule_scope_catalog,sync_scope_from_requirements
 from app.services.boq_scope_adapter import ingest_boq_scope
 from app.services.boq_document_extraction import extract_boq_rows
 from app.services.documents import DOCUMENT_CATEGORIES,archive,classify,mark_revision,update_document_metadata,update_notes,upload_document
@@ -254,6 +254,12 @@ def ingest_schedule_boq_scope(bid_id:int,payload:dict,request:Request,db:Session
  rows=payload.get("rows") or []
  if not isinstance(rows,list):raise HTTPException(422,"rows must be a list of BOQ items")
  return ingest_boq_scope(db,bid_id,rows,user.id,metadata(request))
+
+@router.get("/bids/{bid_id}/schedule-scope/catalog")
+def get_schedule_scope_catalog(bid_id:int,request:Request,sync:bool=Query(True),db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.REQUIREMENT_VIEW);get_bid(db,bid_id)
+ if sync:sync_scope_from_requirements(db,bid_id,user.id,metadata(request))
+ return schedule_scope_catalog(db,bid_id)
 
 @router.post("/bids/{bid_id}/schedule-scope/items")
 def create_schedule_scope_item(bid_id:int,payload:dict,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
