@@ -315,12 +315,6 @@ def _consolidate_rows(rows:list[dict]):
             if authority_score>=30 else
             "Knowledge Suggestion"
         )
-        flag_priority=(
-            "Critical" if group_blocking and authority_score>=80 else
-            "High" if group_blocking and authority_score>=50 else
-            "Medium" if group_blocking else
-            "Low"
-        )
         coverage_values={x.get("coverage_status") for x in cluster}
         group_coverage=(
             "Covered" if "Covered" in coverage_values else
@@ -338,6 +332,12 @@ def _consolidate_rows(rows:list[dict]):
             group_blocking=canonical.get("disposition_status") not in cleared_dispositions
         else:
             group_blocking=True
+        flag_priority=(
+            "Critical" if group_blocking and authority_score>=80 else
+            "High" if group_blocking and authority_score>=50 else
+            "Medium" if group_blocking else
+            "Low"
+        )
         best_match=max(cluster,key=lambda x:(
             1 if x.get("coverage_status")=="Covered" else 0,
             1 if x.get("coverage_status")=="Possible Match" else 0,
