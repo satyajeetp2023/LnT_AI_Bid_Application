@@ -166,6 +166,8 @@ def department_work_queue(db:Session,bid_id:int,responsible_function:str|None=No
         owner=_owner(g.input_category,f"{g.missing_input_title} {g.missing_input_description}",g.responsible_function);functions.add(owner)
     for q in all_queries:
         owner=_owner(q.query_category,q.query_text,q.responsible_function);functions.add(owner)
+    mandatory_scope=[x for x in scope_catalog.get("groups",[]) if x.get("mandatory")]
+    if mandatory_scope:functions.add("Planning")
 
     for function_name in sorted(functions):
         total=completed=0
@@ -185,6 +187,10 @@ def department_work_queue(db:Session,bid_id:int,responsible_function:str|None=No
             if owner!=function_name:continue
             total+=1
             if q.status in {"Responded","Closed","Withdrawn"}:completed+=1
+        if function_name=="Planning":
+            for scope in mandatory_scope:
+                total+=1
+                if not scope.get("group_blocking"):completed+=1
         progress_rows.append({
             "name":function_name,
             "tracked":total,
@@ -215,5 +221,5 @@ def department_work_queue(db:Session,bid_id:int,responsible_function:str|None=No
         "department_control":department_control,
         "department_progress":progress_rows,
         "filter":{"responsible_function":responsible_function,"responsible_person":responsible_person},
-        "version":"phase4-department-work-queue-v6",
+        "version":"phase4-department-work-queue-v7",
     }
