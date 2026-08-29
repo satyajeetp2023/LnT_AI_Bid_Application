@@ -80,8 +80,7 @@ def _task_label(task):
     }
 
 
-def analyze_xer(content:bytes,long_duration_hours:float=160.0,near_critical_hours:float=40.0)->dict:
-    tables=parse_xer(content)
+def analyze_schedule_tables(tables:dict[str,list[dict]],long_duration_hours:float=160.0,near_critical_hours:float=40.0)->dict:
     projects=tables.get("PROJECT",[])
     tasks=tables.get("TASK",[])
     rels=tables.get("TASKPRED",[])
@@ -262,5 +261,11 @@ def analyze_xer(content:bytes,long_duration_hours:float=160.0,near_critical_hour
             "missing_wbs":missing_wbs,
         },
         "source_tables":sorted(tables),
-        "parser_version":"phase6-xer-parser-v3",
+        "parser_version":"phase6-schedule-table-analyzer-v1",
     }
+
+
+def analyze_xer(content:bytes,long_duration_hours:float=160.0,near_critical_hours:float=40.0)->dict:
+    result=analyze_schedule_tables(parse_xer(content),long_duration_hours,near_critical_hours)
+    result["parser_version"]="phase6-xer-parser-v4"
+    return result
