@@ -127,6 +127,32 @@ def _structure_signature(table:dict)->tuple:
     )
 
 
+PLACEHOLDER_RE=re.compile(r"\b([A-Z][A-Z0-9 /&().]{2,40})\s*[-_]{5,}")
+
+
+def _placeholder_semantic(label:str)->tuple[str,str]:
+    lower=label.lower().strip()
+    if "tenderer" in lower or "bidder" in lower:return "tenderer_name","bidder_master_data"
+    if "document" in lower:return "document_reference","bid_specific_input"
+    if "date" in lower:return "date","bid_specific_input"
+    if "signature" in lower:return "signature","manual_controlled_input"
+    return re.sub(r"[^a-z0-9]+","_",lower).strip("_") or "placeholder","bid_specific_input"
+
+
+def _inline_placeholders(value:str,coordinate:str):
+    result=[]
+    for match in PLACEHOLDER_RE.finditer(value):
+        label=match.group(1).strip()
+        semantic,source=_placeholder_semantic(label)
+        result.append({
+            "label":label,
+            "semantic_field":semantic,
+            "input_source":source,
+            "coordinate":coordinate,
+        })
+    return result
+
+
 def parse_xlsx_template(content:bytes)->dict:
     workbook=load_workbook(io.BytesIO(content),data_only=False)
     sheets=[]
@@ -134,6 +160,7 @@ def parse_xlsx_template(content:bytes)->dict:
     for ws in workbook.worksheets:
         cells=[]
         nonempty=[]
+        placeholders=[]
         for row in ws.iter_rows():
             for cell in row:
                 value=_norm(cell.value)
@@ -142,7 +169,9 @@ def parse_xlsx_template(content:bytes)->dict:
                 role,confidence=_cell_role(value,has_border,bool(merged_range))
                 if value or has_border:
                     cells.append(asdict(TemplateCell(cell.coordinate,cell.row,cell.column,value or None,merged_range,role,confidence)))
-                if value:nonempty.append(cell)
+                if value:
+                    nonempty.append(cell)
+                    placeholders.extend(_inline_placeholders(value,cell.coordinate))
 
         tables=[]
         used_header_rows=set()
@@ -176,6 +205,7 @@ def parse_xlsx_template(content:bytes)->dict:
             "merged_ranges":[str(x) for x in ws.merged_cells.ranges],
             "cells":cells,
             "tables":tables,
+            "placeholders":placeholders,
             "image_count":len(ws._images),
         })
 
@@ -201,18 +231,39 @@ def parse_xlsx_template(content:bytes)->dict:
                 "confidence":.99 if len(tables)>=10 else .94,
             })
 
+    placeholder_groups={}
+    for sheet in sheets:
+        for item in sheet.get("placeholders",[]):
+            key=item["semantic_field"]
+            group=placeholder_groups.setdefault(key,{
+                "semantic_field":item["semantic_field"],
+                "label":item["label"],
+                "input_source":item["input_source"],
+                "occurrences":[],
+            })
+            group["occurrences"].append({"sheet":sheet["name"],"coordinate":item["coordinate"]})
+    workbook_placeholders=[]
+    for group in placeholder_groups.values():
+        group["occurrence_count"]=len(group["occurrences"])
+        group["sample_occurrences"]=group["occurrences"][:10]
+        del group["occurrences"]
+        workbook_placeholders.append(group)
+    workbook_placeholders.sort(key=lambda x:x["semantic_field"])
+
     return {
         "file_type":"xlsx",
         "sheet_count":len(workbook.worksheets),
         "sheets":sheets,
         "tables":all_tables,
         "workbook_patterns":workbook_patterns,
+        "workbook_placeholders":workbook_placeholders,
         "summary":{
             "tables_detected":len(all_tables),
             "compliance_tables":sum(1 for x in all_tables if x["table_type"]=="statement_of_compliance"),
             "candidate_input_cells":sum(1 for s in sheets for c in s["cells"] if c["role"]=="candidate_input"),
             "images_detected":sum(s["image_count"] for s in sheets),
             "repeated_sheet_patterns":len(workbook_patterns),
+            "workbook_placeholders":len(workbook_placeholders),
         },
-        "parser_version":"phase5-xlsx-template-parser-v2",
+        "parser_version":"phase5-xlsx-template-parser-v3",
     }
