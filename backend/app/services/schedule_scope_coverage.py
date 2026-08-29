@@ -79,6 +79,8 @@ def _scope_item_dict(item:ScheduleScopeItem):
         "source_reference":item.source_reference,
         "source_excerpt":item.source_excerpt,
         "mandatory":item.mandatory,
+        "responsible_function":item.responsible_function,
+        "responsible_person":item.responsible_person,
         "match_keywords":item.match_keywords or [],
         "coverage_status":item.coverage_status,
         "matched_task_code":item.matched_task_code,
