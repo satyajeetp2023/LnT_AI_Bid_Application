@@ -5,7 +5,7 @@ import {use,useCallback,useEffect,useState} from "react";
 import {BidWorkspaceHeader} from "@/components/BidWorkspaceHeader";
 import {EmptyState,ErrorState,LoadingState,PageHeader,StatusBadge,SummaryCard} from "@/components/design-system";
 import {request} from "@/services/api";
-import type {Bid,Document,P6ActivityProfile,P6ScheduleAnalysis,P6ScheduleComparison,Page} from "@/types";
+import type {Bid,Document,P6ActivityProfile,P6ScheduleAnalysis,P6ScheduleComparison,Page,ScheduleScopeCoverage,ScheduleScopeItem} from "@/types";
 
 const ISSUE_LABELS:Record<string,string>={
  open_start:"Open Start / No Predecessor",
@@ -33,16 +33,25 @@ export default function SchedulesPage({params}:{params:Promise<{id:string}>}){
  const [comparison,setComparison]=useState<P6ScheduleComparison|null>(null);
  const [activityProfile,setActivityProfile]=useState<P6ActivityProfile|null>(null);
  const [profileLoading,setProfileLoading]=useState(false);
+ const [scopeCoverage,setScopeCoverage]=useState<ScheduleScopeCoverage|null>(null);
+ const [scopeLoading,setScopeLoading]=useState(false);
+ const [scopeReason,setScopeReason]=useState<Record<number,string>>({});
+ const [scopeStatus,setScopeStatus]=useState<Record<number,string>>({});
  const [comparing,setComparing]=useState(false);
  const [loading,setLoading]=useState(true);
  const [analyzing,setAnalyzing]=useState(false);
  const [error,setError]=useState("");
 
  const analyze=useCallback(async(documentId:number)=>{
-  setAnalyzing(true);setError("");
-  try{setAnalysis(await request<P6ScheduleAnalysis>("/documents/"+documentId+"/schedule-analysis"))}
-  catch{setError("Unable to analyze this Primavera XER file.");setAnalysis(null)}
-  finally{setAnalyzing(false)}
+  setAnalyzing(true);setScopeLoading(true);setError("");
+  try{
+   const [nextAnalysis,nextCoverage]=await Promise.all([
+    request<P6ScheduleAnalysis>("/documents/"+documentId+"/schedule-analysis"),
+    request<ScheduleScopeCoverage>("/documents/"+documentId+"/schedule-scope-coverage")
+   ]);
+   setAnalysis(nextAnalysis);setScopeCoverage(nextCoverage);
+  }catch{setError("Unable to analyze this Primavera XER file.");setAnalysis(null);setScopeCoverage(null)}
+  finally{setAnalyzing(false);setScopeLoading(false)}
  },[]);
 
  const inspectActivity=async(taskKey:string)=>{
@@ -51,6 +60,15 @@ export default function SchedulesPage({params}:{params:Promise<{id:string}>}){
   try{setActivityProfile(await request<P6ActivityProfile>("/documents/"+selected+"/schedule-activity-profile?task_key="+encodeURIComponent(taskKey)))}
   catch{setError("Unable to retrieve the full Primavera parameter profile for this activity.")}
   finally{setProfileLoading(false)}
+ };
+
+ const saveScopeDisposition=async(item:ScheduleScopeItem)=>{
+  const status=scopeStatus[item.id]||item.disposition_status;
+  const reason=scopeReason[item.id]??item.disposition_reason??"";
+  try{
+   await request("/schedule-scope/items/"+item.id+"/disposition",{method:"POST",body:JSON.stringify({status,reason})});
+   if(selected)setScopeCoverage(await request<ScheduleScopeCoverage>("/documents/"+selected+"/schedule-scope-coverage?sync_requirements=false"));
+  }catch(e){setError(e instanceof Error?e.message:"Unable to save schedule coverage explanation.")}
  };
 
  const compareVersions=async()=>{
@@ -99,6 +117,11 @@ export default function SchedulesPage({params}:{params:Promise<{id:string}>}){
      <SummaryCard label="Open Finishes" value={analysis.health.issue_counts.open_finish} tone="amber"/>
      <SummaryCard label="Negative Float" value={analysis.health.issue_counts.negative_float} tone="red"/>
     </div>
+
+    {scopeLoading&&<div className="mb-3"><LoadingState label="Checking schedule scope coverage…"/></div>}
+    {scopeCoverage&&<section className={"mb-3 overflow-hidden rounded border "+(scopeCoverage.ready?"border-emerald-200 bg-white":"border-red-200 bg-white")}><div className="flex flex-col gap-2 border-b bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="text-sm font-bold text-slate-900">Schedule Scope Coverage</h2><p className="text-xs text-slate-500">{scopeCoverage.note}</p></div><StatusBadge tone={scopeCoverage.ready?"green":"red"}>{scopeCoverage.grade}</StatusBadge></div><div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-6"><SummaryCard label="Expected" value={scopeCoverage.summary.expected}/><SummaryCard label="Covered" value={scopeCoverage.summary.covered} tone="green"/><SummaryCard label="Possible Match" value={scopeCoverage.summary.possible_match} tone="amber"/><SummaryCard label="Missing" value={scopeCoverage.summary.missing} tone="red"/><SummaryCard label="Blocking" value={scopeCoverage.summary.blocking} tone="red"/><SummaryCard label="Explained Missing" value={scopeCoverage.summary.explained_missing}/></div><div className="space-y-2 border-t p-3">{scopeCoverage.items.map(item=><article key={item.id} className={"rounded border p-3 "+(item.blocking?"border-red-200 bg-red-50/30":"border-slate-200 bg-white")}><div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{item.activity_level} · {item.source_type}{item.source_reference&&" · "+item.source_reference}</div><div className="mt-1 text-sm font-semibold text-slate-900">{item.activity_name}</div><div className="mt-1 text-[11px] text-slate-500">Schedule match: {item.matched_task_code||"—"} {item.matched_task_name?("· "+item.matched_task_name):""}{item.match_confidence!==null?(" · "+Math.round(item.match_confidence*100)+"%"):""}</div></div><div className="flex flex-wrap gap-1.5"><StatusBadge tone={item.coverage_status==="Covered"?"green":item.coverage_status==="Missing"?"red":"amber"}>{item.coverage_status}</StatusBadge>{item.blocking&&<span className="rounded bg-red-100 px-2 py-1 text-[10px] font-bold text-red-700">BLOCKING</span>}</div></div>{item.coverage_status!=="Covered"&&<div className="mt-3 grid gap-2 lg:grid-cols-[220px_1fr_auto] lg:items-end"><div><label className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Disposition</label><select value={scopeStatus[item.id]||item.disposition_status} onChange={e=>setScopeStatus({...scopeStatus,[item.id]:e.target.value})} className="mt-1 w-full rounded border border-slate-300 bg-white px-2 py-2 text-xs"><option>Unexplained</option>{item.coverage_status==="Possible Match"&&<option>Confirmed Covered</option>}<option>To Be Added</option><option>Covered Elsewhere</option><option>Not Applicable</option><option>Explained-Excluded</option></select></div><div><label className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Why is this activity not clearly in the schedule?</label><textarea rows={2} value={scopeReason[item.id]??item.disposition_reason??""} onChange={e=>setScopeReason({...scopeReason,[item.id]:e.target.value})} placeholder="Explanation is required for exclusion, coverage elsewhere, N/A or To Be Added." className="mt-1 w-full rounded border border-slate-300 bg-white p-2 text-xs"/></div><button onClick={()=>saveScopeDisposition(item)} className="rounded bg-[#304354] px-3 py-2 text-xs font-semibold text-white">Save Explanation</button></div>}</article>)}</div></section>}
+
+    <section className="mb-3 overflow-hidden rounded border border-slate-200 bg-white"><div className="flex flex-col gap-2 border-b bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="text-sm font-bold text-slate-900">Resource Loading Profile</h2><p className="text-xs text-slate-500">{analysis.optimization_advisor.resource_loading.note}</p></div><StatusBadge tone={analysis.optimization_advisor.resource_loading.status==="Broadly Resource Loaded"?"green":analysis.optimization_advisor.resource_loading.status==="Partially Resource Loaded"?"amber":"grey"}>{analysis.optimization_advisor.resource_loading.status}</StatusBadge></div><div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-4"><SummaryCard label="Eligible Activities" value={analysis.optimization_advisor.resource_loading.eligible_activities}/><SummaryCard label="With Assignments" value={analysis.optimization_advisor.resource_loading.activities_with_assignments}/><SummaryCard label="Coverage" value={Math.round(analysis.optimization_advisor.resource_loading.coverage_ratio*100)+"%"}/><SummaryCard label="Assignments" value={analysis.optimization_advisor.resource_loading.assignment_count}/></div>{analysis.optimization_advisor.resource_loading.resource_types.length>0&&<div className="flex flex-wrap gap-2 border-t p-3">{analysis.optimization_advisor.resource_loading.resource_types.map(x=><span key={x.name} className="rounded bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-700">{x.name} · {x.count}</span>)}</div>}</section>
 
     <section className="mb-3 overflow-hidden rounded border border-slate-200 bg-white"><div className="border-b bg-slate-50 px-4 py-3"><h2 className="text-sm font-bold text-slate-900">Schedule Parameter Inventory</h2><p className="text-xs text-slate-500">{analysis.optimization_advisor.parameter_inventory.note}</p></div><div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-4"><SummaryCard label="XER Tables" value={analysis.optimization_advisor.parameter_inventory.table_count}/><SummaryCard label="Unique Fields" value={analysis.optimization_advisor.parameter_inventory.total_fields}/><SummaryCard label="Total Rows" value={analysis.optimization_advisor.parameter_inventory.total_rows}/><SummaryCard label="Calendars" value={analysis.optimization_advisor.parameter_inventory.calendar_count}/></div><div className="max-h-[320px] overflow-auto border-t"><table className="w-full min-w-[700px] text-left text-xs"><thead className="sticky top-0 bg-white text-[10px] uppercase tracking-wide text-slate-500"><tr>{["Table","Rows","Fields","Sample Fields"].map(h=><th key={h} className="px-4 py-2">{h}</th>)}</tr></thead><tbody>{analysis.optimization_advisor.parameter_inventory.tables.map(x=><tr key={x.table} className="border-t"><td className="px-4 py-3 font-semibold text-slate-900">{x.table}</td><td className="px-4 py-3">{x.rows}</td><td className="px-4 py-3">{x.field_count}</td><td className="max-w-xl px-4 py-3 text-slate-500">{x.fields.slice(0,10).join(", ")}{x.fields.length>10?" …":""}</td></tr>)}</tbody></table></div></section>
 
