@@ -116,10 +116,10 @@ def _is_blocking(item:ScheduleScopeItem)->bool:
     return True
 
 
-def sync_scope_from_project_type(db:Session,bid_id:int,user_id:int):
+def sync_scope_from_project_type(db:Session,bid_id:int,user_id:int,scope_text:str=""):
     project=db.get(BidProject,bid_id)
     if not project:return {"created":0,"updated":0}
-    templates=project_type_activity_library(project.project_type)
+    templates=project_type_activity_library(project.project_type,scope_text)
     existing=db.scalars(select(ScheduleScopeItem).where(
         ScheduleScopeItem.bid_project_id==bid_id,
         ScheduleScopeItem.source_type=="Project-Type Knowledge",
@@ -172,12 +172,13 @@ def sync_scope_from_project_type(db:Session,bid_id:int,user_id:int):
 
 
 def sync_scope_from_requirements(db:Session,bid_id:int,user_id:int,request_metadata:dict|None=None):
-    project_sync=sync_scope_from_project_type(db,bid_id,user_id)
     requirements=db.scalars(select(BidRequirement).where(
         BidRequirement.bid_project_id==bid_id,
         BidRequirement.requirement_category.in_(SCOPE_CATEGORIES),
         BidRequirement.requirement_status.notin_(["Closed","Not Applicable"]),
     )).all()
+    scope_text=" ".join(f"{x.requirement_title} {x.requirement_text}" for x in requirements)
+    project_sync=sync_scope_from_project_type(db,bid_id,user_id,scope_text)
     existing=db.scalars(select(ScheduleScopeItem).where(
         ScheduleScopeItem.bid_project_id==bid_id,
         ScheduleScopeItem.source_requirement_id.is_not(None),
