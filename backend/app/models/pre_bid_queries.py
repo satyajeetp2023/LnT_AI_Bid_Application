@@ -35,6 +35,8 @@ class BidPreBidQuery(Base):
  created_by:Mapped[int]=mapped_column(ForeignKey("users.id"))
  created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=now)
  updated_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=now,onupdate=now)
+ approved_by:Mapped[int|None]=mapped_column(ForeignKey("users.id"))
+ approved_at:Mapped[datetime|None]=mapped_column(DateTime(timezone=True))
  closed_by:Mapped[int|None]=mapped_column(ForeignKey("users.id"))
  closed_at:Mapped[datetime|None]=mapped_column(DateTime(timezone=True))
  @property
