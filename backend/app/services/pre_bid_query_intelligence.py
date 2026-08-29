@@ -6,7 +6,7 @@ from typing import Protocol
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import BidDocument,BidMissingInput,BidPreBidQuery,BidRequirement
+from app.models import BidDocument,BidMissingInput,BidPreBidQuery,BidPreBidQueryDecision,BidRequirement
 
 
 STOP_WORDS={
@@ -303,10 +303,11 @@ class RuleBasedPreBidQuerySuggestionProvider:
         existing_requirements=set(db.scalars(select(BidPreBidQuery.requirement_id).where(BidPreBidQuery.bid_project_id==bid_id,BidPreBidQuery.requirement_id.is_not(None))).all())
         suggestions:list[SuggestedPreBidQuery]=[]
         answered:list[dict]=[]
+        suppressed={(x.source_kind,x.source_id) for x in db.scalars(select(BidPreBidQueryDecision).where(BidPreBidQueryDecision.bid_project_id==bid_id,BidPreBidQueryDecision.decision=="Do Not Raise")).all()}
 
         gaps=db.scalars(select(BidMissingInput).where(BidMissingInput.bid_project_id==bid_id,BidMissingInput.status.notin_(["Resolved","Not Applicable"]))).all()
         for gap in gaps:
-            if gap.id in existing_missing:continue
+            if gap.id in existing_missing or ("Missing Input",gap.id) in suppressed:continue
             question=f"{gap.missing_input_title}. {gap.missing_input_description}"
             check=self.knowledge.check(db,bid_id,question,gap.requirement_id)
             if check.status=="answered_in_tender":
@@ -330,7 +331,7 @@ class RuleBasedPreBidQuerySuggestionProvider:
             BidRequirement.bid_project_id==bid_id,BidRequirement.requirement_status!="Closed",BidRequirement.review_status=="Needs Clarification",
         )).all()
         for req in requirements:
-            if req.id in existing_requirements:continue
+            if req.id in existing_requirements or ("Requirement",req.id) in suppressed:continue
             check=self.knowledge.check(db,bid_id,f"{req.requirement_title}. {req.requirement_text}",req.id)
             if check.status=="answered_in_tender":
                 answered.append({"source_kind":"Requirement","source_id":req.id,"title":req.requirement_title,"knowledge_check":check.as_dict()})
@@ -352,6 +353,7 @@ class RuleBasedPreBidQuerySuggestionProvider:
         suggestions.extend(_undefined_particulars(all_requirements,blocked))
         suggestions.extend(_scope_conflicts(all_requirements,blocked))
         suggestions.extend(_conflicting_requirements(all_requirements,blocked))
+        suggestions=[x for x in suggestions if (x.source_kind,x.source_id) not in suppressed]
 
         suggestions.sort(key=lambda x:({"Critical":0,"High":1,"Medium":2,"Low":3}.get(x.priority,4),-x.confidence,x.query_title.lower()))
         return suggestions,answered
@@ -365,5 +367,5 @@ def suggest_pre_bid_queries(db:Session,bid_id:int):
         "knowledge_provider":getattr(provider.knowledge,"version","unknown"),
         "items":[x.as_dict() for x in items],
         "answered":answered,
-        "summary":{"suggested":len(items),"answered_in_tender":len(answered),"automatic_discoveries":sum(1 for x in items if x.source_kind in {"Missing Reference","Undefined Tender Particular","Scope Ownership Conflict","Cross-Document Conflict"})},
+        "summary":{"suggested":len(items),"answered_in_tender":len(answered),"automatic_discoveries":sum(1 for x in items if x.source_kind in {"Missing Reference","Undefined Tender Particular","Scope Ownership Conflict","Cross-Document Conflict"}),"suppressed":len(db.scalars(select(BidPreBidQueryDecision).where(BidPreBidQueryDecision.bid_project_id==bid_id,BidPreBidQueryDecision.decision=="Do Not Raise")).all())},
     }
