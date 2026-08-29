@@ -34,6 +34,43 @@ def _table_inventory(tables:dict[str,list[dict]]):
     return result
 
 
+def activity_parameter_profile(content:bytes,task_key:str):
+    tables=parse_xer(content)
+    tasks=tables.get("TASK",[])
+    task=next((x for x in tasks if str(x.get("task_code") or "")==str(task_key) or str(x.get("task_id") or "")==str(task_key)),None)
+    if not task:return None
+    task_id=task.get("task_id")
+    rels=tables.get("TASKPRED",[])
+    predecessors=[x for x in rels if x.get("task_id")==task_id]
+    successors=[x for x in rels if x.get("pred_task_id")==task_id]
+    assignments=[x for x in tables.get("TASKRSRC",[]) if x.get("task_id")==task_id]
+    task_codes=[x for x in tables.get("TASKACTV",[]) if x.get("task_id")==task_id]
+    calendar_id=task.get("clndr_id")
+    calendar=next((x for x in tables.get("CALENDAR",[]) if x.get("clndr_id")==calendar_id),None)
+    wbs_id=task.get("wbs_id")
+    wbs=next((x for x in tables.get("PROJWBS",[]) if x.get("wbs_id")==wbs_id),None)
+    resources={x.get("rsrc_id"):x for x in tables.get("RSRC",[]) if x.get("rsrc_id")}
+    return {
+        "task_key":task_key,
+        "task":task,
+        "wbs":wbs,
+        "calendar":calendar,
+        "predecessors":predecessors,
+        "successors":successors,
+        "resource_assignments":[{**x,"resource":resources.get(x.get("rsrc_id"))} for x in assignments],
+        "activity_codes":task_codes,
+        "field_summary":{
+            "task_fields":len(task),
+            "populated_task_fields":sum(1 for v in task.values() if str(v or "").strip()),
+            "predecessor_count":len(predecessors),
+            "successor_count":len(successors),
+            "resource_assignment_count":len(assignments),
+            "activity_code_count":len(task_codes),
+        },
+        "profile_version":"phase6-activity-parameter-profile-v1",
+    }
+
+
 def build_schedule_optimization_advisor(
     content:bytes,
     near_critical_hours:float=40.0,
