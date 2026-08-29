@@ -15,9 +15,10 @@ export function Sidebar({mobileOpen=false,onClose}:{mobileOpen?:boolean;onClose?
   {n:"Requirement Register",h:bidId?`/bids/${bidId}/requirements`:undefined,i:FileSearch},
   {n:"Missing Inputs",h:bidId?`/bids/${bidId}/missing-inputs`:undefined,i:TriangleAlert},
   {n:"Pre-Bid Queries",h:bidId?`/bids/${bidId}/pre-bid-queries`:undefined,i:FileQuestion},
+  {n:"Review & Approval",h:bidId?`/bids/${bidId}/review-approval`:undefined,i:ShieldCheck},
  ];
  const future=[
-  {n:"Schedules",i:FileCheck2},{n:"Bid Preparation",i:FileCheck2},{n:"Review & Approval",i:ShieldCheck},{n:"Submission",i:FileCheck2},{n:"Bid Results",i:BarChart3},{n:"Historical Intelligence",i:History},{n:"Reports & Analytics",i:BarChart3}
+  {n:"Schedules",i:FileCheck2},{n:"Bid Preparation",i:FileCheck2},{n:"Submission",i:FileCheck2},{n:"Bid Results",i:BarChart3},{n:"Historical Intelligence",i:History},{n:"Reports & Analytics",i:BarChart3}
  ];
  const item=(x:any)=>{
   const selected=x.h?(x.h==="/"?p===x.h:x.h==="/bids"?p==="/bids":x.h==="/bids/new"?p==="/bids/new":p===x.h||p.startsWith(x.h+"/")):false;
