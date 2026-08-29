@@ -25,6 +25,21 @@ STOP={
     "the","and","for","with","shall","must","required","contractor","bidder","tenderer","employer",
     "work","works","project","system","systems","including","all","any","this","that","from","into",
 }
+LIFECYCLE_STAGES=(
+    ("Design",("design","engineering","drawings","calculation")),
+    ("Approval",("approval","approve","review")),
+    ("Procurement / Supply",("procure","procurement","supply","manufacture","fabricate","deliver")),
+    ("Construction / Installation",("construct","construction","install","installation","erect","erection","lay","laying")),
+    ("Testing",("test","testing","inspection")),
+    ("Commissioning",("commission","commissioning","energize","energisation","energization")),
+)
+
+
+def _lifecycle_stages(text:str):
+    lower=str(text or "").lower()
+    return [stage for stage,signals in LIFECYCLE_STAGES if any(signal in lower for signal in signals)]
+
+
 
 
 def _terms(text:str)->set[str]:
@@ -176,7 +191,32 @@ def sync_scope_from_requirements(db:Session,bid_id:int,user_id:int,request_metad
                 match_keywords=words,
                 created_by=user_id,
             )
-            db.add(item);created+=1
+            db.add(item);db.flush();created+=1
+        stages=_lifecycle_stages(req.requirement_text)
+        if len(stages)>1:
+            for stage in stages:
+                child_name=f"{stage}: {name}"
+                child=db.scalar(select(ScheduleScopeItem).where(
+                    ScheduleScopeItem.bid_project_id==bid_id,
+                    ScheduleScopeItem.parent_id==item.id,
+                    ScheduleScopeItem.source_requirement_id==req.id,
+                    ScheduleScopeItem.activity_name==child_name,
+                ))
+                if child:continue
+                db.add(ScheduleScopeItem(
+                    bid_project_id=bid_id,
+                    parent_id=item.id,
+                    source_requirement_id=req.id,
+                    source_document_id=req.source_document_id,
+                    activity_name=child_name[:300],
+                    activity_level="Sub-Activity",
+                    source_type="Contract / Technical Requirement",
+                    source_reference=req.source_clause or req.source_section,
+                    source_excerpt=req.requirement_text[:2000],
+                    mandatory=req.is_mandatory,
+                    match_keywords=_keywords(child_name,req.requirement_text),
+                    created_by=user_id,
+                ));created+=1
     db.add(AuditEvent(
         user_id=user_id,bid_project_id=bid_id,event_type="schedule.scope_catalog_synced",
         entity_type="BidProject",entity_id=str(bid_id),request_metadata=request_metadata or {},
@@ -277,7 +317,7 @@ def evaluate_scope_coverage(db:Session,bid_id:int,xer_content:bytes,user_id:int,
         },
         "ready":len(blocking)==0 and len(rows)>0,
         "grade":"Complete" if len(blocking)==0 and rows else "Action Required" if rows else "No Scope Catalog",
-        "methodology":"phase6-schedule-scope-coverage-v2",
+        "methodology":"phase6-schedule-scope-coverage-v3",
         "note":"Expected activities are independently sourced from bid scope. Missing or ambiguous coverage must be explained; 'To Be Added' remains a blocker until a revised schedule contains the activity.",
     }
 
