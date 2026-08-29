@@ -5,7 +5,7 @@ import {use,useCallback,useEffect,useState} from "react";
 import {BidWorkspaceHeader} from "@/components/BidWorkspaceHeader";
 import {EmptyState,ErrorState,LoadingState,PageHeader,PriorityBadge,StatusBadge,SummaryCard} from "@/components/design-system";
 import {request} from "@/services/api";
-import type {Bid,EstimationReadiness,PreBidQuery,PreBidQueryPage} from "@/types";
+import type {Bid,EstimationReadiness,PreparedArtifact,PreBidQuery,PreBidQueryPage} from "@/types";
 
 const emptySummary={total:0,draft:0,submitted:0,responded:0,open:0,overdue:0};
 
@@ -14,6 +14,7 @@ export default function ReviewApprovalPage({params}:{params:Promise<{id:string}>
  const [bid,setBid]=useState<Bid|null>(null);
  const [items,setItems]=useState<PreBidQuery[]>([]);
  const [readiness,setReadiness]=useState<EstimationReadiness|null>(null);
+ const [artifacts,setArtifacts]=useState<PreparedArtifact[]>([]);
  const [loading,setLoading]=useState(true);
  const [error,setError]=useState("");
 
@@ -22,8 +23,9 @@ export default function ReviewApprovalPage({params}:{params:Promise<{id:string}>
   Promise.all([
    request<Bid>(`/bids/${id}`),
    request<PreBidQueryPage>(`/bids/${id}/pre-bid-queries?page_size=100`),
-   request<EstimationReadiness>(`/bids/${id}/estimation-readiness`)
-  ]).then(([b,q,r])=>{setBid(b);setItems(q.items);setReadiness(r)})
+   request<EstimationReadiness>(`/bids/${id}/estimation-readiness`),
+   request<PreparedArtifact[]>(`/bids/${id}/prepared-artifacts`)
+  ]).then(([b,q,r,a])=>{setBid(b);setItems(q.items);setReadiness(r);setArtifacts(a)})
     .catch(()=>setError("Unable to load the review queue. Please try again."))
     .finally(()=>setLoading(false));
  },[id]);
@@ -33,10 +35,16 @@ export default function ReviewApprovalPage({params}:{params:Promise<{id:string}>
   await request(`/pre-bid-queries/${item.id}/approve`,{method:"POST"});
   load();
  };
+ const approvePreparedArtifact=async(item:PreparedArtifact)=>{
+  await request(`/prepared-artifacts/${item.id}/approve`,{method:"POST"});
+  load();
+ };
 
  const ready=items.filter(x=>x.status==="Ready for Review"&&!x.approved_at);
  const approved=items.filter(x=>!!x.approved_at);
  const submitted=items.filter(x=>["Submitted","Responded","Closed"].includes(x.status));
+ const artifactsReady=artifacts.filter(x=>x.status==="Ready for Review");
+ const artifactsApproved=artifacts.filter(x=>x.status==="Approved");
 
  return <div className="mx-auto max-w-[1500px]">
   <BidWorkspaceHeader bid={bid} active="Review"/>
@@ -45,11 +53,13 @@ export default function ReviewApprovalPage({params}:{params:Promise<{id:string}>
    title="Review & Approval"
    description="Approve bidder-reviewed outputs before they move into formal submission."
   />
-  <div className="mb-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+  <div className="mb-3 grid grid-cols-2 gap-3 md:grid-cols-6">
    <SummaryCard label="Ready for Review" value={ready.length} tone="amber"/>
    <SummaryCard label="Approved" value={approved.length} tone="green"/>
    <SummaryCard label="Submitted / Closed" value={submitted.length}/>
    <SummaryCard label="Total Queries" value={items.length}/>
+   <SummaryCard label="Artifacts for Review" value={artifactsReady.length} tone="amber"/>
+   <SummaryCard label="Approved Artifacts" value={artifactsApproved.length} tone="green"/>
   </div>
 
   {readiness&&<section className={"mb-3 overflow-hidden rounded border "+(readiness.grade==="Ready"?"border-emerald-200 bg-emerald-50":"border-amber-200 bg-amber-50")}><div className="grid gap-3 p-4 sm:grid-cols-[140px_1fr_auto] sm:items-center"><div><div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Estimation Readiness</div><div className="mt-1 text-2xl font-bold text-slate-900">{Math.round(readiness.overall_score)}%</div><div className={"text-xs font-semibold "+(readiness.grade==="Ready"?"text-emerald-700":"text-amber-700")}>{readiness.grade}</div></div><div className="text-xs leading-5 text-slate-700">{readiness.grade==="Ready"?"Readiness checks are sufficiently complete for management review.":"Management review can continue, but the bid still has unresolved readiness work."}<div className="mt-1 flex flex-wrap gap-2 text-[11px]"><span>{readiness.closure_summary.unreviewed_requirements} unreviewed</span><span>·</span><span>{readiness.closure_summary.unassessed_compliance} compliance not assessed</span><span>·</span><span>{readiness.counts.open_missing_inputs} open gaps</span><span>·</span><span>{readiness.counts.critical_open} critical</span></div></div><Link href={`/bids/${id}/missing-inputs`} className="inline-flex rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-blue-700">Open Readiness</Link></div></section>}
@@ -83,6 +93,23 @@ export default function ReviewApprovalPage({params}:{params:Promise<{id:string}>
        </div>
       </article>)}
      </div>}
+   </section>
+
+   <section className="overflow-hidden border border-slate-200 bg-white">
+    <div className="border-b bg-slate-50 px-4 py-3">
+     <h2 className="text-sm font-bold text-slate-900">Prepared Employer Formats Awaiting Approval</h2>
+     <p className="text-xs text-slate-500">Versioned controlled copies generated from employer-prescribed templates.</p>
+    </div>
+    {artifactsReady.length===0?<div className="px-4 py-6 text-sm text-slate-500">No prepared employer-format artifacts are awaiting approval.</div>:
+     <div className="grid gap-3 p-3 lg:grid-cols-2">{artifactsReady.map(x=><article key={x.id} className="rounded border border-slate-200 bg-white p-4 shadow-sm"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Version {x.version_no}</div><h3 className="mt-0.5 truncate text-sm font-semibold text-slate-900">{x.artifact_name}</h3><div className="mt-1 truncate text-xs text-slate-500">Template: {x.template_name||"—"}</div></div><StatusBadge tone="amber">Ready for Review</StatusBadge></div><div className="mt-3 grid grid-cols-2 gap-2 text-xs"><div><span className="text-slate-500">Populated Fields</span><div className="font-medium text-slate-800">{x.generation_summary?.written_fields||0}</div></div><div><span className="text-slate-500">Unresolved Fields</span><div className="font-medium text-slate-800">{x.generation_summary?.unresolved_fields||0}</div></div><div><span className="text-slate-500">Choice Mark</span><div className="font-medium text-slate-800">{x.generation_summary?.choice_mark||"—"}</div></div><div><span className="text-slate-500">Created</span><div className="font-medium text-slate-800">{new Date(x.created_at).toLocaleString()}</div></div></div><div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t pt-3"><Link href={`/bids/${id}/bid-preparation`} className="rounded border border-slate-300 px-3 py-2 text-xs font-semibold text-blue-700">Open Bid Preparation</Link><button onClick={()=>approvePreparedArtifact(x)} className="rounded bg-[#e2b635] px-4 py-2 text-xs font-semibold text-[#243241]">Approve Artifact</button></div></article>)}</div>}
+   </section>
+
+   <section className="overflow-hidden border border-slate-200 bg-white">
+    <div className="border-b bg-slate-50 px-4 py-3">
+     <h2 className="text-sm font-bold text-slate-900">Approved Prepared Artifacts</h2>
+     <p className="text-xs text-slate-500">Only the latest approved version of a template remains current; older approved versions are superseded automatically.</p>
+    </div>
+    {artifactsApproved.length===0?<div className="px-4 py-6 text-sm text-slate-500">No approved employer-format artifacts yet.</div>:<div className="divide-y">{artifactsApproved.map(x=><div key={x.id} className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><div className="truncate text-sm font-semibold text-slate-900">{x.artifact_name}</div><div className="mt-1 text-xs text-slate-500">Version {x.version_no}{x.approved_at?` · approved ${new Date(x.approved_at).toLocaleString()}`:""}</div></div><StatusBadge tone="green">Approved</StatusBadge></div>)}</div>}
    </section>
 
    <section className="overflow-hidden border border-slate-200 bg-white">
