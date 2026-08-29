@@ -175,7 +175,7 @@ def sync_scope_from_requirements(db:Session,bid_id:int,user_id:int,request_metad
         ScheduleScopeItem.bid_project_id==bid_id,
         ScheduleScopeItem.source_requirement_id.is_not(None),
     )).all()
-    by_requirement={x.source_requirement_id:x for x in existing}
+    by_requirement={x.source_requirement_id:x for x in existing if x.parent_id is None}
     created=updated=0
     for req in requirements:
         name=_activity_name(req)
@@ -215,7 +215,14 @@ def sync_scope_from_requirements(db:Session,bid_id:int,user_id:int,request_metad
                     ScheduleScopeItem.source_requirement_id==req.id,
                     ScheduleScopeItem.activity_name==child_name,
                 ))
-                if child:continue
+                if child:
+                    child.source_document_id=req.source_document_id
+                    child.source_reference=req.source_clause or req.source_section
+                    child.source_excerpt=req.requirement_text[:2000]
+                    child.mandatory=req.is_mandatory
+                    child.match_keywords=_keywords(child_name,req.requirement_text)
+                    updated+=1
+                    continue
                 db.add(ScheduleScopeItem(
                     bid_project_id=bid_id,
                     parent_id=item.id,
