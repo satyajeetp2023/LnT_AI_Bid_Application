@@ -4,7 +4,7 @@ import Link from "next/link";
 import {use,useEffect,useState} from "react";
 import {BidWorkspaceHeader} from "@/components/BidWorkspaceHeader";
 import {EmptyState,ErrorState,LoadingState,PageHeader,PriorityBadge,SourceEvidenceCard,SummaryCard} from "@/components/design-system";
-import {request} from "@/services/api";
+import {API,request} from "@/services/api";
 import type {Bid,SubmissionFormatCandidateResponse,TemplatePopulationPlan} from "@/types";
 
 const empty:SubmissionFormatCandidateResponse={items:[],summary:{detected:0,mandatory:0,high_priority:0,with_source:0,template_located:0,template_missing:0},version:""};
@@ -15,14 +15,33 @@ export default function BidPreparationPage({params}:{params:Promise<{id:string}>
  const [data,setData]=useState<SubmissionFormatCandidateResponse>(empty);
  const [loading,setLoading]=useState(true);
  const [plan,setPlan]=useState<TemplatePopulationPlan|null>(null);
+ const [selectedTemplateId,setSelectedTemplateId]=useState<number|null>(null);
+ const [choiceMark,setChoiceMark]=useState("X");
+ const [generating,setGenerating]=useState(false);
  const [planLoading,setPlanLoading]=useState(false);
  const [planError,setPlanError]=useState("");
  const [error,setError]=useState("");
  const inspectTemplate=async(documentId:number)=>{
   setPlanLoading(true);setPlanError("");
-  try{setPlan(await request<TemplatePopulationPlan>(`/documents/${documentId}/population-plan`))}
+  try{setPlan(await request<TemplatePopulationPlan>(`/documents/${documentId}/population-plan`));setSelectedTemplateId(documentId)}
   catch{setPlanError("Unable to build a population plan for this template.")}
   finally{setPlanLoading(false)}
+ };
+ const generateDraft=async()=>{
+  if(!selectedTemplateId)return;
+  setGenerating(true);setPlanError("");
+  try{
+   const q=new URLSearchParams({choice_mark:choiceMark});
+   const r=await fetch(`${API}/documents/${selectedTemplateId}/generate-controlled-draft?${q.toString()}`,{method:"POST",headers:{"X-User-ID":"1"}});
+   if(!r.ok){const e=await r.json().catch(()=>({detail:"Draft generation failed"}));throw new Error(e.detail||"Draft generation failed")}
+   const blob=await r.blob();
+   const disposition=r.headers.get("content-disposition")||"";
+   const match=disposition.match(/filename="?([^";]+)"?/i);
+   const filename=match?.[1]||"controlled_draft.xlsx";
+   const url=URL.createObjectURL(blob);
+   const a=document.createElement("a");a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+  }catch{setPlanError("Unable to generate the controlled draft.")}
+  finally{setGenerating(false)}
  };
  useEffect(()=>{
   setLoading(true);
@@ -56,7 +75,7 @@ export default function BidPreparationPage({params}:{params:Promise<{id:string}>
   {planLoading&&<div className="mt-3"><LoadingState label="Building controlled population plan…"/></div>}
   {planError&&<div className="mt-3"><ErrorState message={planError}/></div>}
   {plan&&<section className="mt-3 overflow-hidden rounded border border-slate-200 bg-white">
-   <div className="border-b bg-slate-50 px-4 py-3"><h2 className="text-sm font-bold text-slate-900">Template Population Plan</h2><p className="text-xs text-slate-500">Clause-by-clause mapping between the employer template and reviewed tender requirements. Nothing is written back to the original file at this stage.</p></div>
+   <div className="flex flex-col gap-3 border-b bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="text-sm font-bold text-slate-900">Template Population Plan</h2><p className="text-xs text-slate-500">Clause-by-clause mapping between the employer template and reviewed tender requirements. The original employer file remains untouched.</p></div><div className="flex flex-wrap items-center gap-2"><label className="text-xs font-semibold text-slate-600">Compliance mark</label><select value={choiceMark} onChange={e=>setChoiceMark(e.target.value)} className="rounded border border-slate-300 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700"><option value="X">X</option><option value="✓">✓</option><option value="Yes">Yes</option></select><button disabled={!selectedTemplateId||generating} onClick={generateDraft} className="rounded bg-[#304354] px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">{generating?"Generating…":"Generate Controlled Draft"}</button></div></div>
    <div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-3 lg:grid-cols-6">
     <SummaryCard label="Template Rows" value={plan.summary.template_rows}/>
     <SummaryCard label="Matched" value={plan.summary.requirements_matched} tone="green"/>
