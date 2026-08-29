@@ -15,6 +15,7 @@ from app.services.requirements import create_requirement,list_requirements,updat
 from app.services.requirement_extraction import extract_requirements_from_document
 from app.services.responsibility_assignment import suggest_responsible_function
 from app.services.department_workflow import department_work_queue
+from app.services.submission_format_intelligence import detect_submission_formats
 from app.services.documents import DOCUMENT_CATEGORIES,archive,classify,mark_revision,update_document_metadata,update_notes,upload_document
 from app.services.document_classification import auto_classify_document
 from app.storage.base import LocalSecureStorage
@@ -149,6 +150,10 @@ def assign_work_item_person(bid_id:int,payload:dict,request:Request,db:Session=D
  db.add(AuditEvent(user_id=user.id,bid_project_id=bid_id,event_type="work_item.person_assigned",entity_type=entity_type,entity_id=str(entity_id),request_metadata=metadata(request),details={"responsible_person":person_name,"responsible_user_id":target_user_id}))
  db.commit()
  return {"entity_type":entity_type,"entity_id":entity_id,"responsible_person":person_name}
+
+@router.get("/bids/{bid_id}/submission-format-candidates")
+def submission_format_candidates(bid_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.REQUIREMENT_VIEW);get_bid(db,bid_id);return detect_submission_formats(db,bid_id)
 
 @router.get("/bids/{bid_id}/department-work-queue")
 def get_department_work_queue(bid_id:int,responsible_function:str|None=None,mine:bool=False,db:Session=Depends(get_db),user:User=Depends(user_dep)):
