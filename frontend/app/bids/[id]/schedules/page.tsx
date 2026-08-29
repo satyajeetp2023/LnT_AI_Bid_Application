@@ -5,7 +5,7 @@ import {use,useCallback,useEffect,useState} from "react";
 import {BidWorkspaceHeader} from "@/components/BidWorkspaceHeader";
 import {EmptyState,ErrorState,LoadingState,PageHeader,StatusBadge,SummaryCard} from "@/components/design-system";
 import {request} from "@/services/api";
-import type {Bid,Document,P6ScheduleAnalysis,Page} from "@/types";
+import type {Bid,Document,P6ScheduleAnalysis,P6ScheduleComparison,Page} from "@/types";
 
 const ISSUE_LABELS:Record<string,string>={
  open_start:"Open Start / No Predecessor",
@@ -26,6 +26,9 @@ export default function SchedulesPage({params}:{params:Promise<{id:string}>}){
  const [documents,setDocuments]=useState<Document[]>([]);
  const [selected,setSelected]=useState<number|null>(null);
  const [analysis,setAnalysis]=useState<P6ScheduleAnalysis|null>(null);
+ const [baseline,setBaseline]=useState<number|null>(null);
+ const [comparison,setComparison]=useState<P6ScheduleComparison|null>(null);
+ const [comparing,setComparing]=useState(false);
  const [loading,setLoading]=useState(true);
  const [analyzing,setAnalyzing]=useState(false);
  const [error,setError]=useState("");
@@ -37,6 +40,14 @@ export default function SchedulesPage({params}:{params:Promise<{id:string}>}){
   finally{setAnalyzing(false)}
  },[]);
 
+ const compareVersions=async()=>{
+  if(!selected||!baseline||selected===baseline)return;
+  setComparing(true);setError("");
+  try{setComparison(await request<P6ScheduleComparison>("/documents/"+selected+"/schedule-comparison?baseline_document_id="+baseline))}
+  catch{setError("Unable to compare these Primavera schedule versions.");setComparison(null)}
+  finally{setComparing(false)}
+ };
+
  useEffect(()=>{
   setLoading(true);setError("");
   Promise.all([
@@ -44,7 +55,7 @@ export default function SchedulesPage({params}:{params:Promise<{id:string}>}){
    request<Page<Document>>("/bids/"+id+"/documents?extension=xer&page_size=100")
   ]).then(([b,d])=>{
    setBid(b);setDocuments(d.items);
-   if(d.items.length){setSelected(d.items[0].id);analyze(d.items[0].id)}
+   if(d.items.length){setSelected(d.items[0].id);analyze(d.items[0].id);if(d.items.length>1)setBaseline(d.items[1].id)}
   }).catch(()=>setError("Unable to load schedule documents.")).finally(()=>setLoading(false));
  },[id,analyze]);
 
@@ -61,6 +72,9 @@ export default function SchedulesPage({params}:{params:Promise<{id:string}>}){
     <div className="text-xs text-slate-500">{documents.length} XER file{documents.length===1?"":"s"} in this bid</div>
    </section>
 
+   {documents.length>1&&<section className="mb-3 rounded border border-slate-200 bg-white p-3"><div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between"><div className="grid flex-1 gap-3 sm:grid-cols-2"><div><label className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Baseline / Earlier Version</label><select value={baseline||""} onChange={e=>{setBaseline(Number(e.target.value));setComparison(null)}} className="mt-1 w-full rounded border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800"><option value="">Select baseline</option>{documents.filter(d=>d.id!==selected).map(d=><option key={d.id} value={d.id}>{d.document_title||d.original_filename}</option>)}</select></div><div><label className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Current / Later Version</label><div className="mt-1 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700">{documents.find(d=>d.id===selected)?.document_title||documents.find(d=>d.id===selected)?.original_filename||"Current schedule"}</div></div></div><button disabled={!baseline||baseline===selected||comparing} onClick={compareVersions} className="rounded bg-[#304354] px-4 py-2 text-xs font-semibold text-white disabled:opacity-40">{comparing?"Comparing…":"Compare Versions"}</button></div><p className="mt-2 text-[11px] text-slate-500">Version comparison highlights schedule movement and logic changes; it does not by itself establish contractual delay responsibility or entitlement.</p></section>}
+
+   {comparison&&<ScheduleComparisonPanel value={comparison}/>}
    {analyzing?<LoadingState label="Parsing XER and checking schedule health…"/>:analysis&&<>
     <section className={"mb-3 overflow-hidden rounded border "+(analysis.health.grade==="Good"?"border-emerald-200 bg-emerald-50":analysis.health.grade==="Needs Attention"?"border-amber-200 bg-amber-50":"border-red-200 bg-red-50")}><div className="grid gap-3 p-4 md:grid-cols-[150px_1fr]"><div><div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Health Screening</div><div className="mt-1 text-3xl font-bold text-slate-900">{Math.round(analysis.health.score)}%</div><div className="text-xs font-semibold text-slate-700">{analysis.health.grade}</div></div><div className="text-xs leading-5 text-slate-700"><div className="font-semibold text-slate-900">{analysis.project.project_name||analysis.project.project_code||"Primavera Project"}</div><div className="mt-1">{analysis.health.note}</div><div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500"><span>Data date: {analysis.project.data_date?new Date(analysis.project.data_date).toLocaleString():"—"}</span><span>Planned start: {analysis.project.planned_start?new Date(analysis.project.planned_start).toLocaleDateString():"—"}</span><span>Planned finish: {analysis.project.planned_finish?new Date(analysis.project.planned_finish).toLocaleDateString():"—"}</span></div></div></div></section>
 
@@ -87,6 +101,15 @@ export default function SchedulesPage({params}:{params:Promise<{id:string}>}){
    </>}
   </>}
  </div>;
+}
+
+function ScheduleComparisonPanel({value}:{value:P6ScheduleComparison}){
+ const top=value.finish_slippage.slice(0,20);
+ return <section className="mb-3 space-y-3">
+  <div className="overflow-hidden rounded border border-slate-200 bg-white"><div className="border-b bg-slate-50 px-4 py-3"><h2 className="text-sm font-bold text-slate-900">Baseline / Update Comparison</h2><p className="text-xs text-slate-500">{value.note}</p></div><div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-4 lg:grid-cols-8"><SummaryCard label="Added Activities" value={value.summary.added_activities} tone="amber"/><SummaryCard label="Deleted Activities" value={value.summary.deleted_activities} tone="amber"/><SummaryCard label="Finish Slippages" value={value.summary.finish_slippages} tone="red"/><SummaryCard label="Milestone Moves" value={value.summary.milestone_changes} tone="red"/><SummaryCard label="Duration Changes" value={value.summary.duration_changes}/><SummaryCard label="Float Changes" value={value.summary.float_changes}/><SummaryCard label="Added Logic" value={value.summary.added_relationships}/><SummaryCard label="Deleted Logic" value={value.summary.deleted_relationships}/></div><div className="border-t px-4 py-3 text-xs text-slate-600">Data date shift: <span className="font-semibold text-slate-800">{value.summary.data_date_shift_days??"—"} days</span> · Baseline: {value.baseline.data_date?new Date(value.baseline.data_date).toLocaleString():"—"} · Current: {value.current.data_date?new Date(value.current.data_date).toLocaleString():"—"}</div></div>
+  {value.milestone_changes.length>0&&<div className="overflow-hidden rounded border border-red-200 bg-white"><div className="border-b border-red-100 bg-red-50 px-4 py-3"><h3 className="text-sm font-bold text-red-800">Milestone Movement</h3></div><div className="divide-y">{value.milestone_changes.slice(0,20).map((x,i)=><div key={x.task_code||i} className="grid gap-2 px-4 py-3 text-xs sm:grid-cols-[120px_1fr_auto]"><div className="font-semibold text-slate-900">{x.task_code||"—"}</div><div><div className="font-medium text-slate-800">{x.task_name||"Milestone"}</div><div className="mt-1 text-slate-500">{x.baseline_finish?new Date(x.baseline_finish).toLocaleDateString():"—"} → {x.current_finish?new Date(x.current_finish).toLocaleDateString():"—"}</div></div><div className={(x.finish_variance_days||0)>0?"font-bold text-red-700":"font-bold text-emerald-700"}>{x.finish_variance_days??"—"} days</div></div>)}</div></div>}
+  {top.length>0&&<div className="overflow-hidden rounded border border-slate-200 bg-white"><div className="border-b bg-slate-50 px-4 py-3"><h3 className="text-sm font-bold text-slate-900">Largest Finish Slippages</h3></div><div className="overflow-x-auto"><table className="w-full min-w-[850px] text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500"><tr>{["Activity","Name","Baseline Finish","Current Finish","Variance","Float Change"].map(h=><th key={h} className="px-4 py-2">{h}</th>)}</tr></thead><tbody>{top.map((x,i)=><tr key={x.task_code||i} className="border-t"><td className="px-4 py-3 font-semibold text-slate-900">{x.task_code||"—"}</td><td className="max-w-sm px-4 py-3">{x.task_name||"—"}</td><td className="px-4 py-3">{x.baseline_finish?new Date(x.baseline_finish).toLocaleDateString():"—"}</td><td className="px-4 py-3">{x.current_finish?new Date(x.current_finish).toLocaleDateString():"—"}</td><td className="px-4 py-3 font-bold text-red-700">{x.finish_variance_days??"—"} d</td><td className="px-4 py-3">{x.float_change_hours??"—"} h</td></tr>)}</tbody></table></div></div>}
+ </section>
 }
 
 function Distribution({title,rows}:{title:string;rows:Array<{name:string;count:number}>}){
