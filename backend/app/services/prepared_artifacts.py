@@ -93,6 +93,10 @@ def get_prepared_artifact(db:Session,artifact_id:int):
 
 def mark_artifact_ready(db:Session,item:BidPreparedArtifact,user_id:int,request_metadata:dict):
     if item.status!="Draft":raise HTTPException(422,"Only Draft prepared artifacts can be sent for review")
+    summary=item.generation_summary or {}
+    unresolved=int(summary.get("unresolved_fields") or 0)
+    missing_headers=int(summary.get("missing_header_field_count") or 0)
+    if unresolved or missing_headers:raise HTTPException(422,f"Prepared artifact is incomplete: {unresolved} unresolved bidder field(s), {missing_headers} missing workbook header input(s)")
     item.status="Ready for Review"
     item.ready_for_review_by=user_id
     item.ready_for_review_at=datetime.now(timezone.utc)
