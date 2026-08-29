@@ -24,7 +24,7 @@ from app.services.submission_readiness import build_submission_package,submissio
 from app.services.p6_xer import analyze_xer
 from app.services.schedule_requirement_alignment import align_schedule_to_requirements
 from app.services.p6_schedule_comparison import compare_xer
-from app.services.p6_schedule_optimizer import build_schedule_optimization_advisor
+from app.services.p6_schedule_optimizer import activity_parameter_profile,build_schedule_optimization_advisor
 from app.services.documents import DOCUMENT_CATEGORIES,archive,classify,mark_revision,update_document_metadata,update_notes,upload_document
 from app.services.document_classification import auto_classify_document
 from app.storage.base import LocalSecureStorage
@@ -216,6 +216,14 @@ def schedule_comparison(document_id:int,request:Request,baseline_document_id:int
  db.add(AuditEvent(user_id=user.id,bid_project_id=current.bid_project_id,event_type="schedule.xer_compared",entity_type="BidDocument",entity_id=str(current.id),request_metadata=metadata(request),details={"baseline_document_id":baseline.id,"current_document_id":current.id,**result.get("summary",{})}))
  db.commit()
  return result
+
+@router.get("/documents/{document_id}/schedule-activity-profile")
+def schedule_activity_profile(document_id:int,task_key:str=Query(...,min_length=1,max_length=200),db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ doc=get_doc(db,document_id);require_project_access(db,user,doc.bid_project_id,Permission.VIEW_DOCUMENT)
+ if doc.file_extension.lower()!="xer" or not doc.storage_path:raise HTTPException(422,"Primavera XER content is required")
+ profile=activity_parameter_profile(LocalSecureStorage(get_settings().storage_root).read(doc.storage_path),task_key)
+ if not profile:raise HTTPException(404,"Activity not found in this schedule")
+ return profile
 
 @router.patch("/documents/{document_id}/notes",response_model=DocumentRead)
 def notes(document_id:int,payload:NotesUpdate,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
