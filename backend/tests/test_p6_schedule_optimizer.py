@@ -29,3 +29,5 @@ def test_review_priority_is_separate_from_adjustment_potential():
     assert "Resequencing" in flexible["adjustment_types"]
     assert flexible["adjustment_potential"] in {"Medium","High"}
     assert result["parameter_inventory"]["table_count"]>=4
+    assert result["resource_loading"]["status"]=="Not Resource Loaded"
+    assert result["resource_loading"]["assignment_count"]==0
