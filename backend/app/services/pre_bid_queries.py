@@ -61,6 +61,8 @@ def update_pre_bid_query(db:Session,item:BidPreBidQuery,payload,user_id:int,requ
  for field,value in values.items():setattr(item,field,value)
  if previous=="Approved" and materially_changed:
   item.status="Ready for Review";item.approved_by=None;item.approved_at=None
+ elif previous=="Approved" and values.get("status") in {"Draft","Ready for Review","Withdrawn"}:
+  item.approved_by=None;item.approved_at=None
  normalize_workflow(item)
  if "status" in values:
   if item.status in CLOSED_STATUSES:item.closed_by=user_id;item.closed_at=datetime.now(timezone.utc)
@@ -74,15 +76,9 @@ def approve_pre_bid_query(db:Session,item:BidPreBidQuery,user_id:int,request_met
  db.add(AuditEvent(user_id=user_id,bid_project_id=item.bid_project_id,event_type="pre_bid_query.approved",entity_type="BidPreBidQuery",entity_id=str(item.id),request_metadata=request_metadata,details={"pre_bid_query_id":item.id}))
  db.commit();return item
 
-def approve_pre_bid_query(db:Session,item:BidPreBidQuery,user_id:int,request_metadata:dict):
- item.approved_by=user_id;item.approved_at=datetime.now(timezone.utc)
- if item.status=="Draft":item.status="Ready for Review"
- db.add(AuditEvent(user_id=user_id,bid_project_id=item.bid_project_id,event_type="pre_bid_query.approved",entity_type="BidPreBidQuery",entity_id=str(item.id),request_metadata=request_metadata,details={"pre_bid_query_id":item.id}))
- db.commit();return item
-
 def revoke_pre_bid_query_approval(db:Session,item:BidPreBidQuery,user_id:int,request_metadata:dict):
- item.approved_by=None;item.approved_at=None
- if item.status=="Ready for Review":item.status="Draft"
+ if item.status!="Approved" or item.approved_at is None:raise HTTPException(422,"Only approved queries can have approval revoked")
+ item.status="Ready for Review";item.approved_by=None;item.approved_at=None
  db.add(AuditEvent(user_id=user_id,bid_project_id=item.bid_project_id,event_type="pre_bid_query.approval_revoked",entity_type="BidPreBidQuery",entity_id=str(item.id),request_metadata=request_metadata,details={"pre_bid_query_id":item.id}))
  db.commit();return item
 
