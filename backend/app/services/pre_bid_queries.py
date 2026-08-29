@@ -71,6 +71,18 @@ def approve_pre_bid_query(db:Session,item:BidPreBidQuery,user_id:int,request_met
  db.add(AuditEvent(user_id=user_id,bid_project_id=item.bid_project_id,event_type="pre_bid_query.approved",entity_type="BidPreBidQuery",entity_id=str(item.id),request_metadata=request_metadata,details={"pre_bid_query_id":item.id}))
  db.commit();return item
 
+def approve_pre_bid_query(db:Session,item:BidPreBidQuery,user_id:int,request_metadata:dict):
+ item.approved_by=user_id;item.approved_at=datetime.now(timezone.utc)
+ if item.status=="Draft":item.status="Ready for Review"
+ db.add(AuditEvent(user_id=user_id,bid_project_id=item.bid_project_id,event_type="pre_bid_query.approved",entity_type="BidPreBidQuery",entity_id=str(item.id),request_metadata=request_metadata,details={"pre_bid_query_id":item.id}))
+ db.commit();return item
+
+def revoke_pre_bid_query_approval(db:Session,item:BidPreBidQuery,user_id:int,request_metadata:dict):
+ item.approved_by=None;item.approved_at=None
+ if item.status=="Ready for Review":item.status="Draft"
+ db.add(AuditEvent(user_id=user_id,bid_project_id=item.bid_project_id,event_type="pre_bid_query.approval_revoked",entity_type="BidPreBidQuery",entity_id=str(item.id),request_metadata=request_metadata,details={"pre_bid_query_id":item.id}))
+ db.commit();return item
+
 def pre_bid_query_summary(db:Session,project_id:int):
  base=BidPreBidQuery.bid_project_id==project_id;today=date.today()
  def count(condition):return db.scalar(select(func.count()).select_from(BidPreBidQuery).where(base,condition)) or 0
