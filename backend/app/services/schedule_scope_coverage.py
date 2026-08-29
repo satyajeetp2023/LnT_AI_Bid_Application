@@ -617,8 +617,7 @@ def _schedule_precision_recommendations(groups:list[dict],tasks:list[dict]):
     }
 
 
-def evaluate_scope_coverage(db:Session,bid_id:int,xer_content:bytes,user_id:int,request_metadata:dict|None=None):
-    tables=parse_xer(xer_content)
+def evaluate_scope_coverage_from_tables(db:Session,bid_id:int,tables:dict[str,list[dict]],user_id:int,request_metadata:dict|None=None):
     tasks=tables.get("TASK",[])
     search_index=_activity_search_index(tables)
     candidate_matches={}
@@ -773,3 +772,7 @@ def disposition_scope_item(
     ))
     db.commit();db.refresh(item)
     return _scope_item_dict(item)
+
+
+def evaluate_scope_coverage(db:Session,bid_id:int,xer_content:bytes,user_id:int,request_metadata:dict|None=None):
+    return evaluate_scope_coverage_from_tables(db,bid_id,parse_xer(xer_content),user_id,request_metadata)
