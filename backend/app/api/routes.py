@@ -151,8 +151,8 @@ def assign_work_item_person(bid_id:int,payload:dict,request:Request,db:Session=D
  return {"entity_type":entity_type,"entity_id":entity_id,"responsible_person":person_name}
 
 @router.get("/bids/{bid_id}/department-work-queue")
-def get_department_work_queue(bid_id:int,responsible_function:str|None=None,db:Session=Depends(get_db),user:User=Depends(user_dep)):
- require_project_access(db,user,bid_id,Permission.REQUIREMENT_VIEW);get_bid(db,bid_id);return department_work_queue(db,bid_id,responsible_function)
+def get_department_work_queue(bid_id:int,responsible_function:str|None=None,mine:bool=False,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.REQUIREMENT_VIEW);get_bid(db,bid_id);return department_work_queue(db,bid_id,responsible_function,user.full_name if mine else None)
 
 @router.post("/bids/{bid_id}/auto-assign-owners")
 def auto_assign_owners(bid_id:int,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
