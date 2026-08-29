@@ -80,7 +80,7 @@ def _task_label(task):
     }
 
 
-def analyze_xer(content:bytes,long_duration_hours:float=160.0)->dict:
+def analyze_xer(content:bytes,long_duration_hours:float=160.0,near_critical_hours:float=40.0)->dict:
     tables=parse_xer(content)
     projects=tables.get("PROJECT",[])
     tasks=tables.get("TASK",[])
@@ -120,6 +120,8 @@ def analyze_xer(content:bytes,long_duration_hours:float=160.0)->dict:
 
     negative_float=[]
     zero_or_negative_float=[]
+    critical_float=[]
+    near_critical_float=[]
     long_duration=[]
     constrained=[]
     status_date_issues=[]
@@ -130,6 +132,10 @@ def analyze_xer(content:bytes,long_duration_hours:float=160.0)->dict:
             negative_float.append({**_task_label(task),"total_float_hours":total_float})
         if total_float<=0:
             zero_or_negative_float.append({**_task_label(task),"total_float_hours":total_float})
+            if task.get("status_code") not in complete_statuses:
+                critical_float.append({**_task_label(task),"total_float_hours":total_float})
+        elif total_float<=near_critical_hours and task.get("status_code") not in complete_statuses:
+            near_critical_float.append({**_task_label(task),"total_float_hours":total_float})
 
         duration=max(_float(task.get("target_drtn_hr_cnt")),_float(task.get("remain_drtn_hr_cnt")))
         if duration>long_duration_hours and task.get("task_type") not in milestones:
@@ -161,9 +167,12 @@ def analyze_xer(content:bytes,long_duration_hours:float=160.0)->dict:
     for task in tasks:
         if task.get("task_type") not in milestones:continue
         finish=task.get("act_end_date") or task.get("early_end_date") or task.get("target_end_date") or task.get("late_end_date")
+        tf=_float(task.get("total_float_hr_cnt"))
         milestone_rows.append({
             **_task_label(task),
             "finish_date":_iso(finish),
+            "total_float_hours":tf,
+            "criticality":"Critical" if tf<=0 else "Near Critical" if tf<=near_critical_hours else "Normal",
         })
 
     project=projects[0] if projects else {}
@@ -181,6 +190,9 @@ def analyze_xer(content:bytes,long_duration_hours:float=160.0)->dict:
         "dangling_relationships":len(dangling),
         "status_date_issues":len(status_date_issues),
         "missing_wbs":len(missing_wbs),
+        "critical_float":len(critical_float),
+        "near_critical_float":len(near_critical_float),
+        "milestones_at_risk":sum(1 for x in milestone_rows if x["criticality"] in {"Critical","Near Critical"}),
     }
     denominator=max(1,len(tasks))
     weighted=(
@@ -213,6 +225,15 @@ def analyze_xer(content:bytes,long_duration_hours:float=160.0)->dict:
             "resources":len(resources),
             "resource_assignments":len(assignments),
         },
+        "criticality":{
+            "method":"Total Float screening",
+            "critical_threshold_hours":0.0,
+            "near_critical_threshold_hours":near_critical_hours,
+            "critical_activities":critical_float,
+            "near_critical_activities":near_critical_float,
+            "milestones_at_risk":[x for x in milestone_rows if x["criticality"] in {"Critical","Near Critical"}],
+            "note":"This is a float-based screening view. It does not independently recalculate Primavera's CPM path.",
+        },
         "health":{
             "score":health_score,
             "grade":"Good" if health_score>=85 else "Needs Attention" if health_score>=65 else "Poor",
@@ -231,6 +252,8 @@ def analyze_xer(content:bytes,long_duration_hours:float=160.0)->dict:
             "open_finish":no_successor,
             "negative_float":negative_float,
             "zero_or_negative_float":zero_or_negative_float,
+            "critical_float":critical_float,
+            "near_critical_float":near_critical_float,
             "constraints":constrained,
             "long_duration":long_duration,
             "lagged_relationships":lagged,
@@ -239,5 +262,5 @@ def analyze_xer(content:bytes,long_duration_hours:float=160.0)->dict:
             "missing_wbs":missing_wbs,
         },
         "source_tables":sorted(tables),
-        "parser_version":"phase6-xer-parser-v2",
+        "parser_version":"phase6-xer-parser-v3",
     }
