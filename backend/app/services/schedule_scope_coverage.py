@@ -663,6 +663,15 @@ def evaluate_scope_coverage(db:Session,bid_id:int,xer_content:bytes,user_id:int,
         x["activity_name"].lower(),
     ))
     blocking_groups=[x for x in groups if x["group_blocking"]]
+    mandatory_groups=[x for x in groups if x.get("mandatory")]
+    covered_mandatory=[x for x in mandatory_groups if x.get("group_coverage_status")=="Covered"]
+    contract_groups=[x for x in groups if x.get("source_type")=="Contract / Technical Requirement"]
+    boq_groups=[x for x in groups if x.get("source_type")=="BOQ"]
+    knowledge_groups=[x for x in groups if x.get("source_type")=="Project-Type Knowledge"]
+    subactivity_groups=[x for x in groups if x.get("activity_level") in {"Sub-Activity","BOQ Sub-Activity"}]
+    def coverage_pct(group_rows):
+        if not group_rows:return None
+        return round(sum(1 for x in group_rows if x.get("group_coverage_status")=="Covered")*100/len(group_rows),1)
     precision_advisor=_schedule_precision_recommendations(groups,tasks)
     matched_codes={str(x.get("matched_task_code") or "") for x in groups if x.get("matched_task_code") and x.get("group_coverage_status") in {"Covered","Possible Match"}}
     search_by_code={str(x["task"].get("task_code") or ""):x for x in search_index if x["task"].get("task_code")}
@@ -724,11 +733,19 @@ def evaluate_scope_coverage(db:Session,bid_id:int,xer_content:bytes,user_id:int,
             "contract_items":sum(1 for x in rows if x["source_type"]=="Contract / Technical Requirement"),
             "boq_items":sum(1 for x in rows if x["source_type"]=="BOQ"),
             "project_type_items":sum(1 for x in rows if x["source_type"]=="Project-Type Knowledge"),
+            "mandatory_logical":len(mandatory_groups),
+            "mandatory_covered":len(covered_mandatory),
+            "mandatory_coverage_percent":coverage_pct(mandatory_groups),
+            "contract_coverage_percent":coverage_pct(contract_groups),
+            "boq_coverage_percent":coverage_pct(boq_groups),
+            "project_knowledge_coverage_percent":coverage_pct(knowledge_groups),
+            "subactivity_coverage_percent":coverage_pct(subactivity_groups),
+            "unmapped_schedule_activities":len(unmapped),
             "explained_missing":sum(1 for x in rows if x["coverage_status"]=="Missing" and not x["blocking"]),
         },
         "ready":len(blocking_groups)==0 and len(groups)>0,
         "grade":"Complete" if len(blocking_groups)==0 and groups else "Action Required" if groups else "No Scope Catalog",
-        "methodology":"phase6-schedule-scope-coverage-v10",
+        "methodology":"phase6-schedule-scope-coverage-v11",
         "note":"Expected activities are independently sourced from bid scope. Missing or ambiguous coverage must be explained; 'To Be Added' remains a blocker until a revised schedule contains the activity.",
     }
 
