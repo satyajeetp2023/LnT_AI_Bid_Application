@@ -1,5 +1,5 @@
 from datetime import date,datetime
-from sqlalchemy import Date,DateTime,ForeignKey,String,Text
+from sqlalchemy import Date,DateTime,ForeignKey,String,Text,UniqueConstraint
 from sqlalchemy.orm import Mapped,mapped_column,relationship
 from app.database.session import Base
 from .models import BidDocument,BidMissingInput,BidRequirement,now
@@ -45,3 +45,17 @@ class BidPreBidQuery(Base):
  def source_original_filename(self):return self.source_document.original_filename if self.source_document else None
  @property
  def source_document_title(self):return self.source_document.document_title if self.source_document else None
+
+
+class BidPreBidQueryDecision(Base):
+ __tablename__="bid_pre_bid_query_decisions"
+ __table_args__=(UniqueConstraint("bid_project_id","source_kind","source_id",name="uq_pre_bid_query_decision_source"),)
+ id:Mapped[int]=mapped_column(primary_key=True)
+ bid_project_id:Mapped[int]=mapped_column(ForeignKey("bid_projects.id",ondelete="CASCADE"),index=True)
+ source_kind:Mapped[str]=mapped_column(String(80),index=True)
+ source_id:Mapped[int]=mapped_column(index=True)
+ decision:Mapped[str]=mapped_column(String(40),default="Do Not Raise",index=True)
+ reason:Mapped[str|None]=mapped_column(Text)
+ decided_by:Mapped[int]=mapped_column(ForeignKey("users.id"))
+ decided_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=now)
+ updated_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=now,onupdate=now)
