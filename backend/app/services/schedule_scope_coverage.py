@@ -299,8 +299,26 @@ def _consolidate_rows(rows:list[dict]):
             group_blocking=canonical.get("disposition_status") not in cleared_dispositions
         else:
             group_blocking=True
+        best_match=max(cluster,key=lambda x:(
+            1 if x.get("coverage_status")=="Covered" else 0,
+            1 if x.get("coverage_status")=="Possible Match" else 0,
+            float(x.get("match_confidence") or 0),
+        ))
         group={
             **canonical,
+            "matched_task_code":best_match.get("matched_task_code"),
+            "matched_task_name":best_match.get("matched_task_name"),
+            "match_confidence":best_match.get("match_confidence"),
+            "candidate_matches":best_match.get("candidate_matches") or canonical.get("candidate_matches") or [],
+            "why_flagged":(
+                "A consolidated source record has a sufficiently strong schedule match."
+                if group_coverage=="Covered" else
+                "The consolidated evidence has only a possible schedule match and still needs planner confirmation."
+                if group_coverage=="Possible Match" else
+                "No supporting source record has a sufficiently strong schedule match."
+                if group_coverage=="Missing" else
+                "Coverage has not yet been evaluated."
+            ),
             "group_id":f"scope-{canonical['id']}",
             "canonical_item_id":canonical["id"],
             "evidence_count":len(cluster),
