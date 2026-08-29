@@ -5,7 +5,7 @@ import {use,useCallback,useEffect,useState} from "react";
 import {BidWorkspaceHeader} from "@/components/BidWorkspaceHeader";
 import {EmptyState,ErrorState,LoadingState,PageHeader,PriorityBadge,StatusBadge,SummaryCard} from "@/components/design-system";
 import {request} from "@/services/api";
-import type {Bid,DepartmentWorkQueue} from "@/types";
+import type {Bid,DepartmentWorkQueue,ProjectMember} from "@/types";
 
 const emptyQueue:DepartmentWorkQueue={items:[],summary:{total:0,critical:0,high:0,overdue:0,unassigned:0,without_person:0},by_function:[],by_type:[],by_person:[],filter:{responsible_function:null},version:""};
 
@@ -14,6 +14,7 @@ export default function WorkQueuePage({params}:{params:Promise<{id:string}>}){
  const [bid,setBid]=useState<Bid|null>(null);
  const [queue,setQueue]=useState<DepartmentWorkQueue>(emptyQueue);
  const [owner,setOwner]=useState("");
+ const [members,setMembers]=useState<ProjectMember[]>([]);
  const [loading,setLoading]=useState(true);
  const [error,setError]=useState("");
 
@@ -22,12 +23,18 @@ export default function WorkQueuePage({params}:{params:Promise<{id:string}>}){
   const suffix=owner?`?responsible_function=${encodeURIComponent(owner)}`:"";
   Promise.all([
    request<Bid>(`/bids/${id}`),
-   request<DepartmentWorkQueue>(`/bids/${id}/department-work-queue${suffix}`)
-  ]).then(([b,q])=>{setBid(b);setQueue(q)})
+   request<DepartmentWorkQueue>(`/bids/${id}/department-work-queue${suffix}`),
+   request<ProjectMember[]>(`/bids/${id}/members`)
+  ]).then(([b,q,m])=>{setBid(b);setQueue(q);setMembers(m)})
     .catch(()=>setError("Unable to load the department work queue. Please try again."))
     .finally(()=>setLoading(false));
  },[id,owner]);
  useEffect(load,[load]);
+
+ const assignPerson=async(entity_type:string,entity_id:number,user_id:string)=>{
+  await request(`/bids/${id}/work-items/assign-person`,{method:"POST",body:JSON.stringify({entity_type,entity_id,user_id:user_id?Number(user_id):null})});
+  load();
+ };
 
  const functions=Array.from(new Set(queue.by_function.map(x=>x.name))).sort();
 
@@ -59,14 +66,14 @@ export default function WorkQueuePage({params}:{params:Promise<{id:string}>}){
     {queue.items.map((x,index)=><article key={`${x.entity_type}-${x.entity_id}`} className="rounded border border-slate-200 bg-white p-3 shadow-sm">
      <div className="flex items-start gap-3"><div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-700">{index+1}</div><div className="min-w-0 flex-1"><div className="text-[10px] font-semibold uppercase tracking-wide text-blue-700">{x.entity_type}</div><h3 className="mt-0.5 text-sm font-semibold text-slate-900">{x.title}</h3></div><PriorityBadge value={x.priority}/></div>
      <div className="mt-3 flex flex-wrap gap-2"><StatusBadge tone={x.is_overdue?"red":x.status==="Resolved"||x.status==="Closed"?"green":"grey"}>{x.is_overdue?`Overdue · ${x.status}`:x.status}</StatusBadge></div>
-     <div className="mt-3 grid grid-cols-2 gap-3 text-xs"><div><span className="text-slate-500">Function</span><div className="font-medium text-slate-800">{x.responsible_function||"Unassigned"}</div></div><div><span className="text-slate-500">Responsible Person</span><div className={"font-medium "+(x.responsible_person?"text-slate-800":"text-amber-700")}>{x.responsible_person||"Needs assignment"}</div></div><div><span className="text-slate-500">Due</span><div className="font-medium text-slate-800">{x.due_date||"—"}</div></div></div>
+     <div className="mt-3 grid grid-cols-2 gap-3 text-xs"><div><span className="text-slate-500">Function</span><div className="font-medium text-slate-800">{x.responsible_function||"Unassigned"}</div></div><div><span className="text-slate-500">Responsible Person</span><select aria-label={`Assign ${x.title}`} className="mt-1 w-full rounded border border-slate-300 bg-white p-2 text-xs" value={members.find(m=>m.name===x.responsible_person)?.user_id||""} onChange={e=>assignPerson(x.entity_type,x.entity_id,e.target.value)}><option value="">Needs assignment</option>{members.map(m=><option key={m.user_id} value={m.user_id}>{m.name} · {m.project_role}</option>)}</select></div><div><span className="text-slate-500">Due</span><div className="font-medium text-slate-800">{x.due_date||"—"}</div></div></div>
      <div className="mt-3 rounded bg-slate-50 p-2 text-xs leading-5 text-slate-600"><span className="font-semibold text-slate-700">Next:</span> {x.action}. {x.reason}</div>
      <div className="mt-3 border-t pt-3"><Link href={x.route} className="inline-flex rounded bg-[#e2b635] px-3 py-2 text-xs font-semibold text-[#243241]">Open Register</Link></div>
     </article>)}
    </div>
 
    <section className="hidden overflow-hidden border border-slate-200 bg-white md:block">
-    <div className="overflow-x-auto"><table className="w-full min-w-[1100px] text-left text-sm"><thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500"><tr>{["#","Work Item","Type","Priority","Status","Function","Responsible Person","Due","Next Action","Source",""].map(x=><th key={x} className="px-3 py-3">{x}</th>)}</tr></thead><tbody>{queue.items.map((x,index)=><tr key={`${x.entity_type}-${x.entity_id}`} className="border-t align-top"><td className="px-3 py-3 text-xs font-bold text-slate-500">{index+1}</td><td className="max-w-xs px-3 py-3"><div className="font-semibold text-slate-900">{x.title}</div><div className="mt-1 line-clamp-2 text-xs text-slate-500">{x.reason}</div></td><td className="px-3 py-3 text-xs">{x.entity_type}</td><td className="px-3 py-3"><PriorityBadge value={x.priority}/></td><td className="px-3 py-3"><StatusBadge tone={x.is_overdue?"red":"grey"}>{x.is_overdue?`Overdue · ${x.status}`:x.status}</StatusBadge></td><td className="px-3 py-3 text-xs">{x.responsible_function||"Unassigned"}</td><td className={"px-3 py-3 text-xs font-medium "+(x.responsible_person?"text-slate-700":"text-amber-700")}>{x.responsible_person||"Needs assignment"}</td><td className="whitespace-nowrap px-3 py-3 text-xs">{x.due_date||"—"}</td><td className="max-w-xs px-3 py-3 text-xs text-slate-600">{x.action}</td><td className="max-w-40 px-3 py-3 text-xs text-slate-500"><div className="truncate">{x.source_document||"—"}</div>{(x.source_page||x.source_clause)&&<div>{x.source_page&&`p.${x.source_page}`}{x.source_page&&x.source_clause&&" · "}{x.source_clause&&`Cl.${x.source_clause}`}</div>}</td><td className="whitespace-nowrap px-3 py-3"><Link href={x.route} className="font-semibold text-blue-700">Open</Link></td></tr>)}</tbody></table></div>
+    <div className="overflow-x-auto"><table className="w-full min-w-[1100px] text-left text-sm"><thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500"><tr>{["#","Work Item","Type","Priority","Status","Function","Responsible Person","Due","Next Action","Source",""].map(x=><th key={x} className="px-3 py-3">{x}</th>)}</tr></thead><tbody>{queue.items.map((x,index)=><tr key={`${x.entity_type}-${x.entity_id}`} className="border-t align-top"><td className="px-3 py-3 text-xs font-bold text-slate-500">{index+1}</td><td className="max-w-xs px-3 py-3"><div className="font-semibold text-slate-900">{x.title}</div><div className="mt-1 line-clamp-2 text-xs text-slate-500">{x.reason}</div></td><td className="px-3 py-3 text-xs">{x.entity_type}</td><td className="px-3 py-3"><PriorityBadge value={x.priority}/></td><td className="px-3 py-3"><StatusBadge tone={x.is_overdue?"red":"grey"}>{x.is_overdue?`Overdue · ${x.status}`:x.status}</StatusBadge></td><td className="px-3 py-3 text-xs">{x.responsible_function||"Unassigned"}</td><td className="px-3 py-3"><select aria-label={`Assign ${x.title}`} className={"max-w-[190px] rounded border bg-white p-1.5 text-xs "+(x.responsible_person?"border-slate-300 text-slate-700":"border-amber-300 text-amber-700")} value={members.find(m=>m.name===x.responsible_person)?.user_id||""} onChange={e=>assignPerson(x.entity_type,x.entity_id,e.target.value)}><option value="">Needs assignment</option>{members.map(m=><option key={m.user_id} value={m.user_id}>{m.name} · {m.project_role}</option>)}</select></td><td className="whitespace-nowrap px-3 py-3 text-xs">{x.due_date||"—"}</td><td className="max-w-xs px-3 py-3 text-xs text-slate-600">{x.action}</td><td className="max-w-40 px-3 py-3 text-xs text-slate-500"><div className="truncate">{x.source_document||"—"}</div>{(x.source_page||x.source_clause)&&<div>{x.source_page&&`p.${x.source_page}`}{x.source_page&&x.source_clause&&" · "}{x.source_clause&&`Cl.${x.source_clause}`}</div>}</td><td className="whitespace-nowrap px-3 py-3"><Link href={x.route} className="font-semibold text-blue-700">Open</Link></td></tr>)}</tbody></table></div>
    </section>
   </>}
  </div>;
