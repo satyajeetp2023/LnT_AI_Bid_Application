@@ -16,6 +16,7 @@ from app.services.requirement_extraction import extract_requirements_from_docume
 from app.services.responsibility_assignment import suggest_responsible_function
 from app.services.department_workflow import department_work_queue
 from app.services.submission_format_intelligence import detect_submission_formats
+from app.services.template_structure_parser import parse_xlsx_template
 from app.services.documents import DOCUMENT_CATEGORIES,archive,classify,mark_revision,update_document_metadata,update_notes,upload_document
 from app.services.document_classification import auto_classify_document
 from app.storage.base import LocalSecureStorage
@@ -97,6 +98,17 @@ def extract_document_requirements(document_id:int,request:Request,db:Session=Dep
  if doc.duplicate_of_document_id or not doc.storage_path:raise HTTPException(422,"Document content is not available for requirement extraction")
  try:return asdict(extract_requirements_from_document(db,doc,LocalSecureStorage(get_settings().storage_root),user.id,metadata(request)))
  except ValueError as exc:raise HTTPException(422,str(exc)) from None
+@router.get("/documents/{document_id}/template-structure")
+def document_template_structure(document_id:int,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ doc=get_doc(db,document_id);require_project_access(db,user,doc.bid_project_id,Permission.VIEW_DOCUMENT)
+ if doc.duplicate_of_document_id or not doc.storage_path:raise HTTPException(422,"Document content is not available for template inspection")
+ if doc.file_extension.lower()!="xlsx":raise HTTPException(422,"Template structure inspection currently supports .xlsx files only")
+ storage=LocalSecureStorage(get_settings().storage_root)
+ result=parse_xlsx_template(storage.read(doc.storage_path))
+ db.add(AuditEvent(user_id=user.id,bid_project_id=doc.bid_project_id,event_type="template.structure_inspected",entity_type="BidDocument",entity_id=str(doc.id),request_metadata=metadata(request),details={"parser_version":result.get("parser_version"),"tables_detected":result.get("summary",{}).get("tables_detected",0)}))
+ db.commit()
+ return result
+
 @router.patch("/documents/{document_id}/notes",response_model=DocumentRead)
 def notes(document_id:int,payload:NotesUpdate,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
  doc=get_doc(db,document_id); require_project_access(db,user,doc.bid_project_id,Permission.CLASSIFY_DOCUMENT); return update_notes(db,doc,payload.notes,user.id,metadata(request))
