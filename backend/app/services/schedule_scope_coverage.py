@@ -239,6 +239,71 @@ def sync_scope_from_requirements(db:Session,bid_id:int,user_id:int,request_metad
     return {"created":created,"updated":updated,"requirements_considered":len(requirements),"project_type":project_sync}
 
 
+def _scope_similarity(a:dict,b:dict)->float:
+    ta=_terms(a.get("activity_name") or "")
+    tb=_terms(b.get("activity_name") or "")
+    if not ta or not tb:return 0.0
+    jaccard=len(ta&tb)/max(1,len(ta|tb))
+    seq=SequenceMatcher(None,(a.get("activity_name") or "").lower(),(b.get("activity_name") or "").lower()).ratio()
+    return max(jaccard,seq)
+
+
+def _consolidate_rows(rows:list[dict]):
+    authority={"BOQ":0,"Contract / Technical Requirement":1,"Manual":2,"Project-Type Knowledge":3}
+    ordered=sorted(rows,key=lambda x:(
+        authority.get(x.get("source_type"),2),
+        0 if x.get("mandatory") else 1,
+        x.get("activity_level") or "",
+        x.get("activity_name") or "",
+    ))
+    groups=[]
+    assigned=set()
+    for row in ordered:
+        if row["id"] in assigned:continue
+        cluster=[row];assigned.add(row["id"])
+        for other in ordered:
+            if other["id"] in assigned:continue
+            same_level=(
+                row.get("activity_level")==other.get("activity_level")
+                or {row.get("activity_level"),other.get("activity_level")}<= {"Activity","BOQ Scope"}
+                or {row.get("activity_level"),other.get("activity_level")}<= {"Sub-Activity","BOQ Sub-Activity"}
+            )
+            if same_level and _scope_similarity(row,other)>=.78:
+                cluster.append(other);assigned.add(other["id"])
+        canonical=min(cluster,key=lambda x:(
+            authority.get(x.get("source_type"),2),
+            0 if x.get("mandatory") else 1,
+            x["id"],
+        ))
+        evidence=[{
+            "item_id":x["id"],
+            "source_type":x.get("source_type"),
+            "source_reference":x.get("source_reference"),
+            "why_expected":x.get("why_expected"),
+            "mandatory":x.get("mandatory"),
+        } for x in cluster]
+        group_blocking=any(x.get("blocking") for x in cluster)
+        coverage_values={x.get("coverage_status") for x in cluster}
+        group_coverage=(
+            "Covered" if "Covered" in coverage_values else
+            "Possible Match" if "Possible Match" in coverage_values else
+            "Missing" if "Missing" in coverage_values else
+            "Not Checked"
+        )
+        group={
+            **canonical,
+            "group_id":f"scope-{canonical['id']}",
+            "canonical_item_id":canonical["id"],
+            "evidence_count":len(cluster),
+            "evidence":evidence,
+            "group_blocking":group_blocking,
+            "group_coverage_status":group_coverage,
+            "member_item_ids":[x["id"] for x in cluster],
+        }
+        groups.append(group)
+    return groups
+
+
 def schedule_scope_catalog(db:Session,bid_id:int):
     items=db.scalars(select(ScheduleScopeItem).where(
         ScheduleScopeItem.bid_project_id==bid_id
@@ -257,6 +322,7 @@ def schedule_scope_catalog(db:Session,bid_id:int):
             "Knowledge Suggestion"
         )
         rows.append(row)
+    groups=_consolidate_rows(rows)
     authority_order={"Contractual / BOQ":0,"Bid Scope Evidence":1,"Knowledge Suggestion":2}
     level_order={"Activity Family":0,"Activity":1,"BOQ Scope":1,"Sub-Activity":2,"BOQ Sub-Activity":2}
     rows.sort(key=lambda x:(
@@ -267,8 +333,11 @@ def schedule_scope_catalog(db:Session,bid_id:int):
     ))
     return {
         "items":rows,
+        "groups":groups,
         "summary":{
             "total":len(rows),
+            "logical_expected":len(groups),
+            "consolidated_duplicates":len(rows)-len(groups),
             "mandatory":sum(1 for x in rows if x["mandatory"]),
             "activity_families":sum(1 for x in rows if x["activity_level"]=="Activity Family"),
             "activities":sum(1 for x in rows if x["activity_level"] in {"Activity","BOQ Scope"}),
@@ -278,7 +347,7 @@ def schedule_scope_catalog(db:Session,bid_id:int):
             "project_type_items":sum(1 for x in rows if x["source_type"]=="Project-Type Knowledge"),
             "manual_items":sum(1 for x in rows if x["source_type"]=="Manual"),
         },
-        "version":"phase6-expected-activity-universe-v1",
+        "version":"phase6-expected-activity-universe-v2",
         "note":"This catalog is built independently of the uploaded schedule. Contract/BOQ evidence is stronger than project-type knowledge suggestions.",
     }
 
@@ -431,6 +500,7 @@ def evaluate_scope_coverage(db:Session,bid_id:int,xer_content:bytes,user_id:int,
     ))
     db.commit()
     rows=[{**_scope_item_dict(x),"candidate_matches":candidate_matches.get(x.id,[])} for x in items]
+    groups=_consolidate_rows(rows)
     authority_order={"BOQ":0,"Contract / Technical Requirement":1,"Manual":2,"Project-Type Knowledge":3}
     coverage_order={"Missing":0,"Possible Match":1,"Not Checked":2,"Covered":3}
     rows.sort(key=lambda x:(
@@ -440,24 +510,27 @@ def evaluate_scope_coverage(db:Session,bid_id:int,xer_content:bytes,user_id:int,
         x["activity_level"],
         x["activity_name"].lower(),
     ))
-    blocking=[x for x in rows if x["blocking"]]
+    blocking_groups=[x for x in groups if x["group_blocking"]]
     return {
         "items":rows,
+        "groups":groups,
         "summary":{
             "expected":len(rows),
             "covered":sum(1 for x in rows if x["coverage_status"]=="Covered"),
             "possible_match":sum(1 for x in rows if x["coverage_status"]=="Possible Match"),
             "missing":sum(1 for x in rows if x["coverage_status"]=="Missing"),
-            "blocking":len(blocking),
+            "blocking":len(blocking_groups),
+            "logical_expected":len(groups),
+            "consolidated_duplicates":len(rows)-len(groups),
             "knowledge_warnings":sum(1 for x in rows if x["source_type"]=="Project-Type Knowledge" and x["coverage_status"]!="Covered"),
             "contract_items":sum(1 for x in rows if x["source_type"]=="Contract / Technical Requirement"),
             "boq_items":sum(1 for x in rows if x["source_type"]=="BOQ"),
             "project_type_items":sum(1 for x in rows if x["source_type"]=="Project-Type Knowledge"),
             "explained_missing":sum(1 for x in rows if x["coverage_status"]=="Missing" and not x["blocking"]),
         },
-        "ready":len(blocking)==0 and len(rows)>0,
-        "grade":"Complete" if len(blocking)==0 and rows else "Action Required" if rows else "No Scope Catalog",
-        "methodology":"phase6-schedule-scope-coverage-v5",
+        "ready":len(blocking_groups)==0 and len(groups)>0,
+        "grade":"Complete" if len(blocking_groups)==0 and groups else "Action Required" if groups else "No Scope Catalog",
+        "methodology":"phase6-schedule-scope-coverage-v6",
         "note":"Expected activities are independently sourced from bid scope. Missing or ambiguous coverage must be explained; 'To Be Added' remains a blocker until a revised schedule contains the activity.",
     }
 
