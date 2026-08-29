@@ -22,9 +22,21 @@ def normalize_workflow(item:BidPreBidQuery):
   if not (item.employer_response or "").strip():raise HTTPException(422,"Employer response is required when status is Responded")
   if item.response_date is None:item.response_date=date.today()
 
+def _next_query_number(db:Session,project_id:int)->str:
+ numbers=db.scalars(select(BidPreBidQuery.query_number).where(BidPreBidQuery.bid_project_id==project_id,BidPreBidQuery.query_number.is_not(None))).all()
+ highest=0
+ for value in numbers:
+  if not value:continue
+  digits="".join(ch for ch in value.split("-")[-1] if ch.isdigit())
+  if digits:
+   try:highest=max(highest,int(digits))
+   except ValueError:pass
+ return f"PBQ-{highest+1:03d}"
+
 def create_pre_bid_query(db:Session,project_id:int,payload,user_id:int,request_metadata:dict):
  validate_links(db,project_id,payload.requirement_id,payload.missing_input_id,payload.source_document_id)
- item=BidPreBidQuery(**payload.model_dump(),bid_project_id=project_id,created_by=user_id);normalize_workflow(item)
+ values=payload.model_dump();values["query_number"]=(values.get("query_number") or "").strip() or _next_query_number(db,project_id)
+ item=BidPreBidQuery(**values,bid_project_id=project_id,created_by=user_id);normalize_workflow(item)
  if item.status in CLOSED_STATUSES:item.closed_by=user_id;item.closed_at=datetime.now(timezone.utc)
  db.add(item);db.flush();db.add(AuditEvent(user_id=user_id,bid_project_id=project_id,event_type="pre_bid_query.created",entity_type="BidPreBidQuery",entity_id=str(item.id),request_metadata=request_metadata,details={"pre_bid_query_id":item.id}));db.commit();return item
 
