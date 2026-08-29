@@ -78,11 +78,15 @@ def build_schedule_optimization_from_tables(
     tables:dict[str,list[dict]],
     near_critical_hours:float=40.0,
     long_duration_hours:float=160.0,
+    capabilities:dict|None=None,
 ):
     tasks=tables.get("TASK",[])
     rels=tables.get("TASKPRED",[])
     assignments=tables.get("TASKRSRC",[])
     calendars=tables.get("CALENDAR",[])
+    capabilities=capabilities or {}
+    logic_available=bool(capabilities.get("logic",bool(rels)))
+    float_available=bool(capabilities.get("float",any(str(x.get("total_float_hr_cnt") or "").strip() for x in tasks)))
 
     preds=defaultdict(list);succs=defaultdict(list)
     for rel in rels:
@@ -145,7 +149,7 @@ def build_schedule_optimization_from_tables(
     for task in tasks:
         if task.get("status_code") in complete_statuses:continue
         task_id=task.get("task_id")
-        total_float=_float(task.get("total_float_hr_cnt"))
+        total_float=_float(task.get("total_float_hr_cnt")) if float_available else None
         duration=max(_float(task.get("target_drtn_hr_cnt")),_float(task.get("remain_drtn_hr_cnt")))
         task_type=task.get("task_type")
         issues=[]
@@ -154,24 +158,24 @@ def build_schedule_optimization_from_tables(
         adjustment_score=0
         adjustment_types=[]
 
-        if task_type not in milestone_types and not preds.get(task_id):
+        if logic_available and task_type not in milestone_types and not preds.get(task_id):
             issues.append("No predecessor / open start")
             opportunities.append("Review whether a predecessor or release condition should be added.")
             review_score+=22
-        if task_type not in milestone_types and not succs.get(task_id):
+        if logic_available and task_type not in milestone_types and not succs.get(task_id):
             issues.append("No successor / open finish")
             opportunities.append("Review whether downstream logic or a completion tie is missing.")
             review_score+=22
 
-        if total_float<0:
+        if float_available and total_float is not None and total_float<0:
             issues.append("Negative total float")
             opportunities.append("Do not compress automatically. Review logic, constraints, duration and contractual milestone assumptions first.")
             review_score+=28
-        elif total_float<=near_critical_hours:
+        elif float_available and total_float is not None and total_float<=near_critical_hours:
             issues.append("Near-critical float")
             opportunities.append("Treat as sensitive. Test sequencing, duration and resource assumptions before consuming available float.")
             review_score+=18
-        elif total_float>near_critical_hours:
+        elif float_available and total_float is not None and total_float>near_critical_hours:
             opportunities.append("Available float may allow resequencing or resource smoothing, subject to access, procurement and interface constraints.")
             adjustment_score+=20
             adjustment_types.extend(["Resequencing","Resource smoothing"])
@@ -218,9 +222,9 @@ def build_schedule_optimization_from_tables(
             adjustment_types.append("Logic simplification")
 
         hard_constraint=((cstr and cstr not in {"CS_None","None"}) or (cstr2 and cstr2 not in {"CS_None","None"}))
-        if total_float<=0:
+        if float_available and total_float is not None and total_float<=0:
             adjustment_score=max(0,adjustment_score-20)
-        elif total_float<=near_critical_hours:
+        elif float_available and total_float is not None and total_float<=near_critical_hours:
             adjustment_score=max(0,adjustment_score-10)
         if hard_constraint:
             adjustment_score=max(0,adjustment_score-8)
@@ -245,7 +249,7 @@ def build_schedule_optimization_from_tables(
             "guardrail":"Recommendation only. Recalculate in Primavera after any change and verify milestones, interfaces, resources, calendars and contractual requirements.",
         })
 
-    candidates.sort(key=lambda x:(-x["review_priority_score"],-x["adjustability_score"],x["total_float_hours"],x.get("task_code") or ""))
+    candidates.sort(key=lambda x:(-x["review_priority_score"],-x["adjustability_score"],x["total_float_hours"] if x["total_float_hours"] is not None else 10**12,x.get("task_code") or ""))
 
     table_inventory=_table_inventory(tables)
     return {
@@ -270,7 +274,7 @@ def build_schedule_optimization_from_tables(
             "total_fields":sum(x["field_count"] for x in table_inventory),
             "total_rows":sum(x["rows"] for x in table_inventory),
             "calendar_count":len(calendars),
-            "note":"All XER tables and fields are inventoried even when the current optimization rules do not yet interpret every field semantically.",
+            "note":"All normalized source tables and fields are inventoried. Rules only use parameters actually available from the uploaded schedule.",
         },
         "optimization":{
             "candidate_count":len(candidates),
