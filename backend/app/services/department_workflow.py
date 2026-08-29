@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.models import BidMissingInput,BidPreBidQuery,BidRequirement
 from app.services.missing_input_taxonomy import RESOLVED_STATUSES
 from app.services.responsibility_assignment import suggest_responsible_function
+from app.services.schedule_scope_coverage import schedule_scope_catalog
 
 
 PRIORITY_ORDER={"Critical":0,"High":1,"Medium":2,"Low":3}
@@ -87,6 +88,31 @@ def department_work_queue(db:Session,bid_id:int,responsible_function:str|None=No
             "reason":"Pre-Bid Query still requires bidder or Employer action.",
             "route":f"/bids/{bid_id}/pre-bid-queries","source_document":q.source_document_title or q.source_original_filename,
             "source_page":q.source_page,"source_clause":q.source_clause,
+        })
+
+    scope_catalog=schedule_scope_catalog(db,bid_id)
+    for scope in scope_catalog.get("groups",[]):
+        if not scope.get("group_blocking"):continue
+        owner=scope.get("responsible_function") or "Planning"
+        person=scope.get("responsible_person")
+        if responsible_function and owner!=responsible_function:continue
+        if responsible_person and person!=responsible_person:continue
+        items.append({
+            "entity_type":"Schedule Scope",
+            "entity_id":scope["canonical_item_id"],
+            "title":scope["activity_name"],
+            "priority":"High" if scope.get("mandatory") else "Medium",
+            "responsible_function":owner,
+            "responsible_person":person,
+            "status":scope.get("group_coverage_status") or "Not Checked",
+            "due_date":None,
+            "is_overdue":False,
+            "action":"Resolve schedule scope coverage",
+            "reason":scope.get("why_flagged") or "Expected scope is not clearly covered by the current schedule.",
+            "route":f"/bids/{bid_id}/schedules",
+            "source_document":scope.get("source_type"),
+            "source_page":None,
+            "source_clause":scope.get("source_reference"),
         })
 
     due_soon_limit=today+timedelta(days=3)
@@ -189,5 +215,5 @@ def department_work_queue(db:Session,bid_id:int,responsible_function:str|None=No
         "department_control":department_control,
         "department_progress":progress_rows,
         "filter":{"responsible_function":responsible_function,"responsible_person":responsible_person},
-        "version":"phase4-department-work-queue-v5",
+        "version":"phase4-department-work-queue-v6",
     }
