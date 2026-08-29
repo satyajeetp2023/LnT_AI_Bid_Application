@@ -36,3 +36,6 @@ def test_schedule_health_flags_open_ends_float_constraints_and_lag():
     assert result["health"]["issue_counts"]["lagged_relationships"]==1
     assert result["health"]["issue_counts"]["open_start"]>=1
     assert result["health"]["issue_counts"]["open_finish"]>=1
+    assert result["health"]["issue_counts"]["critical_float"]>=1
+    assert result["criticality"]["critical_threshold_hours"]==0
+    assert result["criticality"]["near_critical_threshold_hours"]==40
