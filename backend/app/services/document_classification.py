@@ -13,7 +13,7 @@ from app.services.intelligence import DocumentIntelligenceProvider
 from app.services.document_taxonomy import DOCUMENT_CATEGORIES
 from app.storage.base import StorageProvider
 
-CLASSIFIER_VERSION = "phase1-rule-v1"
+CLASSIFIER_VERSION = "phase1-rule-v2"
 logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
@@ -93,6 +93,8 @@ class RuleBasedDocumentIntelligenceProvider(DocumentIntelligenceProvider):
     version = CLASSIFIER_VERSION
 
     def classify(self, filename: str, extension: str, content: bytes) -> ClassificationResult:
+        if extension.lower()=="xer":
+            return ClassificationResult("Forms / Formats / Schedules","Primavera P6 XER",.99,"classified")
         text = extract_text(extension, content)
         return classify_content(filename, text)
 
