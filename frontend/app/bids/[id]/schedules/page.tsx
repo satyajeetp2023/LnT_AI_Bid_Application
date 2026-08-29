@@ -5,7 +5,7 @@ import {use,useCallback,useEffect,useState} from "react";
 import {BidWorkspaceHeader} from "@/components/BidWorkspaceHeader";
 import {EmptyState,ErrorState,LoadingState,PageHeader,StatusBadge,SummaryCard} from "@/components/design-system";
 import {request} from "@/services/api";
-import type {Bid,Document,P6ActivityProfile,P6ScheduleAnalysis,P6ScheduleComparison,Page,ScheduleScopeCoverage,ScheduleScopeItem} from "@/types";
+import type {Bid,Document,P6ActivityProfile,P6ScheduleAnalysis,P6ScheduleComparison,Page,ScheduleScopeCatalog,ScheduleScopeCoverage,ScheduleScopeItem} from "@/types";
 
 const ISSUE_LABELS:Record<string,string>={
  open_start:"Open Start / No Predecessor",
@@ -34,6 +34,7 @@ export default function SchedulesPage({params}:{params:Promise<{id:string}>}){
  const [activityProfile,setActivityProfile]=useState<P6ActivityProfile|null>(null);
  const [profileLoading,setProfileLoading]=useState(false);
  const [scopeCoverage,setScopeCoverage]=useState<ScheduleScopeCoverage|null>(null);
+ const [scopeCatalog,setScopeCatalog]=useState<ScheduleScopeCatalog|null>(null);
  const [scopeLoading,setScopeLoading]=useState(false);
  const [scopeReason,setScopeReason]=useState<Record<number,string>>({});
  const [scopeStatus,setScopeStatus]=useState<Record<number,string>>({});
@@ -83,9 +84,10 @@ export default function SchedulesPage({params}:{params:Promise<{id:string}>}){
   setLoading(true);setError("");
   Promise.all([
    request<Bid>("/bids/"+id),
-   request<Page<Document>>("/bids/"+id+"/documents?extension=xer&page_size=100")
-  ]).then(([b,d])=>{
-   setBid(b);setDocuments(d.items);
+   request<Page<Document>>("/bids/"+id+"/documents?extension=xer&page_size=100"),
+   request<ScheduleScopeCatalog>("/bids/"+id+"/schedule-scope/catalog")
+  ]).then(([b,d,catalog])=>{
+   setBid(b);setDocuments(d.items);setScopeCatalog(catalog);
    if(d.items.length){setSelected(d.items[0].id);analyze(d.items[0].id);if(d.items.length>1)setBaseline(d.items[1].id)}
   }).catch(()=>setError("Unable to load schedule documents.")).finally(()=>setLoading(false));
  },[id,analyze]);
@@ -104,8 +106,8 @@ export default function SchedulesPage({params}:{params:Promise<{id:string}>}){
   <PageHeader items={[{label:"Bid Workspace",href:"/bids"},{label:"Schedules"}]} title="Primavera P6 Schedule Intelligence" description="Analyze uploaded XER schedules for structure, logic and schedule-health indicators before bid submission." action={<Link href={"/bids/"+id+"/documents"} className="rounded bg-[#304354] px-4 py-2 text-xs font-semibold text-white">Upload / Open Documents</Link>}/>
 
   {error&&<div className="mb-3"><ErrorState message={error}/></div>}
-  {loading?<LoadingState label="Loading Primavera schedules…"/>:documents.length===0?<EmptyState title="No Primavera XER schedule uploaded" description="Upload the employer/bid schedule XER in Document Repository. The Schedules workspace will analyze it without changing the source file." action={<Link href={"/bids/"+id+"/documents"} className="rounded bg-[#e2b635] px-4 py-2 text-sm font-semibold text-[#243241]">Open Document Repository</Link>}/>:<>
-   <section className="mb-3 flex flex-col gap-3 rounded border border-slate-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
+  {loading?<LoadingState label="Loading Primavera schedules…"/>:documents.length===0?<><EmptyState title="No Primavera XER schedule uploaded" description="The app has already built the expected activity universe from available bid scope. Upload a schedule later and it will be checked against this catalog." action={<Link href={"/bids/"+id+"/documents"} className="rounded bg-[#e2b635] px-4 py-2 text-sm font-semibold text-[#243241]">Open Document Repository</Link>}/>{scopeCatalog&&<ExpectedScopeCatalogPanel value={scopeCatalog}/>}</>:<>
+   {scopeCatalog&&<ExpectedScopeCatalogPanel value={scopeCatalog}/>}<section className="mb-3 flex flex-col gap-3 rounded border border-slate-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
     <div><div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Schedule File</div><select value={selected||""} onChange={e=>{const value=Number(e.target.value);setSelected(value);analyze(value)}} className="mt-1 min-w-[280px] max-w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800">{documents.map(d=><option key={d.id} value={d.id}>{d.document_title||d.original_filename}</option>)}</select></div>
     <div className="text-xs text-slate-500">{documents.length} XER file{documents.length===1?"":"s"} in this bid</div>
    </section>
@@ -155,6 +157,10 @@ export default function SchedulesPage({params}:{params:Promise<{id:string}>}){
    </>}
   </>}
  </div>;
+}
+
+function ExpectedScopeCatalogPanel({value}:{value:ScheduleScopeCatalog}){
+ return <section className="mb-3 overflow-hidden rounded border border-slate-200 bg-white"><div className="border-b bg-slate-50 px-4 py-3"><h2 className="text-sm font-bold text-slate-900">Expected Activity / Sub-Activity Universe</h2><p className="text-xs text-slate-500">{value.note}</p></div><div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-4 lg:grid-cols-8"><SummaryCard label="Total Expected" value={value.summary.total}/><SummaryCard label="Mandatory" value={value.summary.mandatory} tone="red"/><SummaryCard label="Activity Families" value={value.summary.activity_families}/><SummaryCard label="Activities" value={value.summary.activities}/><SummaryCard label="Sub-Activities" value={value.summary.subactivities}/><SummaryCard label="Contract" value={value.summary.contract_items}/><SummaryCard label="BOQ" value={value.summary.boq_items}/><SummaryCard label="Project Knowledge" value={value.summary.project_type_items}/></div>{value.items.length>0&&<div className="max-h-[520px] overflow-auto border-t"><div className="space-y-2 p-3">{value.items.map(item=><div key={item.id} className="rounded border border-slate-200 bg-white p-3"><div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{item.activity_level} · {item.source_type}{item.source_reference&&" · "+item.source_reference}</div><div className="mt-1 text-sm font-semibold text-slate-900">{item.parent_activity_name&&<span className="mr-1 text-slate-400">{item.parent_activity_name} ›</span>}{item.activity_name}</div><div className="mt-1 text-[10px] leading-4 text-slate-500">{item.why_expected}</div></div><div className="flex flex-wrap gap-1.5"><span className={item.catalog_authority==="Contractual / BOQ"?"rounded bg-red-50 px-2 py-1 text-[10px] font-bold text-red-700":item.catalog_authority==="Bid Scope Evidence"?"rounded bg-blue-50 px-2 py-1 text-[10px] font-bold text-blue-700":"rounded bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-600"}>{item.catalog_authority}</span>{item.mandatory&&<span className="rounded bg-amber-50 px-2 py-1 text-[10px] font-bold text-amber-700">Mandatory</span>}</div></div></div>)}</div></div>}</section>
 }
 
 function ScheduleComparisonPanel({value}:{value:P6ScheduleComparison}){
