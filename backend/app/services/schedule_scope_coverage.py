@@ -1,0 +1,249 @@
+import re
+from datetime import datetime,timezone
+from decimal import Decimal
+from difflib import SequenceMatcher
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.models import AuditEvent,BidProject,BidRequirement,ScheduleScopeItem
+from app.services.p6_xer import parse_xer
+
+
+SCOPE_CATEGORIES={
+    "Technical Requirement","Planning / Scheduling Requirement","Design Requirement",
+    "Procurement Requirement","Construction Requirement","Testing & Commissioning Requirement",
+    "Interface Requirement","Quality Requirement","Safety Requirement",
+}
+ACTION_RE=re.compile(
+    r"\b(?:shall|must|required to|is to)\s+(?:be\s+)?"
+    r"(?:design|prepare|procure|manufacture|supply|deliver|construct|install|erect|lay|test|commission|integrate|inspect|approve|complete|execute|provide)\s+(.+)",
+    re.I,
+)
+STOP={
+    "the","and","for","with","shall","must","required","contractor","bidder","tenderer","employer",
+    "work","works","project","system","systems","including","all","any","this","that","from","into",
+}
+
+
+def _terms(text:str)->set[str]:
+    return {x for x in re.findall(r"[a-z0-9]+",str(text or "").lower()) if len(x)>2 and x not in STOP}
+
+
+def _activity_name(requirement:BidRequirement)->str:
+    text=re.sub(r"\s+"," ",requirement.requirement_text).strip()
+    match=ACTION_RE.search(text)
+    candidate=match.group(1) if match else requirement.requirement_title
+    candidate=re.split(r"[.;]",candidate,1)[0].strip(" :-")
+    if len(candidate)>180:candidate=candidate[:177]+"..."
+    return candidate or requirement.requirement_title[:180]
+
+
+def _keywords(name:str,text:str)->list[str]:
+    words=_terms(f"{name} {text}")
+    return sorted(words)[:30]
+
+
+def _scope_item_dict(item:ScheduleScopeItem):
+    return {
+        "id":item.id,
+        "bid_project_id":item.bid_project_id,
+        "parent_id":item.parent_id,
+        "source_requirement_id":item.source_requirement_id,
+        "source_document_id":item.source_document_id,
+        "activity_name":item.activity_name,
+        "activity_level":item.activity_level,
+        "source_type":item.source_type,
+        "source_reference":item.source_reference,
+        "source_excerpt":item.source_excerpt,
+        "mandatory":item.mandatory,
+        "match_keywords":item.match_keywords or [],
+        "coverage_status":item.coverage_status,
+        "matched_task_code":item.matched_task_code,
+        "matched_task_name":item.matched_task_name,
+        "match_confidence":float(item.match_confidence) if item.match_confidence is not None else None,
+        "disposition_status":item.disposition_status,
+        "disposition_reason":item.disposition_reason,
+        "disposition_by":item.disposition_by,
+        "disposition_at":item.disposition_at,
+        "blocking":_is_blocking(item),
+    }
+
+
+def _is_blocking(item:ScheduleScopeItem)->bool:
+    if not item.mandatory:return False
+    if item.coverage_status=="Covered":return False
+    if item.coverage_status=="Possible Match":
+        return item.disposition_status!="Confirmed Covered"
+    if item.coverage_status=="Missing":
+        return item.disposition_status in {"Unexplained","To Be Added"}
+    return True
+
+
+def sync_scope_from_requirements(db:Session,bid_id:int,user_id:int,request_metadata:dict|None=None):
+    requirements=db.scalars(select(BidRequirement).where(
+        BidRequirement.bid_project_id==bid_id,
+        BidRequirement.requirement_category.in_(SCOPE_CATEGORIES),
+        BidRequirement.requirement_status.notin_(["Closed","Not Applicable"]),
+    )).all()
+    existing=db.scalars(select(ScheduleScopeItem).where(
+        ScheduleScopeItem.bid_project_id==bid_id,
+        ScheduleScopeItem.source_requirement_id.is_not(None),
+    )).all()
+    by_requirement={x.source_requirement_id:x for x in existing}
+    created=updated=0
+    for req in requirements:
+        name=_activity_name(req)
+        words=_keywords(name,req.requirement_text)
+        if len(words)<2:continue
+        item=by_requirement.get(req.id)
+        if item:
+            item.activity_name=name
+            item.source_document_id=req.source_document_id
+            item.source_reference=req.source_clause or req.source_section
+            item.source_excerpt=req.requirement_text[:2000]
+            item.mandatory=req.is_mandatory
+            item.match_keywords=words
+            updated+=1
+        else:
+            item=ScheduleScopeItem(
+                bid_project_id=bid_id,
+                source_requirement_id=req.id,
+                source_document_id=req.source_document_id,
+                activity_name=name,
+                activity_level="Activity",
+                source_type="Contract / Technical Requirement",
+                source_reference=req.source_clause or req.source_section,
+                source_excerpt=req.requirement_text[:2000],
+                mandatory=req.is_mandatory,
+                match_keywords=words,
+                created_by=user_id,
+            )
+            db.add(item);created+=1
+    db.add(AuditEvent(
+        user_id=user_id,bid_project_id=bid_id,event_type="schedule.scope_catalog_synced",
+        entity_type="BidProject",entity_id=str(bid_id),request_metadata=request_metadata or {},
+        details={"created":created,"updated":updated,"requirements_considered":len(requirements)},
+    ))
+    db.commit()
+    return {"created":created,"updated":updated,"requirements_considered":len(requirements)}
+
+
+def add_scope_item(
+    db:Session,bid_id:int,payload:dict,user_id:int,request_metadata:dict|None=None
+):
+    name=str(payload.get("activity_name") or "").strip()
+    if not name:raise ValueError("activity_name is required")
+    source_type=str(payload.get("source_type") or "Manual").strip()
+    item=ScheduleScopeItem(
+        bid_project_id=bid_id,
+        parent_id=payload.get("parent_id"),
+        source_document_id=payload.get("source_document_id"),
+        activity_name=name,
+        activity_level=str(payload.get("activity_level") or "Activity"),
+        source_type=source_type,
+        source_reference=str(payload.get("source_reference") or "").strip() or None,
+        source_excerpt=str(payload.get("source_excerpt") or "").strip() or None,
+        mandatory=bool(payload.get("mandatory",True)),
+        match_keywords=_keywords(name,str(payload.get("source_excerpt") or "")),
+        created_by=user_id,
+    )
+    db.add(item);db.flush()
+    db.add(AuditEvent(
+        user_id=user_id,bid_project_id=bid_id,event_type="schedule.scope_item_added",
+        entity_type="ScheduleScopeItem",entity_id=str(item.id),request_metadata=request_metadata or {},
+        details={"source_type":source_type,"activity_name":name},
+    ))
+    db.commit();db.refresh(item)
+    return _scope_item_dict(item)
+
+
+def _match(item:ScheduleScopeItem,tasks:list[dict]):
+    target=_terms(" ".join(item.match_keywords or [])+" "+item.activity_name)
+    if not target:return None,0.0
+    best=None;best_score=0.0
+    for task in tasks:
+        label=f'{task.get("task_code") or ""} {task.get("task_name") or ""}'
+        words=_terms(label)
+        if not words:continue
+        overlap=len(target&words)/max(1,len(target))
+        name_ratio=SequenceMatcher(None,item.activity_name.lower(),str(task.get("task_name") or "").lower()).ratio()
+        contains=1.0 if item.activity_name.lower() in str(task.get("task_name") or "").lower() else 0.0
+        score=max(contains,.70*overlap+.30*name_ratio)
+        if score>best_score:
+            best=task;best_score=score
+    return best,round(best_score,3)
+
+
+def evaluate_scope_coverage(db:Session,bid_id:int,xer_content:bytes,user_id:int,request_metadata:dict|None=None):
+    tasks=parse_xer(xer_content).get("TASK",[])
+    items=db.scalars(select(ScheduleScopeItem).where(
+        ScheduleScopeItem.bid_project_id==bid_id
+    ).order_by(ScheduleScopeItem.id)).all()
+    for item in items:
+        task,confidence=_match(item,tasks)
+        previous=item.coverage_status
+        if task and confidence>=.72:
+            item.coverage_status="Covered"
+        elif task and confidence>=.42:
+            item.coverage_status="Possible Match"
+        else:
+            item.coverage_status="Missing"
+            task=None
+        item.matched_task_code=task.get("task_code") if task else None
+        item.matched_task_name=task.get("task_name") if task else None
+        item.match_confidence=Decimal(str(confidence)) if confidence else None
+        if item.coverage_status=="Covered":
+            item.disposition_status="Confirmed Covered"
+            item.disposition_reason=None
+        elif previous=="Covered" and item.coverage_status!="Covered":
+            item.disposition_status="Unexplained"
+            item.disposition_reason=None
+    db.add(AuditEvent(
+        user_id=user_id,bid_project_id=bid_id,event_type="schedule.scope_coverage_evaluated",
+        entity_type="BidProject",entity_id=str(bid_id),request_metadata=request_metadata or {},
+        details={"expected_items":len(items),"schedule_activities":len(tasks)},
+    ))
+    db.commit()
+    rows=[_scope_item_dict(x) for x in items]
+    blocking=[x for x in rows if x["blocking"]]
+    return {
+        "items":rows,
+        "summary":{
+            "expected":len(rows),
+            "covered":sum(1 for x in rows if x["coverage_status"]=="Covered"),
+            "possible_match":sum(1 for x in rows if x["coverage_status"]=="Possible Match"),
+            "missing":sum(1 for x in rows if x["coverage_status"]=="Missing"),
+            "blocking":len(blocking),
+            "explained_missing":sum(1 for x in rows if x["coverage_status"]=="Missing" and not x["blocking"]),
+        },
+        "ready":len(blocking)==0 and len(rows)>0,
+        "grade":"Complete" if len(blocking)==0 and rows else "Action Required" if rows else "No Scope Catalog",
+        "methodology":"phase6-schedule-scope-coverage-v1",
+        "note":"Expected activities are independently sourced from bid scope. Missing or ambiguous coverage must be explained; 'To Be Added' remains a blocker until a revised schedule contains the activity.",
+    }
+
+
+def disposition_scope_item(
+    db:Session,item_id:int,status:str,reason:str|None,user_id:int,request_metadata:dict|None=None
+):
+    allowed={"Unexplained","Confirmed Covered","To Be Added","Covered Elsewhere","Not Applicable","Explained-Excluded"}
+    if status not in allowed:raise ValueError("Invalid disposition status")
+    item=db.get(ScheduleScopeItem,item_id)
+    if not item:raise ValueError("Schedule scope item not found")
+    reason=(reason or "").strip() or None
+    if status in {"Covered Elsewhere","Not Applicable","Explained-Excluded","To Be Added"} and not reason:
+        raise ValueError("A reason is required for this disposition")
+    if status=="Confirmed Covered" and item.coverage_status not in {"Covered","Possible Match"}:
+        raise ValueError("Only a covered or possible-match item can be confirmed covered")
+    item.disposition_status=status
+    item.disposition_reason=reason
+    item.disposition_by=user_id
+    item.disposition_at=datetime.now(timezone.utc)
+    db.add(AuditEvent(
+        user_id=user_id,bid_project_id=item.bid_project_id,event_type="schedule.scope_item_dispositioned",
+        entity_type="ScheduleScopeItem",entity_id=str(item.id),request_metadata=request_metadata or {},
+        details={"status":status,"reason":reason},
+    ))
+    db.commit();db.refresh(item)
+    return _scope_item_dict(item)
