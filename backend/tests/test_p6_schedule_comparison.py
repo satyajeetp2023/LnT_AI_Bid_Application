@@ -42,4 +42,7 @@ def test_xer_comparison_tracks_slippage_changes_and_relationships():
     assert result["summary"]["data_date_shift_days"]==14
     assert result["summary"]["added_relationships"]==2
     assert result["summary"]["deleted_relationships"]==1
+    assert result["summary"]["newly_negative_float"]==1
+    assert result["summary"]["delayed_milestones"]==1
+    assert result["risk_summary"]["risk_level"]=="High"
     assert result["finish_slippage"][0]["finish_variance_days"]>=5
