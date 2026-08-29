@@ -34,8 +34,7 @@ def _table_inventory(tables:dict[str,list[dict]]):
     return result
 
 
-def activity_parameter_profile(content:bytes,task_key:str):
-    tables=parse_xer(content)
+def activity_parameter_profile_from_tables(tables:dict[str,list[dict]],task_key:str):
     tasks=tables.get("TASK",[])
     task=next((x for x in tasks if str(x.get("task_code") or "")==str(task_key) or str(x.get("task_id") or "")==str(task_key)),None)
     if not task:return None
@@ -67,8 +66,12 @@ def activity_parameter_profile(content:bytes,task_key:str):
             "resource_assignment_count":len(assignments),
             "activity_code_count":len(task_codes),
         },
-        "profile_version":"phase6-activity-parameter-profile-v1",
+        "profile_version":"phase6-activity-parameter-profile-v2",
     }
+
+
+def activity_parameter_profile(content:bytes,task_key:str):
+    return activity_parameter_profile_from_tables(parse_xer(content),task_key)
 
 
 def build_schedule_optimization_from_tables(
