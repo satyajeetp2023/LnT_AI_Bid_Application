@@ -15,6 +15,7 @@ export function Sidebar({mobileOpen=false,onClose}:{mobileOpen?:boolean;onClose?
   {n:"Requirement Register",h:bidId?`/bids/${bidId}/requirements`:undefined,i:FileSearch},
   {n:"Missing Inputs",h:bidId?`/bids/${bidId}/missing-inputs`:undefined,i:TriangleAlert},
   {n:"Pre-Bid Queries",h:bidId?`/bids/${bidId}/pre-bid-queries`:undefined,i:FileQuestion},
+  {n:"Work Queue",h:bidId?`/bids/${bidId}/work-queue`:undefined,i:FileCheck2},
   {n:"Review & Approval",h:bidId?`/bids/${bidId}/review-approval`:undefined,i:ShieldCheck},
  ];
  const future=[
