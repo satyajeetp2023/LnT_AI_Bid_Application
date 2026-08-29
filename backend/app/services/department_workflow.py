@@ -101,7 +101,7 @@ def department_work_queue(db:Session,bid_id:int,responsible_function:str|None=No
             "entity_type":"Schedule Scope",
             "entity_id":scope["canonical_item_id"],
             "title":scope["activity_name"],
-            "priority":"High" if scope.get("mandatory") else "Medium",
+            "priority":scope.get("flag_priority") or ("High" if scope.get("mandatory") else "Medium"),
             "responsible_function":owner,
             "responsible_person":person,
             "status":scope.get("group_coverage_status") or "Not Checked",
