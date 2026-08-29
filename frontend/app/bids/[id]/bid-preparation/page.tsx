@@ -27,7 +27,7 @@ export default function BidPreparationPage({params}:{params:Promise<{id:string}>
  const [error,setError]=useState("");
  const inspectTemplate=async(documentId:number)=>{
   setPlanLoading(true);setPlanError("");
-  try{const nextPlan=await request<TemplatePopulationPlan>(`/documents/${documentId}/population-plan`);setPlan(nextPlan);setSelectedTemplateId(documentId);setHeaderValues(Object.fromEntries(nextPlan.header_inputs.map(x=>[x.semantic_field,""])));setFieldOverrides({}))}
+  try{const nextPlan=await request<TemplatePopulationPlan>(`/documents/${documentId}/population-plan`);setPlan(nextPlan);setSelectedTemplateId(documentId);setHeaderValues(Object.fromEntries(nextPlan.header_inputs.map(x=>[x.semantic_field,""])));setFieldOverrides({})}
   catch{setPlanError("Unable to build a population plan for this template.")}
   finally{setPlanLoading(false)}
  };
@@ -42,8 +42,11 @@ export default function BidPreparationPage({params}:{params:Promise<{id:string}>
   finally{setSaving(false)}
  };
  const sendForReview=async(item:PreparedArtifact)=>{
-  const updated=await request<PreparedArtifact>(`/prepared-artifacts/${item.id}/ready-for-review`,{method:"POST"});
-  setArtifacts(prev=>prev.map(x=>x.id===updated.id?updated:x));
+  setPlanError("");
+  try{
+   const updated=await request<PreparedArtifact>(`/prepared-artifacts/${item.id}/ready-for-review`,{method:"POST"});
+   setArtifacts(prev=>prev.map(x=>x.id===updated.id?updated:x));
+  }catch(e){setPlanError(e instanceof Error?e.message:"Unable to send the prepared artifact for review.")}
  };
  const generateDraft=async()=>{
   if(!selectedTemplateId)return;
