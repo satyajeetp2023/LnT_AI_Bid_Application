@@ -424,6 +424,7 @@ def schedule_scope_catalog(db:Session,bid_id:int):
             "contract_items":sum(1 for x in rows if x["source_type"]=="Contract / Technical Requirement"),
             "boq_items":sum(1 for x in rows if x["source_type"]=="BOQ"),
             "project_type_items":sum(1 for x in rows if x["source_type"]=="Project-Type Knowledge"),
+            "unmapped_schedule_activities":len(unmapped),
             "manual_items":sum(1 for x in rows if x["source_type"]=="Manual"),
         },
         "version":"phase6-expected-activity-universe-v2",
@@ -663,10 +664,54 @@ def evaluate_scope_coverage(db:Session,bid_id:int,xer_content:bytes,user_id:int,
     ))
     blocking_groups=[x for x in groups if x["group_blocking"]]
     precision_advisor=_schedule_precision_recommendations(groups,tasks)
+    matched_codes={str(x.get("matched_task_code") or "") for x in groups if x.get("matched_task_code") and x.get("group_coverage_status") in {"Covered","Possible Match"}}
+    search_by_code={str(x["task"].get("task_code") or ""):x for x in search_index if x["task"].get("task_code")}
+    unmapped=[]
+    milestone_types={"TT_Mile","TT_FinMile","TT_StartMile","TT_FinishMile"}
+    for task in tasks:
+        code=str(task.get("task_code") or "")
+        if not code or code in matched_codes:continue
+        task_type=task.get("task_type")
+        duration=max(_number(task.get("target_drtn_hr_cnt")),_number(task.get("remain_drtn_hr_cnt")))
+        total_float=_number(task.get("total_float_hr_cnt"))
+        context=search_by_code.get(code) or {}
+        score=10
+        reasons=["No expected contract/BOQ/project-scope item currently maps to this schedule activity."]
+        if task_type in milestone_types:
+            score+=10;reasons.append("This is a milestone and should have a clear scope or contractual purpose.")
+        if duration>160:
+            score+=15;reasons.append(f"Long duration: {duration:.0f} hours.")
+        if total_float<=0:
+            score+=20;reasons.append(f"Critical/negative float screening: {total_float:.0f} hours.")
+        elif total_float<=40:
+            score+=10;reasons.append(f"Near-critical float screening: {total_float:.0f} hours.")
+        unmapped.append({
+            "task_id":task.get("task_id"),
+            "task_code":code,
+            "task_name":task.get("task_name"),
+            "task_type":task_type,
+            "wbs_path":context.get("wbs_path"),
+            "activity_codes":context.get("activity_codes") or [],
+            "duration_hours":duration,
+            "total_float_hours":total_float,
+            "review_score":min(100,score),
+            "priority":"High" if score>=45 else "Medium" if score>=25 else "Low",
+            "reasons":reasons,
+            "recommended_action":"Confirm which contract/BOQ/enabling scope this activity represents, or add/link the missing expected scope item.",
+        })
+    unmapped.sort(key=lambda x:(-x["review_score"],x["task_code"]))
+    reverse_coverage={
+        "unmapped_activities":unmapped,
+        "unmapped_count":len(unmapped),
+        "high_priority":sum(1 for x in unmapped if x["priority"]=="High"),
+        "methodology":"phase6-reverse-schedule-scope-coverage-v1",
+        "note":"Unmapped schedule activities are review items, not automatic errors. Enabling, management or temporary-work activities may be valid.",
+    }
     return {
         "items":rows,
         "groups":groups,
         "precision_advisor":precision_advisor,
+        "reverse_coverage":reverse_coverage,
         "summary":{
             "expected":len(rows),
             "covered":sum(1 for x in rows if x["coverage_status"]=="Covered"),
@@ -683,7 +728,7 @@ def evaluate_scope_coverage(db:Session,bid_id:int,xer_content:bytes,user_id:int,
         },
         "ready":len(blocking_groups)==0 and len(groups)>0,
         "grade":"Complete" if len(blocking_groups)==0 and groups else "Action Required" if groups else "No Scope Catalog",
-        "methodology":"phase6-schedule-scope-coverage-v9",
+        "methodology":"phase6-schedule-scope-coverage-v10",
         "note":"Expected activities are independently sourced from bid scope. Missing or ambiguous coverage must be explained; 'To Be Added' remains a blocker until a revised schedule contains the activity.",
     }
 
