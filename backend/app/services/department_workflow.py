@@ -103,9 +103,11 @@ def department_work_queue(db:Session,bid_id:int,responsible_function:str|None=No
             "high":sum(1 for x in items if x["priority"]=="High"),
             "overdue":sum(1 for x in items if x["is_overdue"]),
             "unassigned":sum(1 for x in items if not x["responsible_function"]),
+            "without_person":sum(1 for x in items if not x["responsible_person"]),
         },
         "by_function":[{"name":k,"count":v} for k,v in by_function.most_common()],
         "by_type":[{"name":k,"count":v} for k,v in by_type.most_common()],
+        "by_person":[{"name":k,"count":v} for k,v in Counter((x["responsible_person"] or "Unassigned") for x in items).most_common()],
         "filter":{"responsible_function":responsible_function},
-        "version":"phase4-department-work-queue-v1",
+        "version":"phase4-department-work-queue-v2",
     }
