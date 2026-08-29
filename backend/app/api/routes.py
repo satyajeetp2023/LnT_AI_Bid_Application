@@ -6,7 +6,7 @@ from sqlalchemy import func,select
 from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.database.session import get_db
-from app.models import AuditEvent,BidDocument,BidMissingInput,BidPreBidQuery,BidProject,BidRequirement,ProjectMembership,User
+from app.models import AuditEvent,BidDocument,BidMissingInput,BidPreBidQuery,BidPreparedArtifact,BidProject,BidRequirement,ProjectMembership,User
 from app.schemas.requirements import RequirementCreate,RequirementExtractionSummary,RequirementRead,RequirementUpdate
 from app.schemas.bids import AutoClassifyRequest,BidCreate,BidRead,BidUpdate,ClassificationUpdate,DocumentMetadataUpdate,DocumentRead,NotesUpdate,RevisionCreate
 from app.security.auth import Permission,current_user,is_admin,require_permission,require_project_access
@@ -19,6 +19,7 @@ from app.services.submission_format_intelligence import detect_submission_format
 from app.services.template_structure_parser import parse_xlsx_template
 from app.services.template_population_plan import build_population_plan
 from app.services.template_draft_generator import generate_controlled_xlsx_draft
+from app.services.prepared_artifacts import approve_artifact,artifact_dict,create_prepared_artifact,get_prepared_artifact,list_prepared_artifacts,mark_artifact_ready
 from app.services.documents import DOCUMENT_CATEGORIES,archive,classify,mark_revision,update_document_metadata,update_notes,upload_document
 from app.services.document_classification import auto_classify_document
 from app.storage.base import LocalSecureStorage
@@ -132,6 +133,39 @@ def generate_template_draft(document_id:int,request:Request,payload:dict|None=No
  stem=doc.original_filename.rsplit(".",1)[0]
  filename=f"{stem}_controlled_draft.xlsx"
  return Response(data,media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",headers={"Content-Disposition":f'attachment; filename="{filename}"',"X-Template-Written-Fields":str(summary["written_fields"]),"X-Template-Unresolved-Fields":str(summary["unresolved_fields"])})
+
+@router.post("/documents/{document_id}/save-controlled-draft")
+def save_template_draft(document_id:int,request:Request,payload:dict|None=None,choice_mark:str=Query("X"),include_suggested_text:bool=Query(False),db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ doc=get_doc(db,document_id);require_project_access(db,user,doc.bid_project_id,Permission.PREPARED_ARTIFACT_MANAGE)
+ if doc.duplicate_of_document_id or not doc.storage_path:raise HTTPException(422,"Document content is not available for prepared artifact generation")
+ if doc.file_extension.lower()!="xlsx":raise HTTPException(422,"Prepared artifact generation currently supports .xlsx templates only")
+ storage=LocalSecureStorage(get_settings().storage_root)
+ try:data,summary=generate_controlled_xlsx_draft(db,doc.bid_project_id,storage.read(doc.storage_path),choice_mark,include_suggested_text,(payload or {}).get("header_values") or {},(payload or {}).get("field_overrides") or {})
+ except ValueError as exc:raise HTTPException(422,str(exc)) from None
+ item=create_prepared_artifact(db,doc,data,summary,storage,user.id,metadata(request))
+ return artifact_dict(item)
+
+@router.get("/bids/{bid_id}/prepared-artifacts")
+def prepared_artifacts(bid_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.PREPARED_ARTIFACT_VIEW);get_bid(db,bid_id)
+ return [artifact_dict(x) for x in list_prepared_artifacts(db,bid_id)]
+
+@router.get("/prepared-artifacts/{artifact_id}/download")
+def download_prepared_artifact(artifact_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ item=get_prepared_artifact(db,artifact_id);require_project_access(db,user,item.bid_project_id,Permission.PREPARED_ARTIFACT_VIEW)
+ data=LocalSecureStorage(get_settings().storage_root).read(item.storage_path)
+ safe=item.artifact_name.replace('"','')
+ return Response(data,media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",headers={"Content-Disposition":f'attachment; filename="{safe}.xlsx"'})
+
+@router.post("/prepared-artifacts/{artifact_id}/ready-for-review")
+def prepared_artifact_ready(artifact_id:int,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ item=get_prepared_artifact(db,artifact_id);require_project_access(db,user,item.bid_project_id,Permission.PREPARED_ARTIFACT_MANAGE)
+ return artifact_dict(mark_artifact_ready(db,item,user.id,metadata(request)))
+
+@router.post("/prepared-artifacts/{artifact_id}/approve")
+def approve_prepared_artifact(artifact_id:int,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ item=get_prepared_artifact(db,artifact_id);require_project_access(db,user,item.bid_project_id,Permission.PREPARED_ARTIFACT_APPROVE)
+ return artifact_dict(approve_artifact(db,item,user.id,metadata(request)))
 
 @router.patch("/documents/{document_id}/notes",response_model=DocumentRead)
 def notes(document_id:int,payload:NotesUpdate,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
