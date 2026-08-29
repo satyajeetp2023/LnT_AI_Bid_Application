@@ -17,13 +17,14 @@ export default function BidPreparationPage({params}:{params:Promise<{id:string}>
  const [plan,setPlan]=useState<TemplatePopulationPlan|null>(null);
  const [selectedTemplateId,setSelectedTemplateId]=useState<number|null>(null);
  const [choiceMark,setChoiceMark]=useState("X");
+ const [headerValues,setHeaderValues]=useState<Record<string,string>>({});
  const [generating,setGenerating]=useState(false);
  const [planLoading,setPlanLoading]=useState(false);
  const [planError,setPlanError]=useState("");
  const [error,setError]=useState("");
  const inspectTemplate=async(documentId:number)=>{
   setPlanLoading(true);setPlanError("");
-  try{setPlan(await request<TemplatePopulationPlan>(`/documents/${documentId}/population-plan`));setSelectedTemplateId(documentId)}
+  try{const nextPlan=await request<TemplatePopulationPlan>(`/documents/${documentId}/population-plan`);setPlan(nextPlan);setSelectedTemplateId(documentId);setHeaderValues(Object.fromEntries(nextPlan.header_inputs.map(x=>[x.semantic_field,""])))}
   catch{setPlanError("Unable to build a population plan for this template.")}
   finally{setPlanLoading(false)}
  };
@@ -32,7 +33,7 @@ export default function BidPreparationPage({params}:{params:Promise<{id:string}>
   setGenerating(true);setPlanError("");
   try{
    const q=new URLSearchParams({choice_mark:choiceMark});
-   const r=await fetch(`${API}/documents/${selectedTemplateId}/generate-controlled-draft?${q.toString()}`,{method:"POST",headers:{"X-User-ID":"1"}});
+   const r=await fetch(`${API}/documents/${selectedTemplateId}/generate-controlled-draft?${q.toString()}`,{method:"POST",headers:{"X-User-ID":"1","Content-Type":"application/json"},body:JSON.stringify({header_values:headerValues})});
    if(!r.ok){const e=await r.json().catch(()=>({detail:"Draft generation failed"}));throw new Error(e.detail||"Draft generation failed")}
    const blob=await r.blob();
    const disposition=r.headers.get("content-disposition")||"";
@@ -76,7 +77,7 @@ export default function BidPreparationPage({params}:{params:Promise<{id:string}>
   {planError&&<div className="mt-3"><ErrorState message={planError}/></div>}
   {plan&&<section className="mt-3 overflow-hidden rounded border border-slate-200 bg-white">
    <div className="flex flex-col gap-3 border-b bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="text-sm font-bold text-slate-900">Template Population Plan</h2><p className="text-xs text-slate-500">Clause-by-clause mapping between the employer template and reviewed tender requirements. The original employer file remains untouched.</p></div><div className="flex flex-wrap items-center gap-2"><label className="text-xs font-semibold text-slate-600">Compliance mark</label><select value={choiceMark} onChange={e=>setChoiceMark(e.target.value)} className="rounded border border-slate-300 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700"><option value="X">X</option><option value="✓">✓</option><option value="Yes">Yes</option></select><button disabled={!selectedTemplateId||generating} onClick={generateDraft} className="rounded bg-[#304354] px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">{generating?"Generating…":"Generate Controlled Draft"}</button></div></div>
-   <div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-3 lg:grid-cols-6">
+   {plan.header_inputs.length>0&&<div className="border-b bg-amber-50/50 p-3"><div className="mb-2"><h3 className="text-xs font-bold text-slate-900">Workbook Header Inputs</h3><p className="text-[11px] text-slate-600">Enter each value once. The controlled draft will propagate it to every repeated employer placeholder.</p></div><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{plan.header_inputs.map(x=><div key={x.semantic_field}><label className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{x.label}</label><input value={headerValues[x.semantic_field]||""} onChange={e=>setHeaderValues({...headerValues,[x.semantic_field]:e.target.value})} placeholder={x.semantic_field==="tenderer_name"?"Tenderer / bidder name":"Enter value"} className="mt-1 w-full rounded border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800"/><div className="mt-1 text-[10px] text-slate-500">Repeated {x.occurrence_count} time{x.occurrence_count===1?"":"s"} · {x.input_source.replaceAll("_"," ")}</div></div>)}</div></div>}<div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-3 lg:grid-cols-6">
     <SummaryCard label="Template Rows" value={plan.summary.template_rows}/>
     <SummaryCard label="Matched" value={plan.summary.requirements_matched} tone="green"/>
     <SummaryCard label="Unmatched" value={plan.summary.unmatched_rows} tone="amber"/>
