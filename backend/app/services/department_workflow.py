@@ -1,5 +1,5 @@
 from collections import Counter
-from datetime import date
+from datetime import date,timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -89,12 +89,44 @@ def department_work_queue(db:Session,bid_id:int,responsible_function:str|None=No
             "source_page":q.source_page,"source_clause":q.source_clause,
         })
 
+    due_soon_limit=today+timedelta(days=3)
+    for item in items:
+        due_obj=date.fromisoformat(item["due_date"]) if item["due_date"] else None
+        item["days_to_due"]=(due_obj-today).days if due_obj else None
+        item["is_due_soon"]=bool(due_obj and today<=due_obj<=due_soon_limit)
+        if item["is_overdue"]:
+            item["escalation_level"]="Red";item["escalation_reason"]="Action is overdue."
+        elif item["priority"]=="Critical" and not item["responsible_person"]:
+            item["escalation_level"]="Red";item["escalation_reason"]="Critical action has no named responsible person."
+        elif item["is_due_soon"]:
+            item["escalation_level"]="Amber";item["escalation_reason"]="Action is due within 3 days."
+        elif item["priority"] in {"Critical","High"} and not item["responsible_person"]:
+            item["escalation_level"]="Amber";item["escalation_reason"]="High-priority action has no named responsible person."
+        else:
+            item["escalation_level"]="None";item["escalation_reason"]=None
+
     items.sort(key=lambda x:(
+        {"Red":0,"Amber":1,"None":2}.get(x["escalation_level"],3),
         0 if x["is_overdue"] else 1,
         PRIORITY_ORDER.get(x["priority"],4),
         x["due_date"] or "9999-12-31",
         x["entity_type"],x["title"].lower(),
     ))
+
+    department_control=[]
+    for function_name in sorted(set(x["responsible_function"] or "Unassigned" for x in items)):
+        rows=[x for x in items if (x["responsible_function"] or "Unassigned")==function_name]
+        department_control.append({
+            "name":function_name,
+            "open_actions":len(rows),
+            "critical":sum(1 for x in rows if x["priority"]=="Critical"),
+            "overdue":sum(1 for x in rows if x["is_overdue"]),
+            "due_soon":sum(1 for x in rows if x["is_due_soon"]),
+            "without_person":sum(1 for x in rows if not x["responsible_person"]),
+            "red_escalations":sum(1 for x in rows if x["escalation_level"]=="Red"),
+            "amber_escalations":sum(1 for x in rows if x["escalation_level"]=="Amber"),
+        })
+    department_control.sort(key=lambda x:(-x["red_escalations"],-x["amber_escalations"],-x["overdue"],-x["open_actions"],x["name"]))
 
     by_function=Counter(x["responsible_function"] or "Unassigned" for x in items)
     by_type=Counter(x["entity_type"] for x in items)
@@ -107,10 +139,14 @@ def department_work_queue(db:Session,bid_id:int,responsible_function:str|None=No
             "overdue":sum(1 for x in items if x["is_overdue"]),
             "unassigned":sum(1 for x in items if not x["responsible_function"]),
             "without_person":sum(1 for x in items if not x["responsible_person"]),
+            "due_soon":sum(1 for x in items if x["is_due_soon"]),
+            "red_escalations":sum(1 for x in items if x["escalation_level"]=="Red"),
+            "amber_escalations":sum(1 for x in items if x["escalation_level"]=="Amber"),
         },
         "by_function":[{"name":k,"count":v} for k,v in by_function.most_common()],
         "by_type":[{"name":k,"count":v} for k,v in by_type.most_common()],
         "by_person":[{"name":k,"count":v} for k,v in Counter((x["responsible_person"] or "Unassigned") for x in items).most_common()],
+        "department_control":department_control,
         "filter":{"responsible_function":responsible_function,"responsible_person":responsible_person},
-        "version":"phase4-department-work-queue-v3",
+        "version":"phase4-department-work-queue-v4",
     }
