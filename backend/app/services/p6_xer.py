@@ -80,7 +80,7 @@ def _task_label(task):
     }
 
 
-def analyze_schedule_tables(tables:dict[str,list[dict]],long_duration_hours:float=160.0,near_critical_hours:float=40.0)->dict:
+def analyze_schedule_tables(tables:dict[str,list[dict]],long_duration_hours:float=160.0,near_critical_hours:float=40.0,capabilities:dict|None=None)->dict:
     projects=tables.get("PROJECT",[])
     tasks=tables.get("TASK",[])
     rels=tables.get("TASKPRED",[])
@@ -88,6 +88,9 @@ def analyze_schedule_tables(tables:dict[str,list[dict]],long_duration_hours:floa
     calendars=tables.get("CALENDAR",[])
     resources=tables.get("RSRC",[])
     assignments=tables.get("TASKRSRC",[])
+    capabilities=capabilities or {}
+    logic_available=bool(capabilities.get("logic",bool(rels)))
+    float_available=bool(capabilities.get("float",any(str(x.get("total_float_hr_cnt") or "").strip() for x in tasks)))
 
     task_by_id={x.get("task_id"):x for x in tasks if x.get("task_id")}
     preds=defaultdict(list);succs=defaultdict(list)
@@ -114,8 +117,8 @@ def analyze_schedule_tables(tables:dict[str,list[dict]],long_duration_hours:floa
     active_tasks=[x for x in tasks if x.get("status_code") not in complete_statuses]
     non_milestone_active=[x for x in active_tasks if x.get("task_type") not in milestones]
 
-    no_predecessor=[_task_label(x) for x in non_milestone_active if not preds.get(x.get("task_id"))]
-    no_successor=[_task_label(x) for x in non_milestone_active if not succs.get(x.get("task_id"))]
+    no_predecessor=[_task_label(x) for x in non_milestone_active if not preds.get(x.get("task_id"))] if logic_available else []
+    no_successor=[_task_label(x) for x in non_milestone_active if not succs.get(x.get("task_id"))] if logic_available else []
 
     negative_float=[]
     zero_or_negative_float=[]
@@ -126,14 +129,14 @@ def analyze_schedule_tables(tables:dict[str,list[dict]],long_duration_hours:floa
     status_date_issues=[]
     missing_wbs=[]
     for task in tasks:
-        total_float=_float(task.get("total_float_hr_cnt"))
-        if total_float<0:
+        total_float=_float(task.get("total_float_hr_cnt")) if float_available else None
+        if float_available and total_float is not None and total_float<0:
             negative_float.append({**_task_label(task),"total_float_hours":total_float})
-        if total_float<=0:
+        if float_available and total_float is not None and total_float<=0:
             zero_or_negative_float.append({**_task_label(task),"total_float_hours":total_float})
             if task.get("status_code") not in complete_statuses:
                 critical_float.append({**_task_label(task),"total_float_hours":total_float})
-        elif total_float<=near_critical_hours and task.get("status_code") not in complete_statuses:
+        elif float_available and total_float is not None and total_float<=near_critical_hours and task.get("status_code") not in complete_statuses:
             near_critical_float.append({**_task_label(task),"total_float_hours":total_float})
 
         duration=max(_float(task.get("target_drtn_hr_cnt")),_float(task.get("remain_drtn_hr_cnt")))
@@ -225,20 +228,20 @@ def analyze_schedule_tables(tables:dict[str,list[dict]],long_duration_hours:floa
             "resource_assignments":len(assignments),
         },
         "criticality":{
-            "method":"Total Float screening",
+            "method":"Total Float screening" if float_available else "Not available from source",
             "critical_threshold_hours":0.0,
             "near_critical_threshold_hours":near_critical_hours,
             "critical_activities":critical_float,
             "near_critical_activities":near_critical_float,
             "milestones_at_risk":[x for x in milestone_rows if x["criticality"] in {"Critical","Near Critical"}],
-            "note":"This is a float-based screening view. It does not independently recalculate Primavera's CPM path.",
+            "note":"This is a float-based screening view. It does not independently recalculate Primavera's CPM path." if float_available else "Total float is not available from this source, so criticality is not inferred.",
         },
         "health":{
             "score":health_score,
             "grade":"Good" if health_score>=85 else "Needs Attention" if health_score>=65 else "Poor",
             "issue_counts":issue_counts,
-            "methodology":"phase6-xer-health-v1",
-            "note":"The score is a deterministic screening indicator, not a substitute for contractual schedule review or delay analysis.",
+            "methodology":"phase6-schedule-health-v2",
+            "note":"The score uses only parameters available from the uploaded source. Unavailable logic or float data is not treated as a defect.",
         },
         "milestones":milestone_rows,
         "distributions":{
