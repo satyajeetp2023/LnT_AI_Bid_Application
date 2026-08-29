@@ -128,6 +128,46 @@ def department_work_queue(db:Session,bid_id:int,responsible_function:str|None=No
         })
     department_control.sort(key=lambda x:(-x["red_escalations"],-x["amber_escalations"],-x["overdue"],-x["open_actions"],x["name"]))
 
+    all_requirements=db.scalars(select(BidRequirement).where(BidRequirement.bid_project_id==bid_id)).all()
+    all_gaps=db.scalars(select(BidMissingInput).where(BidMissingInput.bid_project_id==bid_id)).all()
+    all_queries=db.scalars(select(BidPreBidQuery).where(BidPreBidQuery.bid_project_id==bid_id)).all()
+
+    progress_rows=[]
+    functions=set()
+    for r in all_requirements:
+        owner=_owner(r.requirement_category,r.requirement_text,r.responsible_function);functions.add(owner)
+    for g in all_gaps:
+        owner=_owner(g.input_category,f"{g.missing_input_title} {g.missing_input_description}",g.responsible_function);functions.add(owner)
+    for q in all_queries:
+        owner=_owner(q.query_category,q.query_text,q.responsible_function);functions.add(owner)
+
+    for function_name in sorted(functions):
+        total=completed=0
+        for r in all_requirements:
+            owner=_owner(r.requirement_category,r.requirement_text,r.responsible_function)
+            if owner!=function_name:continue
+            total+=1
+            if r.requirement_status in {"Closed","Not Applicable"} or (r.review_status=="Reviewed" and r.compliance_status!="Not Assessed"):
+                completed+=1
+        for g in all_gaps:
+            owner=_owner(g.input_category,f"{g.missing_input_title} {g.missing_input_description}",g.responsible_function)
+            if owner!=function_name:continue
+            total+=1
+            if g.status in RESOLVED_STATUSES:completed+=1
+        for q in all_queries:
+            owner=_owner(q.query_category,q.query_text,q.responsible_function)
+            if owner!=function_name:continue
+            total+=1
+            if q.status in {"Responded","Closed","Withdrawn"}:completed+=1
+        progress_rows.append({
+            "name":function_name,
+            "tracked":total,
+            "completed":completed,
+            "remaining":max(0,total-completed),
+            "completion_percent":100.0 if total==0 else round(completed*100/total,1),
+        })
+    progress_rows.sort(key=lambda x:(x["completion_percent"],-x["remaining"],x["name"]))
+
     by_function=Counter(x["responsible_function"] or "Unassigned" for x in items)
     by_type=Counter(x["entity_type"] for x in items)
     return {
@@ -147,6 +187,7 @@ def department_work_queue(db:Session,bid_id:int,responsible_function:str|None=No
         "by_type":[{"name":k,"count":v} for k,v in by_type.most_common()],
         "by_person":[{"name":k,"count":v} for k,v in Counter((x["responsible_person"] or "Unassigned") for x in items).most_common()],
         "department_control":department_control,
+        "department_progress":progress_rows,
         "filter":{"responsible_function":responsible_function,"responsible_person":responsible_person},
-        "version":"phase4-department-work-queue-v4",
+        "version":"phase4-department-work-queue-v5",
     }
