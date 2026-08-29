@@ -280,7 +280,12 @@ def _consolidate_rows(rows:list[dict]):
                 or {row.get("activity_level"),other.get("activity_level")}<= {"Activity","BOQ Scope"}
                 or {row.get("activity_level"),other.get("activity_level")}<= {"Sub-Activity","BOQ Sub-Activity"}
             )
-            if same_level and _scope_similarity(row,other)>=.78:
+            distinct_boq_items=(
+                row.get("source_type")=="BOQ"
+                and other.get("source_type")=="BOQ"
+                and (row.get("source_reference") or "")!=(other.get("source_reference") or "")
+            )
+            if same_level and not distinct_boq_items and _scope_similarity(row,other)>=.78:
                 cluster.append(other);assigned.add(other["id"])
         canonical=min(cluster,key=lambda x:(
             authority.get(x.get("source_type"),2),
