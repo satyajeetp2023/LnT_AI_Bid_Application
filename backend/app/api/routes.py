@@ -17,6 +17,7 @@ from app.services.responsibility_assignment import suggest_responsible_function
 from app.services.department_workflow import department_work_queue
 from app.services.submission_format_intelligence import detect_submission_formats
 from app.services.template_structure_parser import parse_xlsx_template
+from app.services.template_population_plan import build_population_plan
 from app.services.documents import DOCUMENT_CATEGORIES,archive,classify,mark_revision,update_document_metadata,update_notes,upload_document
 from app.services.document_classification import auto_classify_document
 from app.storage.base import LocalSecureStorage
@@ -108,6 +109,14 @@ def document_template_structure(document_id:int,request:Request,db:Session=Depen
  db.add(AuditEvent(user_id=user.id,bid_project_id=doc.bid_project_id,event_type="template.structure_inspected",entity_type="BidDocument",entity_id=str(doc.id),request_metadata=metadata(request),details={"parser_version":result.get("parser_version"),"tables_detected":result.get("summary",{}).get("tables_detected",0)}))
  db.commit()
  return result
+
+@router.get("/documents/{document_id}/population-plan")
+def document_population_plan(document_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ doc=get_doc(db,document_id);require_project_access(db,user,doc.bid_project_id,Permission.REQUIREMENT_VIEW)
+ if doc.duplicate_of_document_id or not doc.storage_path:raise HTTPException(422,"Document content is not available for population planning")
+ if doc.file_extension.lower()!="xlsx":raise HTTPException(422,"Population planning currently supports .xlsx templates only")
+ storage=LocalSecureStorage(get_settings().storage_root)
+ return build_population_plan(db,doc.bid_project_id,storage.read(doc.storage_path))
 
 @router.patch("/documents/{document_id}/notes",response_model=DocumentRead)
 def notes(document_id:int,payload:NotesUpdate,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
