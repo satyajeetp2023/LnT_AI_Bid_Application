@@ -21,14 +21,15 @@ from app.services.template_population_plan import build_population_plan
 from app.services.template_draft_generator import generate_controlled_xlsx_draft
 from app.services.prepared_artifacts import approve_artifact,artifact_dict,create_prepared_artifact,get_prepared_artifact,list_prepared_artifacts,mark_artifact_ready
 from app.services.submission_readiness import build_submission_package,submission_readiness
-from app.services.p6_xer import analyze_xer
+from app.services.p6_xer import analyze_schedule_tables
 from app.services.schedule_requirement_alignment import align_schedule_to_requirements
-from app.services.p6_schedule_comparison import compare_xer
-from app.services.p6_schedule_optimizer import activity_parameter_profile,build_schedule_optimization_advisor
-from app.services.schedule_scope_coverage import add_scope_item,disposition_scope_item,evaluate_scope_coverage,schedule_scope_catalog,sync_scope_from_requirements
+from app.services.p6_schedule_comparison import compare_schedule_tables
+from app.services.p6_schedule_optimizer import activity_parameter_profile_from_tables,build_schedule_optimization_from_tables
+from app.services.schedule_scope_coverage import add_scope_item,disposition_scope_item,evaluate_scope_coverage_from_tables,schedule_scope_catalog,sync_scope_from_requirements
 from app.services.boq_scope_adapter import ingest_boq_scope
 from app.services.boq_document_extraction import extract_boq_rows
 from app.services.schedule_skeleton import build_schedule_skeleton
+from app.services.schedule_ingestion import SCHEDULE_EXTENSIONS,ingest_schedule
 from app.services.documents import DOCUMENT_CATEGORIES,archive,classify,mark_revision,update_document_metadata,update_notes,upload_document
 from app.services.document_classification import auto_classify_document
 from app.storage.base import LocalSecureStorage
@@ -196,13 +197,15 @@ def approve_prepared_artifact(artifact_id:int,request:Request,db:Session=Depends
 def schedule_analysis(document_id:int,request:Request,long_duration_hours:float=Query(160,gt=0,le=10000),near_critical_hours:float=Query(40,ge=0,le=10000),db:Session=Depends(get_db),user:User=Depends(user_dep)):
  doc=get_doc(db,document_id);require_project_access(db,user,doc.bid_project_id,Permission.VIEW_DOCUMENT)
  if doc.duplicate_of_document_id or not doc.storage_path:raise HTTPException(422,"Document content is not available for schedule analysis")
- if doc.file_extension.lower()!="xer":raise HTTPException(422,"Schedule analysis currently supports Primavera .xer files")
- storage=LocalSecureStorage(get_settings().storage_root)
- content=storage.read(doc.storage_path)
- result=analyze_xer(content,long_duration_hours,near_critical_hours)
- result["optimization_advisor"]=build_schedule_optimization_advisor(content,near_critical_hours,long_duration_hours)
+ if doc.file_extension.lower() not in SCHEDULE_EXTENSIONS:raise HTTPException(422,"This file type is not supported for schedule ingestion")
+ content=LocalSecureStorage(get_settings().storage_root).read(doc.storage_path)
+ ingestion=ingest_schedule(doc.file_extension,content)
+ if not ingestion["detected"]:raise HTTPException(422,"No reliable structured schedule activity table could be extracted from this document")
+ result=analyze_schedule_tables(ingestion["tables"],long_duration_hours,near_critical_hours)
+ result["optimization_advisor"]=build_schedule_optimization_from_tables(ingestion["tables"],near_critical_hours,long_duration_hours)
  result["tender_alignment"]=align_schedule_to_requirements(db,doc.bid_project_id,result)
- db.add(AuditEvent(user_id=user.id,bid_project_id=doc.bid_project_id,event_type="schedule.xer_analyzed",entity_type="BidDocument",entity_id=str(doc.id),request_metadata=metadata(request),details={"parser_version":result.get("parser_version"),"activities":result.get("counts",{}).get("activities",0),"health_score":result.get("health",{}).get("score"),"alignment_grade":result.get("tender_alignment",{}).get("grade")}))
+ result["source_ingestion"]={k:ingestion[k] for k in ("source_kind","fidelity","capabilities","limitations","parser_version")}
+ db.add(AuditEvent(user_id=user.id,bid_project_id=doc.bid_project_id,event_type="schedule.analyzed",entity_type="BidDocument",entity_id=str(doc.id),request_metadata=metadata(request),details={"source_kind":ingestion["source_kind"],"fidelity":ingestion["fidelity"],"activities":result.get("counts",{}).get("activities",0),"health_score":result.get("health",{}).get("score"),"alignment_grade":result.get("tender_alignment",{}).get("grade")}))
  db.commit()
  return result
 
@@ -212,21 +215,28 @@ def schedule_comparison(document_id:int,request:Request,baseline_document_id:int
  require_project_access(db,user,current.bid_project_id,Permission.VIEW_DOCUMENT)
  if current.bid_project_id!=baseline.bid_project_id:raise HTTPException(422,"Baseline and current schedule must belong to the same bid")
  for doc,label in ((baseline,"Baseline"),(current,"Current")):
-  if doc.file_extension.lower()!="xer":raise HTTPException(422,f"{label} document must be a Primavera .xer file")
+  if doc.file_extension.lower() not in SCHEDULE_EXTENSIONS:raise HTTPException(422,f"{label} file type is not supported for schedule comparison")
   if doc.duplicate_of_document_id or not doc.storage_path:raise HTTPException(422,f"{label} schedule content is not available")
  if current.id==baseline.id:raise HTTPException(422,"Baseline and current schedule must be different documents")
  storage=LocalSecureStorage(get_settings().storage_root)
- result=compare_xer(storage.read(baseline.storage_path),storage.read(current.storage_path))
- db.add(AuditEvent(user_id=user.id,bid_project_id=current.bid_project_id,event_type="schedule.xer_compared",entity_type="BidDocument",entity_id=str(current.id),request_metadata=metadata(request),details={"baseline_document_id":baseline.id,"current_document_id":current.id,**result.get("summary",{})}))
+ base_ing=ingest_schedule(baseline.file_extension,storage.read(baseline.storage_path))
+ cur_ing=ingest_schedule(current.file_extension,storage.read(current.storage_path))
+ if not base_ing["detected"] or not cur_ing["detected"]:raise HTTPException(422,"Both documents must contain a reliable structured activity table")
+ result=compare_schedule_tables(base_ing["tables"],cur_ing["tables"])
+ result["source_fidelity"]={"baseline":base_ing["fidelity"],"current":cur_ing["fidelity"]}
+ db.add(AuditEvent(user_id=user.id,bid_project_id=current.bid_project_id,event_type="schedule.compared",entity_type="BidDocument",entity_id=str(current.id),request_metadata=metadata(request),details={"baseline_document_id":baseline.id,"current_document_id":current.id,"baseline_format":baseline.file_extension,"current_format":current.file_extension,**result.get("summary",{})}))
  db.commit()
  return result
 
 @router.get("/documents/{document_id}/schedule-activity-profile")
 def schedule_activity_profile(document_id:int,task_key:str=Query(...,min_length=1,max_length=200),db:Session=Depends(get_db),user:User=Depends(user_dep)):
  doc=get_doc(db,document_id);require_project_access(db,user,doc.bid_project_id,Permission.VIEW_DOCUMENT)
- if doc.file_extension.lower()!="xer" or not doc.storage_path:raise HTTPException(422,"Primavera XER content is required")
- profile=activity_parameter_profile(LocalSecureStorage(get_settings().storage_root).read(doc.storage_path),task_key)
+ if not doc.storage_path or doc.file_extension.lower() not in SCHEDULE_EXTENSIONS:raise HTTPException(422,"Supported schedule content is required")
+ ingestion=ingest_schedule(doc.file_extension,LocalSecureStorage(get_settings().storage_root).read(doc.storage_path))
+ if not ingestion["detected"]:raise HTTPException(422,"No reliable structured activity table could be extracted")
+ profile=activity_parameter_profile_from_tables(ingestion["tables"],task_key)
  if not profile:raise HTTPException(404,"Activity not found in this schedule")
+ profile["source_ingestion"]={k:ingestion[k] for k in ("source_kind","fidelity","capabilities","limitations")}
  return profile
 
 @router.post("/bids/{bid_id}/schedule-scope/sync")
@@ -277,9 +287,13 @@ def create_schedule_scope_item(bid_id:int,payload:dict,request:Request,db:Sessio
 @router.get("/documents/{document_id}/schedule-scope-coverage")
 def schedule_scope_coverage(document_id:int,request:Request,sync_requirements:bool=Query(True),db:Session=Depends(get_db),user:User=Depends(user_dep)):
  doc=get_doc(db,document_id);require_project_access(db,user,doc.bid_project_id,Permission.REQUIREMENT_VIEW)
- if doc.file_extension.lower()!="xer" or not doc.storage_path:raise HTTPException(422,"Primavera XER content is required")
+ if not doc.storage_path or doc.file_extension.lower() not in SCHEDULE_EXTENSIONS:raise HTTPException(422,"Supported schedule content is required")
+ ingestion=ingest_schedule(doc.file_extension,LocalSecureStorage(get_settings().storage_root).read(doc.storage_path))
+ if not ingestion["detected"]:raise HTTPException(422,"No reliable structured activity table could be extracted for scope coverage")
  if sync_requirements:sync_scope_from_requirements(db,doc.bid_project_id,user.id,metadata(request))
- return evaluate_scope_coverage(db,doc.bid_project_id,LocalSecureStorage(get_settings().storage_root).read(doc.storage_path),user.id,metadata(request))
+ result=evaluate_scope_coverage_from_tables(db,doc.bid_project_id,ingestion["tables"],user.id,metadata(request))
+ result["source_ingestion"]={k:ingestion[k] for k in ("source_kind","fidelity","capabilities","limitations")}
+ return result
 
 @router.post("/schedule-scope/items/{item_id}/disposition")
 def schedule_scope_disposition(item_id:int,payload:dict,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
