@@ -188,12 +188,12 @@ def approve_prepared_artifact(artifact_id:int,request:Request,db:Session=Depends
  return artifact_dict(approve_artifact(db,item,user.id,metadata(request)))
 
 @router.get("/documents/{document_id}/schedule-analysis")
-def schedule_analysis(document_id:int,request:Request,long_duration_hours:float=Query(160,gt=0,le=10000),db:Session=Depends(get_db),user:User=Depends(user_dep)):
+def schedule_analysis(document_id:int,request:Request,long_duration_hours:float=Query(160,gt=0,le=10000),near_critical_hours:float=Query(40,ge=0,le=10000),db:Session=Depends(get_db),user:User=Depends(user_dep)):
  doc=get_doc(db,document_id);require_project_access(db,user,doc.bid_project_id,Permission.VIEW_DOCUMENT)
  if doc.duplicate_of_document_id or not doc.storage_path:raise HTTPException(422,"Document content is not available for schedule analysis")
  if doc.file_extension.lower()!="xer":raise HTTPException(422,"Schedule analysis currently supports Primavera .xer files")
  storage=LocalSecureStorage(get_settings().storage_root)
- result=analyze_xer(storage.read(doc.storage_path),long_duration_hours)
+ result=analyze_xer(storage.read(doc.storage_path),long_duration_hours,near_critical_hours)
  result["tender_alignment"]=align_schedule_to_requirements(db,doc.bid_project_id,result)
  db.add(AuditEvent(user_id=user.id,bid_project_id=doc.bid_project_id,event_type="schedule.xer_analyzed",entity_type="BidDocument",entity_id=str(doc.id),request_metadata=metadata(request),details={"parser_version":result.get("parser_version"),"activities":result.get("counts",{}).get("activities",0),"health_score":result.get("health",{}).get("score"),"alignment_grade":result.get("tender_alignment",{}).get("grade")}))
  db.commit()
