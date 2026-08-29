@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.services.template_population_plan import build_population_plan
 
 
-ALLOWED_CHOICE_MARKS={"X","✓","Yes"}
+ALLOWED_CHOICE_MARKS={"X","✓"}
 
 
 def generate_controlled_xlsx_draft(
