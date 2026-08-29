@@ -27,6 +27,8 @@ def generate_controlled_xlsx_draft(
     skipped=[]
     header_values=header_values or {}
     field_overrides=field_overrides or {}
+    required_header_fields=[x["semantic_field"] for x in plan.get("header_inputs",[])]
+    missing_header_fields=[x for x in required_header_fields if not str(header_values.get(x,"") or "").strip()]
 
     allowed_override_fields={}
     row_choice_keys={}
@@ -110,7 +112,9 @@ def generate_controlled_xlsx_draft(
         "choice_mark":choice_mark,
         "suggested_text_included":include_suggested_text,
         "header_values_applied":sorted(k for k,v in header_values.items() if str(v or "").strip()),
+        "missing_header_fields":missing_header_fields,
+        "missing_header_field_count":len(missing_header_fields),
         "human_overrides_applied":sum(1 for x in written if x.get("source")=="human_override"),
         "plan_version":plan.get("plan_version"),
-        "generator_version":"phase5-controlled-xlsx-generator-v3",
+        "generator_version":"phase5-controlled-xlsx-generator-v4",
     }
