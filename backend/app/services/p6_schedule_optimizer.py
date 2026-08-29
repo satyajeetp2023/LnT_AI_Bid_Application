@@ -106,6 +106,37 @@ def build_schedule_optimization_advisor(
     else:
         loading_status="Partially Resource Loaded"
 
+    active_non_milestone=[x for x in tasks if x.get("task_type") not in milestone_types]
+    completeness_checks=[]
+    def add_check(name,predicate,required=True):
+        denominator=len(active_non_milestone)
+        populated=sum(1 for task in active_non_milestone if predicate(task))
+        completeness_checks.append({
+            "parameter":name,
+            "required":required,
+            "populated":populated,
+            "total":denominator,
+            "percent":100.0 if denominator==0 else round(populated*100/denominator,1),
+            "missing_activity_codes":[
+                task.get("task_code") or task.get("task_id")
+                for task in active_non_milestone if not predicate(task)
+            ][:100],
+        })
+    add_check("Activity ID / Code",lambda t:bool(str(t.get("task_code") or "").strip()))
+    add_check("Activity Name",lambda t:bool(str(t.get("task_name") or "").strip()))
+    add_check("WBS Assignment",lambda t:bool(str(t.get("wbs_id") or "").strip()))
+    add_check("Calendar",lambda t:bool(str(t.get("clndr_id") or "").strip()))
+    add_check("Status",lambda t:bool(str(t.get("status_code") or "").strip()))
+    add_check("Duration",lambda t:_float(t.get("target_drtn_hr_cnt"))>0 or _float(t.get("remain_drtn_hr_cnt"))>0)
+    add_check("Start Date",lambda t:any(str(t.get(k) or "").strip() for k in ("act_start_date","early_start_date","target_start_date","late_start_date")))
+    add_check("Finish Date",lambda t:any(str(t.get(k) or "").strip() for k in ("act_end_date","early_end_date","target_end_date","late_end_date")))
+    add_check("Total Float",lambda t:str(t.get("total_float_hr_cnt") or "").strip()!="")
+    add_check("Logic",lambda t:bool(preds.get(t.get("task_id")) or succs.get(t.get("task_id"))))
+    if assignments:
+        add_check("Resource Assignment",lambda t:t.get("task_id") in assigned_task_ids,required=False)
+    required_checks=[x for x in completeness_checks if x["required"]]
+    data_completeness_score=100.0 if not required_checks else round(sum(x["percent"] for x in required_checks)/len(required_checks),1)
+
     complete_statuses={"TK_Complete","Complete","Completed"}
 
     candidates=[]
@@ -216,6 +247,12 @@ def build_schedule_optimization_advisor(
 
     table_inventory=_table_inventory(tables)
     return {
+        "data_completeness":{
+            "score":data_completeness_score,
+            "grade":"Complete" if data_completeness_score>=95 else "Needs Attention" if data_completeness_score>=80 else "Incomplete",
+            "checks":completeness_checks,
+            "note":"Resource completeness is shown only when the schedule actually contains resource assignments. Contract-specific resource requirements are checked separately.",
+        },
         "resource_loading":{
             "status":loading_status,
             "activities_with_assignments":covered_active,
@@ -241,7 +278,7 @@ def build_schedule_optimization_advisor(
             "high_adjustment_potential":sum(1 for x in candidates if x["adjustment_potential"]=="High"),
             "medium_adjustment_potential":sum(1 for x in candidates if x["adjustment_potential"]=="Medium"),
             "candidates":candidates,
-            "methodology":"phase6-schedule-optimization-advisor-v3",
+            "methodology":"phase6-schedule-optimization-advisor-v4",
             "note":"The advisor identifies activities worth reviewing for schedule refinement. It never changes the schedule automatically.",
         },
     }
