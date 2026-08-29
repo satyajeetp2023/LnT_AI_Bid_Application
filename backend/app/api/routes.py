@@ -120,12 +120,12 @@ def document_population_plan(document_id:int,db:Session=Depends(get_db),user:Use
  return build_population_plan(db,doc.bid_project_id,storage.read(doc.storage_path))
 
 @router.post("/documents/{document_id}/generate-controlled-draft")
-def generate_template_draft(document_id:int,request:Request,choice_mark:str=Query("X"),include_suggested_text:bool=Query(False),db:Session=Depends(get_db),user:User=Depends(user_dep)):
+def generate_template_draft(document_id:int,request:Request,payload:dict|None=None,choice_mark:str=Query("X"),include_suggested_text:bool=Query(False),db:Session=Depends(get_db),user:User=Depends(user_dep)):
  doc=get_doc(db,document_id);require_project_access(db,user,doc.bid_project_id,Permission.REQUIREMENT_MANAGE)
  if doc.duplicate_of_document_id or not doc.storage_path:raise HTTPException(422,"Document content is not available for draft generation")
  if doc.file_extension.lower()!="xlsx":raise HTTPException(422,"Controlled draft generation currently supports .xlsx templates only")
  storage=LocalSecureStorage(get_settings().storage_root)
- try:data,summary=generate_controlled_xlsx_draft(db,doc.bid_project_id,storage.read(doc.storage_path),choice_mark,include_suggested_text)
+ try:data,summary=generate_controlled_xlsx_draft(db,doc.bid_project_id,storage.read(doc.storage_path),choice_mark,include_suggested_text,(payload or {}).get("header_values") or {})
  except ValueError as exc:raise HTTPException(422,str(exc)) from None
  db.add(AuditEvent(user_id=user.id,bid_project_id=doc.bid_project_id,event_type="template.controlled_draft_generated",entity_type="BidDocument",entity_id=str(doc.id),request_metadata=metadata(request),details={k:v for k,v in summary.items() if k not in {"written","unresolved"}}))
  db.commit()
