@@ -34,6 +34,7 @@ def _next_query_number(db:Session,project_id:int)->str:
  return f"PBQ-{highest+1:03d}"
 
 def create_pre_bid_query(db:Session,project_id:int,payload,user_id:int,request_metadata:dict):
+ if payload.status=="Approved":raise HTTPException(422,"Use the approval workflow to approve a pre-bid query")
  validate_links(db,project_id,payload.requirement_id,payload.missing_input_id,payload.source_document_id)
  values=payload.model_dump();values["query_number"]=(values.get("query_number") or "").strip() or _next_query_number(db,project_id)
  item=BidPreBidQuery(**values,bid_project_id=project_id,created_by=user_id);normalize_workflow(item)
@@ -52,7 +53,9 @@ def list_pre_bid_queries(db:Session,project_id:int,filters:dict,page:int,page_si
  rows=db.scalars(q.order_by(order,BidPreBidQuery.target_response_date.asc().nullslast(),BidPreBidQuery.created_at.desc()).offset((page-1)*page_size).limit(page_size)).all();return rows,total
 
 def update_pre_bid_query(db:Session,item:BidPreBidQuery,payload,user_id:int,request_metadata:dict):
- values=payload.model_dump(exclude_unset=True);validate_links(db,item.bid_project_id,values.get("requirement_id",item.requirement_id),values.get("missing_input_id",item.missing_input_id),values.get("source_document_id",item.source_document_id));previous=item.status
+ values=payload.model_dump(exclude_unset=True)
+ if values.get("status")=="Approved" and item.status!="Approved":raise HTTPException(422,"Use the approval workflow to approve a pre-bid query")
+ validate_links(db,item.bid_project_id,values.get("requirement_id",item.requirement_id),values.get("missing_input_id",item.missing_input_id),values.get("source_document_id",item.source_document_id));previous=item.status
  approval_sensitive={"query_title","query_text","query_category","priority","responsible_function","responsible_person","requirement_id","missing_input_id","source_document_id","source_page","source_clause","source_section","source_excerpt","impact_if_unresolved"}
  materially_changed=bool(approval_sensitive&set(values))
  for field,value in values.items():setattr(item,field,value)
