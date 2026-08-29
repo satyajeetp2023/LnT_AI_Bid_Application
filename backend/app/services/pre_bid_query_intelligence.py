@@ -19,6 +19,8 @@ AUTHORITATIVE_ANSWER_CATEGORIES={"Pre-Bid Clarification","Addendum / Corrigendum
 
 REFERENCE_RE=re.compile(r"\b(?:drawing(?:\s+no\.?)?|drg\.?\s*no\.?|annexure|annex|appendix)\s*[:#-]?\s*([A-Z0-9][A-Z0-9./_-]{2,})",re.I)
 NUMBER_RE=re.compile(r"\b\d+(?:\.\d+)?\s*(?:days?|months?|years?|km|m|mm|kv|mw|mva|%|nos?\.?|units?)?\b",re.I)
+UNDEFINED_RE=re.compile(r"\b(?:TBD|TBA)\b|to be advised|to be confirmed|details? to be provided|information to be provided|not specified|not defined|shall be intimated|will be intimated",re.I)
+
 
 def _compact(text:str)->str:
     return re.sub(r"[^a-z0-9]+","",text.lower())
@@ -54,6 +56,30 @@ def _missing_references(db:Session,bid_id:int,requirements:list[BidRequirement],
             ))
             blocked.add(req.id)
             break
+    return out
+
+def _undefined_particulars(requirements:list[BidRequirement],blocked:set[int])->list[SuggestedPreBidQuery]:
+    out=[]
+    for req in requirements:
+        if req.id in blocked:continue
+        match=UNDEFINED_RE.search(req.requirement_text or "")
+        if not match:continue
+        check=KnowledgeCheck("unresolved",.0,0)
+        phrase=match.group(0)
+        query_text=f"The tender requirement contains an undefined/open particular ('{phrase}') in the following requirement: '{req.requirement_text[:700]}'. Kindly provide/confirm the final applicable particulars so that the bid can be prepared on a clear and comparable basis."
+        out.append(SuggestedPreBidQuery(
+            source_kind="Undefined Tender Particular",source_id=req.id,
+            query_title=f"Clarification of undefined tender particular: {phrase}",
+            query_text=query_text,query_category=_category(req.requirement_category),
+            priority="High" if req.priority in {"Critical","High"} else "Medium",
+            responsible_function=req.responsible_function,requirement_id=req.id,missing_input_id=None,
+            source_document_id=req.source_document_id,source_page=req.source_page,source_clause=req.source_clause,
+            source_section=req.source_section,source_excerpt=req.source_excerpt or req.requirement_text,
+            impact_if_unresolved="An undefined tender particular may create uncertainty in pricing, design, planning, compliance or scope interpretation.",
+            rationale=f"The tender text explicitly leaves a material particular open using the phrase '{phrase}'.",
+            confidence=.93,knowledge_check=check,
+        ))
+        blocked.add(req.id)
     return out
 
 def _conflicting_requirements(requirements:list[BidRequirement],blocked:set[int])->list[SuggestedPreBidQuery]:
@@ -276,6 +302,7 @@ class RuleBasedPreBidQuerySuggestionProvider:
         all_requirements=db.scalars(select(BidRequirement).where(BidRequirement.bid_project_id==bid_id,BidRequirement.requirement_status!="Closed")).all()
         blocked=set(existing_requirements)|{s.requirement_id for s in suggestions if s.requirement_id is not None}
         suggestions.extend(_missing_references(db,bid_id,all_requirements,blocked))
+        suggestions.extend(_undefined_particulars(all_requirements,blocked))
         suggestions.extend(_conflicting_requirements(all_requirements,blocked))
 
         suggestions.sort(key=lambda x:({"Critical":0,"High":1,"Medium":2,"Low":3}.get(x.priority,4),-x.confidence,x.query_title.lower()))
@@ -290,5 +317,5 @@ def suggest_pre_bid_queries(db:Session,bid_id:int):
         "knowledge_provider":getattr(provider.knowledge,"version","unknown"),
         "items":[x.as_dict() for x in items],
         "answered":answered,
-        "summary":{"suggested":len(items),"answered_in_tender":len(answered),"automatic_discoveries":sum(1 for x in items if x.source_kind in {"Missing Reference","Cross-Document Conflict"})},
+        "summary":{"suggested":len(items),"answered_in_tender":len(answered),"automatic_discoveries":sum(1 for x in items if x.source_kind in {"Missing Reference","Undefined Tender Particular","Cross-Document Conflict"})},
     }
