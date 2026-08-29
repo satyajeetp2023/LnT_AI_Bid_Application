@@ -85,6 +85,27 @@ def align_schedule_to_requirements(db:Session,bid_id:int,analysis:dict):
 
     for req in requirements:
         text=f"{req.requirement_title} {req.requirement_text}"
+        lower=text.lower()
+        resource_required=any(x in lower for x in ("resource loaded","resource-loaded","resource loading","manpower histogram","equipment histogram","labour histogram","labor histogram"))
+        if resource_required:
+            loading=(analysis.get("optimization_advisor") or {}).get("resource_loading") or {}
+            status=loading.get("status") or "Unknown"
+            ratio=loading.get("coverage_ratio")
+            if status=="Not Resource Loaded":
+                check_status="Fail";reason="Tender requires resource-loaded planning output, but the XER contains no resource assignments."
+            elif status=="Partially Resource Loaded":
+                check_status="Manual Review";reason="Resource assignments exist only for part of the schedule; confirm whether this satisfies the tender requirement."
+            elif status=="Broadly Resource Loaded":
+                check_status="Pass";reason="The schedule is broadly resource loaded."
+            else:
+                check_status="Manual Review";reason="Resource-loading status could not be established."
+            checks.append({
+                "requirement_id":req.id,"requirement_title":req.requirement_title,"source_clause":req.source_clause,
+                "check_type":"Resource Loading","expected":"Resource-loaded schedule / histogram requirement",
+                "actual":f'{status}' + (f' · {round(float(ratio)*100)}% activity coverage' if ratio is not None else ""),
+                "status":check_status,"confidence":.95,"reason":reason,
+            })
+            continue
         expected_days,raw_duration=_duration_days(text)
         required_date,raw_date=_extract_date(text)
 
@@ -149,6 +170,6 @@ def align_schedule_to_requirements(db:Session,bid_id:int,analysis:dict):
             "failed":failed,
             "manual_review":manual,
         },
-        "version":"phase6-schedule-requirement-alignment-v1",
+        "version":"phase6-schedule-requirement-alignment-v2",
         "note":"Only explicit completion-duration and reliably matched dated-milestone requirements are checked automatically.",
     }
