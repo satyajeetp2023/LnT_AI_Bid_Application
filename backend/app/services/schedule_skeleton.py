@@ -41,15 +41,18 @@ def build_schedule_skeleton(db:Session,bid_id:int):
     activities=[]
     for index,group in enumerate(groups,1):
         phase=_phase(group.get("activity_name") or "")
-        wbs=group.get("parent_activity_name") or (
+        parent_name=group.get("parent_activity_name")
+        wbs=parent_name or (
             "Tender / BOQ Scope" if group.get("source_type") in {"BOQ","Contract / Technical Requirement","Manual"}
             else "Project-Type Knowledge"
         )
+        sequence_group=parent_name or f'scope-{group.get("canonical_item_id") or group.get("id")}'
         activities.append({
             "kind":"Activity",
             "suggested_code":f"SCH-{index:04d}",
             "activity_name":group.get("activity_name"),
             "wbs":wbs,
+            "sequence_group":sequence_group,
             "phase":phase,
             "phase_rank":PHASE_ORDER.get(phase,45),
             "mandatory":bool(group.get("mandatory")),
@@ -75,6 +78,7 @@ def build_schedule_skeleton(db:Session,bid_id:int):
             "suggested_code":f"MIL-{milestone.id:04d}",
             "activity_name":milestone.requirement_title,
             "wbs":"Contract Milestones",
+            "sequence_group":f"milestone-{milestone.id}",
             "phase":"Milestone",
             "phase_rank":999,
             "mandatory":milestone.is_mandatory,
@@ -91,7 +95,7 @@ def build_schedule_skeleton(db:Session,bid_id:int):
 
     by_wbs=defaultdict(list)
     for row in activities:
-        if row["kind"]=="Activity":by_wbs[row["wbs"]].append(row)
+        if row["kind"]=="Activity":by_wbs[row["sequence_group"]].append(row)
     for rows in by_wbs.values():
         rows.sort(key=lambda x:(x["phase_rank"],x["suggested_code"]))
         previous=None
@@ -111,6 +115,6 @@ def build_schedule_skeleton(db:Session,bid_id:int):
             "needs_duration":sum(1 for x in activities if x["kind"]=="Activity" and x["duration"] is None),
             "needs_calendar":sum(1 for x in activities if x["kind"]=="Activity" and x["calendar"] is None),
         },
-        "version":"phase6-expected-schedule-skeleton-v1",
+        "version":"phase6-expected-schedule-skeleton-v2",
         "note":"This is a planning skeleton, not a Primavera programme. Durations, calendars, resources and logic must be set and recalculated by the planner.",
     }
