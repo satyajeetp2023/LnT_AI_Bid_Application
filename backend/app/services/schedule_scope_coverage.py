@@ -301,6 +301,26 @@ def _consolidate_rows(rows:list[dict]):
             "why_expected":x.get("why_expected"),
             "mandatory":x.get("mandatory"),
         } for x in cluster]
+        authority_points={"BOQ":45,"Contract / Technical Requirement":40,"Manual":25,"Project-Type Knowledge":10}
+        authority_score=min(100,sum(
+            authority_points.get(x.get("source_type"),15) * (1.0 if x.get("mandatory") else .6)
+            for x in cluster
+        ))
+        evidence_strength=(
+            "Contractual / BOQ Strong"
+            if authority_score>=70 else
+            "Strong Bid Scope Evidence"
+            if authority_score>=50 else
+            "Moderate Evidence"
+            if authority_score>=30 else
+            "Knowledge Suggestion"
+        )
+        flag_priority=(
+            "Critical" if group_blocking and authority_score>=80 else
+            "High" if group_blocking and authority_score>=50 else
+            "Medium" if group_blocking else
+            "Low"
+        )
         coverage_values={x.get("coverage_status") for x in cluster}
         group_coverage=(
             "Covered" if "Covered" in coverage_values else
@@ -343,6 +363,9 @@ def _consolidate_rows(rows:list[dict]):
             "evidence_count":len(cluster),
             "evidence":evidence,
             "mandatory":group_mandatory,
+            "authority_score":round(authority_score,1),
+            "evidence_strength":evidence_strength,
+            "flag_priority":flag_priority,
             "group_blocking":group_blocking,
             "group_coverage_status":group_coverage,
             "member_item_ids":[x["id"] for x in cluster],
@@ -651,7 +674,7 @@ def evaluate_scope_coverage(db:Session,bid_id:int,xer_content:bytes,user_id:int,
         },
         "ready":len(blocking_groups)==0 and len(groups)>0,
         "grade":"Complete" if len(blocking_groups)==0 and groups else "Action Required" if groups else "No Scope Catalog",
-        "methodology":"phase6-schedule-scope-coverage-v8",
+        "methodology":"phase6-schedule-scope-coverage-v9",
         "note":"Expected activities are independently sourced from bid scope. Missing or ambiguous coverage must be explained; 'To Be Added' remains a blocker until a revised schedule contains the activity.",
     }
 
