@@ -14,6 +14,7 @@ from app.services.bids import create_bid,list_bids,update_bid
 from app.services.requirements import create_requirement,list_requirements,update_requirement
 from app.services.requirement_extraction import extract_requirements_from_document
 from app.services.responsibility_assignment import suggest_responsible_function
+from app.services.department_workflow import department_work_queue
 from app.services.documents import DOCUMENT_CATEGORIES,archive,classify,mark_revision,update_document_metadata,update_notes,upload_document
 from app.services.document_classification import auto_classify_document
 from app.storage.base import LocalSecureStorage
@@ -112,6 +113,10 @@ def download(document_id:int,request:Request,db:Session=Depends(get_db),user:Use
  doc=get_doc(db,document_id); require_project_access(db,user,doc.bid_project_id,Permission.DOWNLOAD_DOCUMENT)
  if not doc.storage_path: raise HTTPException(404,"Document content not available")
  data=LocalSecureStorage(get_settings().storage_root).read(doc.storage_path); db.add(AuditEvent(user_id=user.id,bid_project_id=doc.bid_project_id,event_type="document.downloaded",entity_type="BidDocument",entity_id=str(doc.id),request_metadata=metadata(request))); db.commit(); safe=doc.original_filename.replace('"',''); return Response(data,media_type=doc.mime_type,headers={"Content-Disposition":f'attachment; filename="{safe}"'})
+@router.get("/bids/{bid_id}/department-work-queue")
+def get_department_work_queue(bid_id:int,responsible_function:str|None=None,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.REQUIREMENT_VIEW);get_bid(db,bid_id);return department_work_queue(db,bid_id,responsible_function)
+
 @router.post("/bids/{bid_id}/auto-assign-owners")
 def auto_assign_owners(bid_id:int,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
  require_project_access(db,user,bid_id,Permission.REQUIREMENT_MANAGE);get_bid(db,bid_id)
