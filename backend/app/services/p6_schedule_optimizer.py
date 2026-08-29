@@ -100,62 +100,83 @@ def build_schedule_optimization_advisor(
         task_type=task.get("task_type")
         issues=[]
         opportunities=[]
-        score=0
+        review_score=0
+        adjustment_score=0
+        adjustment_types=[]
 
         if task_type not in milestone_types and not preds.get(task_id):
             issues.append("No predecessor / open start")
             opportunities.append("Review whether a predecessor or release condition should be added.")
-            score+=22
+            review_score+=22
         if task_type not in milestone_types and not succs.get(task_id):
             issues.append("No successor / open finish")
             opportunities.append("Review whether downstream logic or a completion tie is missing.")
-            score+=22
+            review_score+=22
 
         if total_float<0:
             issues.append("Negative total float")
             opportunities.append("Do not compress automatically. Review logic, constraints, duration and contractual milestone assumptions first.")
-            score+=28
+            review_score+=28
         elif total_float<=near_critical_hours:
             issues.append("Near-critical float")
             opportunities.append("Treat as sensitive. Test sequencing, duration and resource assumptions before consuming available float.")
-            score+=18
+            review_score+=18
         elif total_float>near_critical_hours:
             opportunities.append("Available float may allow resequencing or resource smoothing, subject to access, procurement and interface constraints.")
-            score+=5
+            adjustment_score+=20
+            adjustment_types.extend(["Resequencing","Resource smoothing"])
 
         if duration>long_duration_hours and task_type not in milestone_types:
             issues.append("Long duration")
             opportunities.append("Review whether the activity can be broken into measurable work fronts or shorter control activities.")
-            score+=16
+            review_score+=16
+            adjustment_score+=16
+            adjustment_types.append("Duration / work-front breakdown")
 
         lagged=[x for x in preds.get(task_id,[]) if abs(_float(x.get("lag_hr_cnt")))>.001]
         if lagged:
             issues.append(f"{len(lagged)} predecessor relationship(s) with lag")
             opportunities.append("Review whether lag can be replaced by an explicit activity for clearer logic and progress measurement.")
-            score+=min(15,5*len(lagged))
+            review_score+=min(15,5*len(lagged))
+            adjustment_score+=min(12,4*len(lagged))
+            adjustment_types.append("Logic / lag refinement")
 
         cstr=str(task.get("cstr_type") or "").strip()
         cstr2=str(task.get("cstr_type2") or "").strip()
         if (cstr and cstr not in {"CS_None","None"}) or (cstr2 and cstr2 not in {"CS_None","None"}):
             issues.append("Constraint applied")
             opportunities.append("Check whether the constraint is contractually required or can be represented through logic.")
-            score+=14
+            review_score+=14
+            adjustment_types.append("Constraint review")
 
         resource_count=task_resources.get(task_id,0)
         if assignments and resource_count==0 and task_type not in milestone_types:
             issues.append("No resource assignment")
             opportunities.append("Review whether the activity should be resource-loaded for more realistic sequencing and duration.")
-            score+=10
+            review_score+=10
+            adjustment_types.append("Resource loading review")
         elif resource_count>0 and total_float>near_critical_hours:
             opportunities.append("Resource-loaded activity with float may be a candidate for resource leveling without affecting key milestones.")
-            score+=4
+            adjustment_score+=10
+            adjustment_types.append("Resource leveling")
 
         if len(preds.get(task_id,[]))>4 or len(succs.get(task_id,[]))>4:
             issues.append("High logic density")
             opportunities.append("Review dense logic for redundant ties or unnecessary constraints on sequencing.")
-            score+=8
+            review_score+=8
+            adjustment_score+=6
+            adjustment_types.append("Logic simplification")
 
-        if score<8 and not issues:continue
+        hard_constraint=((cstr and cstr not in {"CS_None","None"}) or (cstr2 and cstr2 not in {"CS_None","None"}))
+        if total_float<=0:
+            adjustment_score=max(0,adjustment_score-20)
+        elif total_float<=near_critical_hours:
+            adjustment_score=max(0,adjustment_score-10)
+        if hard_constraint:
+            adjustment_score=max(0,adjustment_score-8)
+        if task_type in milestone_types:
+            adjustment_score=0
+        if review_score<8 and adjustment_score<8 and not issues:continue
 
         candidates.append({
             **_task_label(task),
@@ -166,12 +187,15 @@ def build_schedule_optimization_advisor(
             "resource_assignment_count":resource_count,
             "issues":issues,
             "adjustment_opportunities":opportunities,
-            "adjustability_score":min(100,score),
-            "priority":"High" if score>=45 else "Medium" if score>=25 else "Low",
+            "review_priority_score":min(100,review_score),
+            "adjustability_score":min(100,adjustment_score),
+            "review_priority":"High" if review_score>=45 else "Medium" if review_score>=25 else "Low",
+            "adjustment_potential":"High" if adjustment_score>=35 else "Medium" if adjustment_score>=18 else "Low",
+            "adjustment_types":sorted(set(adjustment_types)),
             "guardrail":"Recommendation only. Recalculate in Primavera after any change and verify milestones, interfaces, resources, calendars and contractual requirements.",
         })
 
-    candidates.sort(key=lambda x:(-x["adjustability_score"],x["total_float_hours"],x.get("task_code") or ""))
+    candidates.sort(key=lambda x:(-x["review_priority_score"],-x["adjustability_score"],x["total_float_hours"],x.get("task_code") or ""))
 
     table_inventory=_table_inventory(tables)
     return {
@@ -185,11 +209,13 @@ def build_schedule_optimization_advisor(
         },
         "optimization":{
             "candidate_count":len(candidates),
-            "high_priority":sum(1 for x in candidates if x["priority"]=="High"),
-            "medium_priority":sum(1 for x in candidates if x["priority"]=="Medium"),
-            "low_priority":sum(1 for x in candidates if x["priority"]=="Low"),
+            "high_priority":sum(1 for x in candidates if x["review_priority"]=="High"),
+            "medium_priority":sum(1 for x in candidates if x["review_priority"]=="Medium"),
+            "low_priority":sum(1 for x in candidates if x["review_priority"]=="Low"),
+            "high_adjustment_potential":sum(1 for x in candidates if x["adjustment_potential"]=="High"),
+            "medium_adjustment_potential":sum(1 for x in candidates if x["adjustment_potential"]=="Medium"),
             "candidates":candidates,
-            "methodology":"phase6-schedule-optimization-advisor-v1",
+            "methodology":"phase6-schedule-optimization-advisor-v2",
             "note":"The advisor identifies activities worth reviewing for schedule refinement. It never changes the schedule automatically.",
         },
     }
