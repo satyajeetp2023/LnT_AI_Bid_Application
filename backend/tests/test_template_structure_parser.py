@@ -26,15 +26,6 @@ def _sample_workbook():
         ws["C5"]="Yes"
         ws["D5"]="No"
         ws["B6"]=name
-        for row in range(4,7):
-            for col in range(2,7):
-                cell=ws.cell(row,col)
-                cell.border=cell.border.copy(
-                    left=cell.border.left.copy(style="thin"),
-                    right=cell.border.right.copy(style="thin"),
-                    top=cell.border.top.copy(style="thin"),
-                    bottom=cell.border.bottom.copy(style="thin"),
-                )
     out=io.BytesIO();wb.save(out);return out.getvalue()
 
 
