@@ -362,10 +362,18 @@ class RuleBasedPreBidQuerySuggestionProvider:
 def suggest_pre_bid_queries(db:Session,bid_id:int):
     provider=RuleBasedPreBidQuerySuggestionProvider()
     items,answered=provider.suggest(db,bid_id)
+    decisions=db.scalars(select(BidPreBidQueryDecision).where(
+        BidPreBidQueryDecision.bid_project_id==bid_id,
+        BidPreBidQueryDecision.decision=="Do Not Raise",
+    ).order_by(BidPreBidQueryDecision.updated_at.desc())).all()
     return {
         "provider":provider.version,
         "knowledge_provider":getattr(provider.knowledge,"version","unknown"),
         "items":[x.as_dict() for x in items],
         "answered":answered,
-        "summary":{"suggested":len(items),"answered_in_tender":len(answered),"automatic_discoveries":sum(1 for x in items if x.source_kind in {"Missing Reference","Undefined Tender Particular","Scope Ownership Conflict","Cross-Document Conflict"}),"suppressed":len(db.scalars(select(BidPreBidQueryDecision).where(BidPreBidQueryDecision.bid_project_id==bid_id,BidPreBidQueryDecision.decision=="Do Not Raise")).all())},
+        "suppressed":[
+            {"source_kind":x.source_kind,"source_id":x.source_id,"decision":x.decision,"reason":x.reason,"decided_at":x.decided_at.isoformat()}
+            for x in decisions
+        ],
+        "summary":{"suggested":len(items),"answered_in_tender":len(answered),"automatic_discoveries":sum(1 for x in items if x.source_kind in {"Missing Reference","Undefined Tender Particular","Scope Ownership Conflict","Cross-Document Conflict"}),"suppressed":len(decisions)},
     }
