@@ -54,9 +54,11 @@ def export_pre_bid_queries(bid_id:int,db:Session=Depends(get_db),user:User=Depen
  return StreamingResponse(iter([body]),media_type="text/csv; charset=utf-8",headers={"Content-Disposition":f'attachment; filename="{filename}"'})
 
 @router.get("/bids/{bid_id}/pre-bid-queries/export.docx")
-def export_pre_bid_queries_docx(bid_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+def export_pre_bid_queries_docx(bid_id:int,submission_only:bool=Query(False),db:Session=Depends(get_db),user:User=Depends(user_dep)):
  require_project_access(db,user,bid_id,Permission.PRE_BID_QUERY_VIEW);bid=get_bid(db,bid_id)
- rows=db.scalars(select(BidPreBidQuery).where(BidPreBidQuery.bid_project_id==bid_id,BidPreBidQuery.status!="Withdrawn").order_by(BidPreBidQuery.id)).all()
+ conditions=[BidPreBidQuery.bid_project_id==bid_id,BidPreBidQuery.status!="Withdrawn"]
+ if submission_only:conditions.append(BidPreBidQuery.status.in_(["Ready for Review","Submitted","Responded","Closed"]))
+ rows=db.scalars(select(BidPreBidQuery).where(*conditions).order_by(BidPreBidQuery.query_number.asc().nullslast(),BidPreBidQuery.id)).all()
  document=WordDocument()
  section=document.sections[0]
  section.orientation=WD_ORIENT.LANDSCAPE
@@ -65,7 +67,7 @@ def export_pre_bid_queries_docx(bid_id:int,db:Session=Depends(get_db),user:User=
  styles=document.styles
  styles["Normal"].font.name="Calibri";styles["Normal"].font.size=Pt(9)
  title=document.add_paragraph()
- title_run=title.add_run("PRE-BID QUERY REGISTER");title_run.bold=True;title_run.font.size=Pt(16)
+ title_run=title.add_run("PRE-BID QUERY REGISTER" + (" — SUBMISSION SET" if submission_only else ""));title_run.bold=True;title_run.font.size=Pt(16)
  subtitle=document.add_paragraph()
  subtitle.add_run(f"Bid ID: {bid.bid_id}   |   Tender Ref: {bid.tender_reference_no}\n").bold=True
  subtitle.add_run(f"Tender: {bid.tender_name}\nClient: {bid.client}")
@@ -89,9 +91,9 @@ def export_pre_bid_queries_docx(bid_id:int,db:Session=Depends(get_db),user:User=
   if item.response_reference:response+=f"\nRef: {item.response_reference}"
   if item.response_date:response+=f"\nDate: {item.response_date.isoformat()}"
   cells[5].text=response
- document.add_paragraph(f"Generated from L&T Bid Intelligence · {len(rows)} query{'ies' if len(rows)!=1 else ''}")
+ document.add_paragraph(f"Generated from L&T Bid Intelligence · {len(rows)} query{'ies' if len(rows)!=1 else ''}" + (" · Draft and withdrawn items excluded" if submission_only else ""))
  output=io.BytesIO();document.save(output);output.seek(0)
- filename=f"{bid.bid_id}_pre_bid_queries.docx"
+ filename=f"{bid.bid_id}_pre_bid_queries{'_submission' if submission_only else ''}.docx"
  return StreamingResponse(output,media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",headers={"Content-Disposition":f'attachment; filename="{filename}"'})
 
 @router.post("/bids/{bid_id}/pre-bid-query-suggestions/decision")
