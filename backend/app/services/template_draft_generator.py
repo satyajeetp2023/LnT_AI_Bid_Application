@@ -17,6 +17,7 @@ def generate_controlled_xlsx_draft(
     choice_mark:str="X",
     include_suggested_text:bool=False,
     header_values:dict|None=None,
+    field_overrides:dict|None=None,
 ):
     if choice_mark not in ALLOWED_CHOICE_MARKS:
         raise ValueError("Unsupported choice mark")
@@ -25,6 +26,31 @@ def generate_controlled_xlsx_draft(
     written=[]
     skipped=[]
     header_values=header_values or {}
+    field_overrides=field_overrides or {}
+
+    allowed_override_fields={}
+    row_choice_keys={}
+    for row in plan["rows"]:
+        for field in row["fields"]:
+            coordinate=field.get("coordinate")
+            if not coordinate:continue
+            key=f'{row["sheet"]}!{coordinate}'
+            allowed_override_fields[key]={**field,"sheet":row["sheet"]}
+            if field.get("semantic_field") in {"compliant_yes","compliant_no"}:
+                row_choice_keys.setdefault(row["sheet"],[]).append(key)
+
+    for sheet,keys in row_choice_keys.items():
+        selected=[k for k in keys if str(field_overrides.get(k,"") or "").strip()]
+        if len(selected)>1:
+            raise ValueError(f"Only one compliance choice may be selected on sheet {sheet}")
+    for key,value in field_overrides.items():
+        field=allowed_override_fields.get(key)
+        if not field:
+            raise ValueError(f"Unknown template field override: {key}")
+        if field.get("ownership")=="employer_only" or field.get("action")=="preserve":
+            raise ValueError(f"Field {key} is not bidder-editable")
+        if field.get("action") not in {"needs_review","needs_human_decision","needs_assessment","needs_input","suggest_text","leave_blank"}:
+            raise ValueError(f"Field {key} cannot be manually overridden in the current workflow")
 
     structure=plan.get("_structure") if isinstance(plan.get("_structure"),dict) else None
     if structure is None:
@@ -49,6 +75,13 @@ def generate_controlled_xlsx_draft(
         for field in row["fields"]:
             coordinate=field.get("coordinate")
             if not coordinate:continue
+            key=f'{row["sheet"]}!{coordinate}'
+            override=field_overrides.get(key)
+            if override is not None and str(override).strip():
+                value=choice_mark if field.get("semantic_field") in {"compliant_yes","compliant_no"} else str(override)
+                ws[coordinate]=value
+                written.append({"sheet":row["sheet"],"coordinate":coordinate,"semantic_field":field.get("semantic_field"),"value":value,"source":"human_override"})
+                continue
             action=field.get("action")
             semantic=field.get("semantic_field")
             proposed=field.get("proposed_value")
@@ -77,6 +110,7 @@ def generate_controlled_xlsx_draft(
         "choice_mark":choice_mark,
         "suggested_text_included":include_suggested_text,
         "header_values_applied":sorted(k for k,v in header_values.items() if str(v or "").strip()),
+        "human_overrides_applied":sum(1 for x in written if x.get("source")=="human_override"),
         "plan_version":plan.get("plan_version"),
-        "generator_version":"phase5-controlled-xlsx-generator-v2",
+        "generator_version":"phase5-controlled-xlsx-generator-v3",
     }
