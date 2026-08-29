@@ -56,7 +56,7 @@ class PreBidQueryUpdate(BaseModel):
   return v
 
 class PreBidQueryRead(PreBidQueryFields):
- id:int;bid_project_id:int;created_by:int;created_at:datetime;updated_at:datetime;closed_by:int|None;closed_at:datetime|None;requirement_title:str|None=None;missing_input_title:str|None=None;source_original_filename:str|None=None;source_document_title:str|None=None;model_config=ConfigDict(from_attributes=True)
+ id:int;bid_project_id:int;created_by:int;created_at:datetime;updated_at:datetime;approved_by:int|None;approved_at:datetime|None;closed_by:int|None;closed_at:datetime|None;requirement_title:str|None=None;missing_input_title:str|None=None;source_original_filename:str|None=None;source_document_title:str|None=None;model_config=ConfigDict(from_attributes=True)
 
 
 class PreBidQuerySuggestionDecision(BaseModel):
