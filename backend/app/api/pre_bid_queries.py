@@ -9,8 +9,8 @@ from docx.shared import Inches,Pt
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.database.session import get_db
-from app.models import BidPreBidQuery,BidProject,User
-from app.schemas.pre_bid_queries import PreBidQueryCreate,PreBidQueryRead,PreBidQueryUpdate
+from app.models import AuditEvent,BidPreBidQuery,BidPreBidQueryDecision,BidProject,User
+from app.schemas.pre_bid_queries import PreBidQueryCreate,PreBidQueryRead,PreBidQuerySuggestionDecision,PreBidQueryUpdate
 from app.security.auth import Permission,current_user,require_project_access
 from app.services.pre_bid_queries import create_pre_bid_query,list_pre_bid_queries,pre_bid_query_summary,update_pre_bid_query
 from app.services.pre_bid_query_intelligence import suggest_pre_bid_queries
@@ -93,6 +93,35 @@ def export_pre_bid_queries_docx(bid_id:int,db:Session=Depends(get_db),user:User=
  output=io.BytesIO();document.save(output);output.seek(0)
  filename=f"{bid.bid_id}_pre_bid_queries.docx"
  return StreamingResponse(output,media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",headers={"Content-Disposition":f'attachment; filename="{filename}"'})
+
+@router.post("/bids/{bid_id}/pre-bid-query-suggestions/decision")
+def decide_pre_bid_query_suggestion(bid_id:int,payload:PreBidQuerySuggestionDecision,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.PRE_BID_QUERY_MANAGE);get_bid(db,bid_id)
+ item=db.scalar(select(BidPreBidQueryDecision).where(
+  BidPreBidQueryDecision.bid_project_id==bid_id,
+  BidPreBidQueryDecision.source_kind==payload.source_kind,
+  BidPreBidQueryDecision.source_id==payload.source_id,
+ ))
+ if payload.decision=="Reconsider":
+  if item:db.delete(item)
+  event="pre_bid_query_suggestion.reconsidered"
+ else:
+  if item:
+   item.decision=payload.decision;item.reason=payload.reason;item.decided_by=user.id
+  else:
+   item=BidPreBidQueryDecision(
+    bid_project_id=bid_id,source_kind=payload.source_kind,source_id=payload.source_id,
+    decision=payload.decision,reason=payload.reason,decided_by=user.id,
+   )
+   db.add(item)
+  event="pre_bid_query_suggestion.suppressed"
+ db.add(AuditEvent(
+  user_id=user.id,bid_project_id=bid_id,event_type=event,entity_type="PreBidQuerySuggestion",
+  entity_id=f"{payload.source_kind}:{payload.source_id}",request_metadata=metadata(request),
+  details={"source_kind":payload.source_kind,"source_id":payload.source_id,"decision":payload.decision,"reason":payload.reason},
+ ))
+ db.commit()
+ return {"source_kind":payload.source_kind,"source_id":payload.source_id,"decision":payload.decision}
 
 @router.get("/bids/{bid_id}/pre-bid-query-suggestions")
 def pre_bid_query_suggestions(bid_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)):
