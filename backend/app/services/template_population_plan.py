@@ -147,9 +147,18 @@ def build_population_plan(db:Session,bid_id:int,template_content:bytes)->dict:
         if not requirement or any(f["action"] in {"needs_review","needs_human_decision","needs_assessment","needs_input"} for f in fields):
             unresolved.append(row)
 
+    header_inputs=[]
+    for placeholder in structure.get("workbook_placeholders",[]):
+        header_inputs.append({
+            **placeholder,
+            "action":"needs_input",
+            "reason":"Workbook-level employer placeholder requires controlled bidder/bid-specific data before final generation.",
+        })
+
     return {
         "template_type":"statement_of_compliance" if rows else "unknown",
         "rows":rows,
+        "header_inputs":header_inputs,
         "summary":{
             "template_rows":len(rows),
             "requirements_matched":matched,
@@ -158,7 +167,8 @@ def build_population_plan(db:Session,bid_id:int,template_content:bytes)->dict:
             "safe_auto_fill_fields":sum(1 for x in rows for f in x["fields"] if f["action"]=="propose_auto_fill"),
             "suggested_text_fields":sum(1 for x in rows for f in x["fields"] if f["action"]=="suggest_text"),
             "employer_only_fields":sum(1 for x in rows for f in x["fields"] if f["action"]=="employer_only"),
+            "header_inputs_required":len(header_inputs),
         },
         "parser_version":structure.get("parser_version"),
-        "plan_version":"phase5-template-population-plan-v1",
+        "plan_version":"phase5-template-population-plan-v2",
     }
