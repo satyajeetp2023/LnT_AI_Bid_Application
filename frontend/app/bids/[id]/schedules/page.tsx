@@ -1,0 +1,101 @@
+"use client";
+
+import Link from "next/link";
+import {use,useCallback,useEffect,useState} from "react";
+import {BidWorkspaceHeader} from "@/components/BidWorkspaceHeader";
+import {EmptyState,ErrorState,LoadingState,PageHeader,StatusBadge,SummaryCard} from "@/components/design-system";
+import {request} from "@/services/api";
+import type {Bid,Document,P6ScheduleAnalysis,Page} from "@/types";
+
+const ISSUE_LABELS:Record<string,string>={
+ open_start:"Open Start / No Predecessor",
+ open_finish:"Open Finish / No Successor",
+ negative_float:"Negative Total Float",
+ zero_or_negative_float:"Zero / Negative Float",
+ constraints:"Constraints",
+ long_duration:"Long Duration",
+ lagged_relationships:"Relationship Lags",
+ dangling_relationships:"Dangling Relationships",
+ status_date_issues:"Status / Actual Date Issues",
+ missing_wbs:"Missing WBS",
+};
+
+export default function SchedulesPage({params}:{params:Promise<{id:string}>}){
+ const {id}=use(params);
+ const [bid,setBid]=useState<Bid|null>(null);
+ const [documents,setDocuments]=useState<Document[]>([]);
+ const [selected,setSelected]=useState<number|null>(null);
+ const [analysis,setAnalysis]=useState<P6ScheduleAnalysis|null>(null);
+ const [loading,setLoading]=useState(true);
+ const [analyzing,setAnalyzing]=useState(false);
+ const [error,setError]=useState("");
+
+ const analyze=useCallback(async(documentId:number)=>{
+  setAnalyzing(true);setError("");
+  try{setAnalysis(await request<P6ScheduleAnalysis>("/documents/"+documentId+"/schedule-analysis"))}
+  catch{setError("Unable to analyze this Primavera XER file.");setAnalysis(null)}
+  finally{setAnalyzing(false)}
+ },[]);
+
+ useEffect(()=>{
+  setLoading(true);setError("");
+  Promise.all([
+   request<Bid>("/bids/"+id),
+   request<Page<Document>>("/bids/"+id+"/documents?extension=xer&page_size=100")
+  ]).then(([b,d])=>{
+   setBid(b);setDocuments(d.items);
+   if(d.items.length){setSelected(d.items[0].id);analyze(d.items[0].id)}
+  }).catch(()=>setError("Unable to load schedule documents.")).finally(()=>setLoading(false));
+ },[id,analyze]);
+
+ const issueEntries=analysis?Object.entries(analysis.issues).filter(([key,rows])=>key!=="zero_or_negative_float"&&rows.length>0):[];
+
+ return <div className="mx-auto max-w-[1500px]">
+  <BidWorkspaceHeader bid={bid} active="Schedules"/>
+  <PageHeader items={[{label:"Bid Workspace",href:"/bids"},{label:"Schedules"}]} title="Primavera P6 Schedule Intelligence" description="Analyze uploaded XER schedules for structure, logic and schedule-health indicators before bid submission." action={<Link href={"/bids/"+id+"/documents"} className="rounded bg-[#304354] px-4 py-2 text-xs font-semibold text-white">Upload / Open Documents</Link>}/>
+
+  {error&&<div className="mb-3"><ErrorState message={error}/></div>}
+  {loading?<LoadingState label="Loading Primavera schedules…"/>:documents.length===0?<EmptyState title="No Primavera XER schedule uploaded" description="Upload the employer/bid schedule XER in Document Repository. The Schedules workspace will analyze it without changing the source file." action={<Link href={"/bids/"+id+"/documents"} className="rounded bg-[#e2b635] px-4 py-2 text-sm font-semibold text-[#243241]">Open Document Repository</Link>}/>:<>
+   <section className="mb-3 flex flex-col gap-3 rounded border border-slate-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
+    <div><div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Schedule File</div><select value={selected||""} onChange={e=>{const value=Number(e.target.value);setSelected(value);analyze(value)}} className="mt-1 min-w-[280px] max-w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800">{documents.map(d=><option key={d.id} value={d.id}>{d.document_title||d.original_filename}</option>)}</select></div>
+    <div className="text-xs text-slate-500">{documents.length} XER file{documents.length===1?"":"s"} in this bid</div>
+   </section>
+
+   {analyzing?<LoadingState label="Parsing XER and checking schedule health…"/>:analysis&&<>
+    <section className={"mb-3 overflow-hidden rounded border "+(analysis.health.grade==="Good"?"border-emerald-200 bg-emerald-50":analysis.health.grade==="Needs Attention"?"border-amber-200 bg-amber-50":"border-red-200 bg-red-50")}><div className="grid gap-3 p-4 md:grid-cols-[150px_1fr]"><div><div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Health Screening</div><div className="mt-1 text-3xl font-bold text-slate-900">{Math.round(analysis.health.score)}%</div><div className="text-xs font-semibold text-slate-700">{analysis.health.grade}</div></div><div className="text-xs leading-5 text-slate-700"><div className="font-semibold text-slate-900">{analysis.project.project_name||analysis.project.project_code||"Primavera Project"}</div><div className="mt-1">{analysis.health.note}</div><div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500"><span>Data date: {analysis.project.data_date?new Date(analysis.project.data_date).toLocaleString():"—"}</span><span>Planned start: {analysis.project.planned_start?new Date(analysis.project.planned_start).toLocaleDateString():"—"}</span><span>Planned finish: {analysis.project.planned_finish?new Date(analysis.project.planned_finish).toLocaleDateString():"—"}</span></div></div></div></section>
+
+    <div className="mb-3 grid grid-cols-2 gap-3 md:grid-cols-6">
+     <SummaryCard label="Activities" value={analysis.counts.activities}/>
+     <SummaryCard label="Relationships" value={analysis.counts.relationships}/>
+     <SummaryCard label="WBS Nodes" value={analysis.counts.wbs_nodes}/>
+     <SummaryCard label="Open Starts" value={analysis.health.issue_counts.open_start} tone="amber"/>
+     <SummaryCard label="Open Finishes" value={analysis.health.issue_counts.open_finish} tone="amber"/>
+     <SummaryCard label="Negative Float" value={analysis.health.issue_counts.negative_float} tone="red"/>
+    </div>
+
+    <section className="mb-3 overflow-hidden rounded border border-slate-200 bg-white"><div className="border-b bg-slate-50 px-4 py-3"><h2 className="text-sm font-bold text-slate-900">Schedule Health Checks</h2><p className="text-xs text-slate-500">Deterministic screening of logic, float, constraints, duration and status/date consistency.</p></div><div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-3 lg:grid-cols-5">{Object.entries(analysis.health.issue_counts).map(([key,value])=><div key={key} className="rounded border border-slate-200 p-3"><div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{ISSUE_LABELS[key]||key.replaceAll("_"," ")}</div><div className={"mt-1 text-xl font-bold "+(value>0?"text-amber-700":"text-emerald-700")}>{value}</div></div>)}</div></section>
+
+    <section className="mb-3 grid gap-3 lg:grid-cols-3">
+     <Distribution title="Activity Status" rows={analysis.distributions.activity_statuses}/>
+     <Distribution title="Activity Type" rows={analysis.distributions.activity_types}/>
+     <Distribution title="Relationship Type" rows={analysis.distributions.relationship_types}/>
+    </section>
+
+    {issueEntries.length>0&&<section className="space-y-3">{issueEntries.map(([key,rows])=><div key={key} className="overflow-hidden rounded border border-slate-200 bg-white"><div className="flex items-center justify-between border-b bg-slate-50 px-4 py-3"><div><h2 className="text-sm font-bold text-slate-900">{ISSUE_LABELS[key]||key.replaceAll("_"," ")}</h2><p className="text-xs text-slate-500">{rows.length} flagged item{rows.length===1?"":"s"}</p></div><StatusBadge tone={key==="negative_float"||key==="dangling_relationships"?"red":"amber"}>{rows.length}</StatusBadge></div><div className="max-h-[360px] overflow-auto"><div className="space-y-2 p-3 md:hidden">{rows.slice(0,100).map((x,index)=><IssueCard key={index} row={x}/>)}</div><div className="hidden md:block"><table className="w-full min-w-[800px] text-left text-xs"><thead className="sticky top-0 bg-white text-[10px] uppercase tracking-wide text-slate-500"><tr>{["Activity ID","Activity","Status","Detail"].map(h=><th key={h} className="px-4 py-2">{h}</th>)}</tr></thead><tbody>{rows.slice(0,100).map((x,index)=><tr key={index} className="border-t"><td className="px-4 py-3 font-semibold text-slate-800">{String(x.task_code||x.task_id||x.pred_task_id||"—")}</td><td className="max-w-sm px-4 py-3">{String(x.task_name||"—")}</td><td className="px-4 py-3">{String(x.status_code||"—")}</td><td className="max-w-md px-4 py-3 text-slate-500">{issueDetail(x)}</td></tr>)}</tbody></table></div></div></div>)}</section>}
+   </>}
+  </>}
+ </div>;
+}
+
+function Distribution({title,rows}:{title:string;rows:Array<{name:string;count:number}>}){
+ return <div className="overflow-hidden rounded border border-slate-200 bg-white"><div className="border-b bg-slate-50 px-4 py-3 text-sm font-bold text-slate-900">{title}</div><div className="divide-y">{rows.slice(0,8).map(x=><div key={x.name} className="flex items-center justify-between px-4 py-2 text-xs"><span className="truncate text-slate-600">{x.name}</span><span className="font-bold text-slate-900">{x.count}</span></div>)}</div></div>
+}
+
+function IssueCard({row}:{row:Record<string,unknown>}){
+ return <article className="rounded border border-slate-200 p-3"><div className="text-sm font-semibold text-slate-900">{String(row.task_code||row.task_id||row.pred_task_id||"Activity")}</div><div className="mt-1 text-xs text-slate-600">{String(row.task_name||"")}</div><div className="mt-2 text-[11px] text-slate-500">{issueDetail(row)}</div></article>
+}
+
+function issueDetail(row:Record<string,unknown>){
+ const ignore=new Set(["task_id","task_code","task_name","status_code","task_type","wbs_id"]);
+ return Object.entries(row).filter(([k,v])=>!ignore.has(k)&&v!==null&&v!==undefined&&v!=="").map(([k,v])=>k.replaceAll("_"," ")+": "+String(v)).join(" · ")||"Flagged by schedule-health rule.";
+}
