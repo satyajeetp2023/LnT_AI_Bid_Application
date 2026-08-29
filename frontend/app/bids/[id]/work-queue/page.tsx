@@ -7,28 +7,30 @@ import {EmptyState,ErrorState,LoadingState,PageHeader,PriorityBadge,StatusBadge,
 import {request} from "@/services/api";
 import type {Bid,DepartmentWorkQueue,ProjectMember} from "@/types";
 
-const emptyQueue:DepartmentWorkQueue={items:[],summary:{total:0,critical:0,high:0,overdue:0,unassigned:0,without_person:0},by_function:[],by_type:[],by_person:[],filter:{responsible_function:null},version:""};
+const emptyQueue:DepartmentWorkQueue={items:[],summary:{total:0,critical:0,high:0,overdue:0,unassigned:0,without_person:0},by_function:[],by_type:[],by_person:[],filter:{responsible_function:null,responsible_person:null},version:""};
 
 export default function WorkQueuePage({params}:{params:Promise<{id:string}>}){
  const {id}=use(params);
  const [bid,setBid]=useState<Bid|null>(null);
  const [queue,setQueue]=useState<DepartmentWorkQueue>(emptyQueue);
  const [owner,setOwner]=useState("");
+ const [mine,setMine]=useState(false);
+ const [functionOptions,setFunctionOptions]=useState<string[]>([]);
  const [members,setMembers]=useState<ProjectMember[]>([]);
  const [loading,setLoading]=useState(true);
  const [error,setError]=useState("");
 
  const load=useCallback(()=>{
   setLoading(true);setError("");
-  const suffix=owner?`?responsible_function=${encodeURIComponent(owner)}`:"";
+  const query=new URLSearchParams();if(owner)query.set("responsible_function",owner);if(mine)query.set("mine","true");const suffix=query.toString()?`?${query.toString()}`:"";
   Promise.all([
    request<Bid>(`/bids/${id}`),
    request<DepartmentWorkQueue>(`/bids/${id}/department-work-queue${suffix}`),
    request<ProjectMember[]>(`/bids/${id}/members`)
-  ]).then(([b,q,m])=>{setBid(b);setQueue(q);setMembers(m)})
+  ]).then(([b,q,m])=>{setBid(b);setQueue(q);setMembers(m);if(!owner&&!mine)setFunctionOptions(Array.from(new Set(q.by_function.map(x=>x.name))).sort())})
     .catch(()=>setError("Unable to load the department work queue. Please try again."))
     .finally(()=>setLoading(false));
- },[id,owner]);
+ },[id,owner,mine]);
  useEffect(load,[load]);
 
  const assignPerson=async(entity_type:string,entity_id:number,user_id:string)=>{
@@ -36,7 +38,7 @@ export default function WorkQueuePage({params}:{params:Promise<{id:string}>}){
   load();
  };
 
- const functions=Array.from(new Set(queue.by_function.map(x=>x.name))).sort();
+ const functions=functionOptions.length?functionOptions:Array.from(new Set(queue.by_function.map(x=>x.name))).sort();
 
  return <div className="mx-auto max-w-[1500px]">
   <BidWorkspaceHeader bid={bid} active="Work Queue"/>
@@ -44,7 +46,7 @@ export default function WorkQueuePage({params}:{params:Promise<{id:string}>}){
    items={[{label:"Bid Workspace",href:"/bids"},{label:"Work Queue"}]}
    title="Department Work Queue"
    description="One prioritized queue for requirements, missing inputs and Pre-Bid Queries that still need departmental action."
-   action={<select aria-label="Filter by responsible function" className="rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700" value={owner} onChange={e=>setOwner(e.target.value)}><option value="">All functions</option>{functions.map(x=><option key={x}>{x}</option>)}</select>}
+   action={<div className="flex flex-wrap gap-2"><div className="inline-flex overflow-hidden rounded border border-slate-300 bg-white"><button onClick={()=>setMine(false)} className={`px-3 py-2 text-xs font-semibold ${!mine?"bg-[#304354] text-white":"text-slate-600"}`}>All Work</button><button onClick={()=>setMine(true)} className={`px-3 py-2 text-xs font-semibold ${mine?"bg-[#304354] text-white":"text-slate-600"}`}>My Work</button></div><select aria-label="Filter by responsible function" disabled={mine} className="rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-50" value={owner} onChange={e=>setOwner(e.target.value)}><option value="">All functions</option>{functions.map(x=><option key={x}>{x}</option>)}</select></div>}
   />
 
   <div className="mb-3 grid grid-cols-2 gap-3 md:grid-cols-6">
@@ -61,7 +63,7 @@ export default function WorkQueuePage({params}:{params:Promise<{id:string}>}){
    <div className="flex gap-2 overflow-x-auto p-3">{queue.by_function.map(x=><button key={x.name} onClick={()=>setOwner(owner===x.name?"":x.name)} className={`min-w-[135px] rounded border p-3 text-left ${owner===x.name?"border-[#e2b635] bg-amber-50":"border-slate-200 bg-white"}`}><div className="truncate text-[10px] font-semibold uppercase tracking-wide text-slate-500">{x.name}</div><div className="mt-1 text-lg font-bold text-slate-900">{x.count}</div><div className="text-[11px] text-slate-500">open action{x.count===1?"":"s"}</div></button>)}</div>
   </section>}
 
-  {error?<ErrorState message={error}/>:loading?<LoadingState label="Loading department work queue…"/>:queue.items.length===0?<EmptyState title="No open departmental actions" description={owner?"This function currently has no outstanding bid actions.":"All currently tracked departmental actions are closed."}/>:<>
+  {error?<ErrorState message={error}/>:loading?<LoadingState label="Loading department work queue…"/>:queue.items.length===0?<EmptyState title="No open departmental actions" description={mine?"No open actions are currently assigned to you.":owner?"This function currently has no outstanding bid actions.":"All currently tracked departmental actions are closed."}/>:<>
    <div className="space-y-2 md:hidden">
     {queue.items.map((x,index)=><article key={`${x.entity_type}-${x.entity_id}`} className="rounded border border-slate-200 bg-white p-3 shadow-sm">
      <div className="flex items-start gap-3"><div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-700">{index+1}</div><div className="min-w-0 flex-1"><div className="text-[10px] font-semibold uppercase tracking-wide text-blue-700">{x.entity_type}</div><h3 className="mt-0.5 text-sm font-semibold text-slate-900">{x.title}</h3></div><PriorityBadge value={x.priority}/></div>
