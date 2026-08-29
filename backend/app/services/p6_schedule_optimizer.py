@@ -71,12 +71,11 @@ def activity_parameter_profile(content:bytes,task_key:str):
     }
 
 
-def build_schedule_optimization_advisor(
-    content:bytes,
+def build_schedule_optimization_from_tables(
+    tables:dict[str,list[dict]],
     near_critical_hours:float=40.0,
     long_duration_hours:float=160.0,
 ):
-    tables=parse_xer(content)
     tasks=tables.get("TASK",[])
     rels=tables.get("TASKPRED",[])
     assignments=tables.get("TASKRSRC",[])
@@ -282,3 +281,11 @@ def build_schedule_optimization_advisor(
             "note":"The advisor identifies activities worth reviewing for schedule refinement. It never changes the schedule automatically.",
         },
     }
+
+
+def build_schedule_optimization_advisor(
+    content:bytes,
+    near_critical_hours:float=40.0,
+    long_duration_hours:float=160.0,
+):
+    return build_schedule_optimization_from_tables(parse_xer(content),near_critical_hours,long_duration_hours)
