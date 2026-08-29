@@ -202,8 +202,8 @@ def schedule_analysis(document_id:int,request:Request,long_duration_hours:float=
  content=LocalSecureStorage(get_settings().storage_root).read(doc.storage_path)
  ingestion=ingest_schedule(doc.file_extension,content)
  if not ingestion["detected"]:raise HTTPException(422,"No reliable structured schedule activity table could be extracted from this document")
- result=analyze_schedule_tables(ingestion["tables"],long_duration_hours,near_critical_hours)
- result["optimization_advisor"]=build_schedule_optimization_from_tables(ingestion["tables"],near_critical_hours,long_duration_hours)
+ result=analyze_schedule_tables(ingestion["tables"],long_duration_hours,near_critical_hours,ingestion["capabilities"])
+ result["optimization_advisor"]=build_schedule_optimization_from_tables(ingestion["tables"],near_critical_hours,long_duration_hours,ingestion["capabilities"])
  result["tender_alignment"]=align_schedule_to_requirements(db,doc.bid_project_id,result)
  result["source_ingestion"]={k:ingestion[k] for k in ("source_kind","fidelity","capabilities","limitations","parser_version")}
  db.add(AuditEvent(user_id=user.id,bid_project_id=doc.bid_project_id,event_type="schedule.analyzed",entity_type="BidDocument",entity_id=str(doc.id),request_metadata=metadata(request),details={"source_kind":ingestion["source_kind"],"fidelity":ingestion["fidelity"],"activities":result.get("counts",{}).get("activities",0),"health_score":result.get("health",{}).get("score"),"alignment_grade":result.get("tender_alignment",{}).get("grade")}))
@@ -334,7 +334,7 @@ def schedule_scope_coverage(document_id:int,request:Request,sync_requirements:bo
  ingestion=ingest_schedule(doc.file_extension,LocalSecureStorage(get_settings().storage_root).read(doc.storage_path))
  if not ingestion["detected"]:raise HTTPException(422,"No reliable structured activity table could be extracted for scope coverage")
  if sync_requirements:sync_scope_from_requirements(db,doc.bid_project_id,user.id,metadata(request))
- result=evaluate_scope_coverage_from_tables(db,doc.bid_project_id,ingestion["tables"],user.id,metadata(request))
+ result=evaluate_scope_coverage_from_tables(db,doc.bid_project_id,ingestion["tables"],user.id,metadata(request),ingestion["capabilities"])
  result["source_ingestion"]={k:ingestion[k] for k in ("source_kind","fidelity","capabilities","limitations")}
  return result
 
