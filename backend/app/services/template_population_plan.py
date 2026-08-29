@@ -1,4 +1,5 @@
 import re
+from openpyxl.utils import get_column_letter
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -54,7 +55,7 @@ def build_population_plan(db:Session,bid_id:int,template_content:bytes)->dict:
         for column in table["columns"]:
             semantic=column.get("semantic_field")
             ownership=column.get("ownership")
-            coordinate=f'{chr(64+column["column"])}{start_row}' if column["column"]<=26 else None
+            coordinate=f'{get_column_letter(column["column"])}{start_row}'
             action="preserve"
             proposed_value=None
             confidence=1.0
