@@ -5,7 +5,7 @@ from typing import Protocol
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import BidMissingInput,BidPreBidQuery,BidRequirement
+from app.models import BidDocument,BidMissingInput,BidPreBidQuery,BidRequirement
 
 
 STOP_WORDS={
@@ -15,6 +15,83 @@ STOP_WORDS={
     "these","this","tender","to","was","we","were","what","when","where","which","will","with","would"
 }
 AUTHORITATIVE_ANSWER_CATEGORIES={"Pre-Bid Clarification","Addendum / Corrigendum"}
+
+REFERENCE_RE=re.compile(r"\b(?:drawing(?:\s+no\.?)?|drg\.?\s*no\.?|annexure|annex|appendix)\s*[:#-]?\s*([A-Z0-9][A-Z0-9./_-]{2,})",re.I)
+NUMBER_RE=re.compile(r"\b\d+(?:\.\d+)?\s*(?:days?|months?|years?|km|m|mm|kv|mw|mva|%|nos?\.?|units?)?\b",re.I)
+
+def _compact(text:str)->str:
+    return re.sub(r"[^a-z0-9]+","",text.lower())
+
+def _missing_references(db:Session,bid_id:int,requirements:list[BidRequirement],blocked:set[int])->list[SuggestedPreBidQuery]:
+    documents=db.scalars(select(BidDocument).where(BidDocument.bid_project_id==bid_id)).all()
+    haystacks=[_compact(f"{d.original_filename} {d.document_title or ''} {d.document_number or ''}") for d in documents]
+    out=[]
+    seen=set()
+    for req in requirements:
+        if req.id in blocked:continue
+        for match in REFERENCE_RE.finditer(req.requirement_text or ""):
+            ref=match.group(1).strip(" .,:;")
+            if not any(ch.isdigit() for ch in ref):continue
+            key=(req.id,ref.lower())
+            if key in seen:continue
+            seen.add(key)
+            token=_compact(ref)
+            if len(token)<3 or any(token in h for h in haystacks):continue
+            check=KnowledgeCheck("unresolved",.0,0)
+            source=req.source_document.document_title or req.source_document.original_filename if req.source_document else None
+            query_text=f"The tender requirement refers to {match.group(0)}; however, the referenced document/drawing could not be identified in the uploaded tender package. Kindly provide the referenced document/drawing or confirm the applicable reference."
+            out.append(SuggestedPreBidQuery(
+                source_kind="Missing Reference",source_id=req.id,
+                query_title=f"Missing referenced document: {ref}",query_text=query_text,
+                query_category=_category(req.requirement_category),priority="High" if req.priority in {"Critical","High"} else "Medium",
+                responsible_function=req.responsible_function,requirement_id=req.id,missing_input_id=None,
+                source_document_id=req.source_document_id,source_page=req.source_page,source_clause=req.source_clause,
+                source_section=req.source_section,source_excerpt=req.source_excerpt or req.requirement_text,
+                impact_if_unresolved="Referenced tender information is unavailable for complete technical/commercial assessment.",
+                rationale=f"The extracted requirement explicitly references {ref}, but no uploaded tender document title, number or filename matches that reference.",
+                confidence=.88,knowledge_check=check,
+            ))
+            blocked.add(req.id)
+            break
+    return out
+
+def _conflicting_requirements(requirements:list[BidRequirement],blocked:set[int])->list[SuggestedPreBidQuery]:
+    out=[]
+    for i,left in enumerate(requirements):
+        if left.id in blocked or not left.source_document_id:continue
+        left_terms=_terms(f"{left.requirement_title} {left.requirement_text}")
+        left_numbers=set(x.lower().strip() for x in NUMBER_RE.findall(left.requirement_text or ""))
+        if len(left_terms)<5 or not left_numbers:continue
+        for right in requirements[i+1:]:
+            if right.id in blocked or not right.source_document_id or right.source_document_id==left.source_document_id:continue
+            if right.requirement_category!=left.requirement_category:continue
+            right_terms=_terms(f"{right.requirement_title} {right.requirement_text}")
+            common=left_terms&right_terms
+            similarity=len(common)/max(1,min(len(left_terms),len(right_terms)))
+            if len(common)<5 or similarity<.58:continue
+            right_numbers=set(x.lower().strip() for x in NUMBER_RE.findall(right.requirement_text or ""))
+            if not right_numbers or left_numbers==right_numbers or left_numbers&right_numbers:continue
+            right_source=right.source_document.document_title or right.source_document.original_filename if right.source_document else None
+            check=KnowledgeCheck(
+                "related_evidence_found",round(min(.95,similarity),2),1,
+                (right.source_excerpt or right.requirement_text or "")[:1200],right_source,right.source_page,right.source_clause
+            )
+            left_source=left.source_document.document_title or left.source_document.original_filename if left.source_document else "one tender document"
+            query_text=f"Two tender requirements appear to address the same subject but contain different numeric particulars. {left_source} states: '{left.requirement_text[:500]}'. {right_source or 'Another tender document'} states: '{right.requirement_text[:500]}'. Kindly clarify which requirement/particular shall govern for bid preparation."
+            out.append(SuggestedPreBidQuery(
+                source_kind="Cross-Document Conflict",source_id=left.id,
+                query_title=f"Conflicting tender particulars: {left.requirement_title[:180]}",query_text=query_text,
+                query_category=_category(left.requirement_category),priority="High",
+                responsible_function=left.responsible_function,requirement_id=left.id,missing_input_id=None,
+                source_document_id=left.source_document_id,source_page=left.source_page,source_clause=left.source_clause,
+                source_section=left.source_section,source_excerpt=left.source_excerpt or left.requirement_text,
+                impact_if_unresolved="Conflicting tender particulars may affect pricing, design, planning, compliance or contractual interpretation.",
+                rationale="Two independently extracted requirements from different tender documents are highly similar in subject but contain incompatible numeric particulars.",
+                confidence=round(min(.90,.62+similarity*.25),2),knowledge_check=check,
+            ))
+            blocked.add(left.id);blocked.add(right.id)
+            break
+    return out
 
 
 def _terms(text:str)->set[str]:
@@ -142,7 +219,7 @@ def _category(value:str|None)->str:
 
 
 class RuleBasedPreBidQuerySuggestionProvider:
-    version="phase2-query-suggestion-rule-v2"
+    version="phase2-query-suggestion-rule-v3"
 
     def __init__(self,knowledge:TenderKnowledgeProvider|None=None):
         self.knowledge=knowledge or ExtractedTenderKnowledgeProvider()
@@ -195,6 +272,11 @@ class RuleBasedPreBidQuerySuggestionProvider:
                 impact_if_unresolved=None,rationale=rationale,confidence=.82,knowledge_check=check,
             ))
 
+        all_requirements=db.scalars(select(BidRequirement).where(BidRequirement.bid_project_id==bid_id,BidRequirement.requirement_status!="Closed")).all()
+        blocked=set(existing_requirements)|{s.requirement_id for s in suggestions if s.requirement_id is not None}
+        suggestions.extend(_missing_references(db,bid_id,all_requirements,blocked))
+        suggestions.extend(_conflicting_requirements(all_requirements,blocked))
+
         suggestions.sort(key=lambda x:({"Critical":0,"High":1,"Medium":2,"Low":3}.get(x.priority,4),-x.confidence,x.query_title.lower()))
         return suggestions,answered
 
@@ -207,5 +289,5 @@ def suggest_pre_bid_queries(db:Session,bid_id:int):
         "knowledge_provider":getattr(provider.knowledge,"version","unknown"),
         "items":[x.as_dict() for x in items],
         "answered":answered,
-        "summary":{"suggested":len(items),"answered_in_tender":len(answered)},
+        "summary":{"suggested":len(items),"answered_in_tender":len(answered),"automatic_discoveries":sum(1 for x in items if x.source_kind in {"Missing Reference","Cross-Document Conflict"})},
     }
