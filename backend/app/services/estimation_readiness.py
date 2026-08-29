@@ -58,6 +58,46 @@ def calculate_estimation_readiness(db:Session,bid_id:int):
 
     by_function=Counter((g.responsible_function or "Unassigned") for g in gaps)
     by_category=Counter(g.input_category for g in gaps)
+    priority_order={"Critical":0,"High":1,"Medium":2,"Low":3}
+    today=date.today()
+    action_plan=[]
+    for g in gaps:
+        is_overdue=bool(g.required_by_date and g.required_by_date<today)
+        reason="Overdue blocker" if is_overdue else "Critical blocker" if g.priority=="Critical" else "Open blocker"
+        action_plan.append({
+            "source_kind":"Missing Input",
+            "source_id":g.id,
+            "missing_input_id":g.id,
+            "requirement_id":g.requirement_id,
+            "title":g.missing_input_title,
+            "priority":g.priority,
+            "responsible_function":g.responsible_function or suggest_responsible_function(g.input_category,f"{g.missing_input_title} {g.missing_input_description}"),
+            "due_date":g.required_by_date.isoformat() if g.required_by_date else None,
+            "is_overdue":is_overdue,
+            "reason":reason,
+            "recommended_action":"Resolve the missing input or raise/link a Pre-Bid Query if Employer clarification is required.",
+        })
+    for candidate in candidates:
+        action_plan.append({
+            "source_kind":"Candidate Gap",
+            "source_id":candidate["requirement_id"],
+            "missing_input_id":None,
+            "requirement_id":candidate["requirement_id"],
+            "title":candidate["title"],
+            "priority":candidate["priority"],
+            "responsible_function":candidate["responsible_function"],
+            "due_date":None,
+            "is_overdue":False,
+            "reason":"Reviewed requirement still needs clarification but has no Missing Input.",
+            "recommended_action":"Review the requirement and create a Missing Input if the clarification is genuinely required.",
+        })
+    action_plan.sort(key=lambda x:(
+        0 if x["is_overdue"] else 1,
+        priority_order.get(x["priority"],4),
+        x["due_date"] or "9999-12-31",
+        x["title"].lower(),
+    ))
+    action_plan=action_plan[:12]
 
     return {
         "overall_score":overall,
@@ -80,11 +120,12 @@ def calculate_estimation_readiness(db:Session,bid_id:int):
         "candidate_gaps":candidates,
         "open_gaps_by_function":[{"name":k,"count":v} for k,v in by_function.most_common()],
         "open_gaps_by_category":[{"name":k,"count":v} for k,v in by_category.most_common()],
+        "action_plan":action_plan,
         "methodology":{
             "information_completeness_weight":45,
             "review_completion_weight":25,
             "compliance_assessment_weight":20,
             "blocker_control_weight":10,
-            "version":"phase3-readiness-rule-v2",
+            "version":"phase3-readiness-rule-v3",
         },
     }
