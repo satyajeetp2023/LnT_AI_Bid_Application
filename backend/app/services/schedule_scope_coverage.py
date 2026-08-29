@@ -83,6 +83,18 @@ def _scope_item_dict(item:ScheduleScopeItem):
         "disposition_by":item.disposition_by,
         "disposition_at":item.disposition_at,
         "blocking":_is_blocking(item),
+        "why_expected":item.source_excerpt or (
+            f"Expected from {item.source_type}" + (f" · {item.source_reference}" if item.source_reference else "")
+        ),
+        "why_flagged":(
+            "No sufficiently similar schedule activity was found."
+            if item.coverage_status=="Missing" else
+            "A possible schedule activity was found, but the match is not strong enough to confirm automatically."
+            if item.coverage_status=="Possible Match" else
+            "A sufficiently strong schedule match was found."
+            if item.coverage_status=="Covered" else
+            "Coverage has not yet been evaluated."
+        ),
     }
 
 
@@ -303,6 +315,15 @@ def evaluate_scope_coverage(db:Session,bid_id:int,xer_content:bytes,user_id:int,
     ))
     db.commit()
     rows=[_scope_item_dict(x) for x in items]
+    authority_order={"BOQ":0,"Contract / Technical Requirement":1,"Manual":2,"Project-Type Knowledge":3}
+    coverage_order={"Missing":0,"Possible Match":1,"Not Checked":2,"Covered":3}
+    rows.sort(key=lambda x:(
+        0 if x["blocking"] else 1,
+        authority_order.get(x["source_type"],2),
+        coverage_order.get(x["coverage_status"],4),
+        x["activity_level"],
+        x["activity_name"].lower(),
+    ))
     blocking=[x for x in rows if x["blocking"]]
     return {
         "items":rows,
@@ -313,11 +334,14 @@ def evaluate_scope_coverage(db:Session,bid_id:int,xer_content:bytes,user_id:int,
             "missing":sum(1 for x in rows if x["coverage_status"]=="Missing"),
             "blocking":len(blocking),
             "knowledge_warnings":sum(1 for x in rows if x["source_type"]=="Project-Type Knowledge" and x["coverage_status"]!="Covered"),
+            "contract_items":sum(1 for x in rows if x["source_type"]=="Contract / Technical Requirement"),
+            "boq_items":sum(1 for x in rows if x["source_type"]=="BOQ"),
+            "project_type_items":sum(1 for x in rows if x["source_type"]=="Project-Type Knowledge"),
             "explained_missing":sum(1 for x in rows if x["coverage_status"]=="Missing" and not x["blocking"]),
         },
         "ready":len(blocking)==0 and len(rows)>0,
         "grade":"Complete" if len(blocking)==0 and rows else "Action Required" if rows else "No Scope Catalog",
-        "methodology":"phase6-schedule-scope-coverage-v3",
+        "methodology":"phase6-schedule-scope-coverage-v4",
         "note":"Expected activities are independently sourced from bid scope. Missing or ambiguous coverage must be explained; 'To Be Added' remains a blocker until a revised schedule contains the activity.",
     }
 
