@@ -52,7 +52,7 @@ export default function SchedulesPage({params}:{params:Promise<{id:string}>}){
     request<ScheduleScopeCoverage>("/documents/"+documentId+"/schedule-scope-coverage")
    ]);
    setAnalysis(nextAnalysis);setScopeCoverage(nextCoverage);
-  }catch{setError("Unable to analyze this Primavera XER file.");setAnalysis(null);setScopeCoverage(null)}
+  }catch{setError("Unable to analyze this schedule document.");setAnalysis(null);setScopeCoverage(null)}
   finally{setAnalyzing(false);setScopeLoading(false)}
  },[]);
 
@@ -60,7 +60,7 @@ export default function SchedulesPage({params}:{params:Promise<{id:string}>}){
   if(!selected)return;
   setProfileLoading(true);setError("");
   try{setActivityProfile(await request<P6ActivityProfile>("/documents/"+selected+"/schedule-activity-profile?task_key="+encodeURIComponent(taskKey)))}
-  catch{setError("Unable to retrieve the full Primavera parameter profile for this activity.")}
+  catch{setError("Unable to retrieve the full available parameter profile for this activity.")}
   finally{setProfileLoading(false)}
  };
 
@@ -77,7 +77,7 @@ export default function SchedulesPage({params}:{params:Promise<{id:string}>}){
   if(!selected||!baseline||selected===baseline)return;
   setComparing(true);setError("");
   try{setComparison(await request<P6ScheduleComparison>("/documents/"+selected+"/schedule-comparison?baseline_document_id="+baseline))}
-  catch{setError("Unable to compare these Primavera schedule versions.");setComparison(null)}
+  catch{setError("Unable to compare these schedule versions.");setComparison(null)}
   finally{setComparing(false)}
  };
 
@@ -85,12 +85,12 @@ export default function SchedulesPage({params}:{params:Promise<{id:string}>}){
   setLoading(true);setError("");
   Promise.all([
    request<Bid>("/bids/"+id),
-   request<Page<Document>>("/bids/"+id+"/documents?extension=xer&page_size=100"),
+   request<Document[]>("/bids/"+id+"/schedule-documents"),
    request<ScheduleScopeCatalog>("/bids/"+id+"/schedule-scope/catalog")
   ]).then(async([b,d,catalog])=>{
-   setBid(b);setDocuments(d.items);setScopeCatalog(catalog);
+   setBid(b);setDocuments(d);setScopeCatalog(catalog);
    setSkeleton(await request<ScheduleSkeleton>("/bids/"+id+"/schedule-skeleton?sync_scope=false"));
-   if(d.items.length){setSelected(d.items[0].id);analyze(d.items[0].id);if(d.items.length>1)setBaseline(d.items[1].id)}
+   if(d.length){setSelected(d[0].id);analyze(d[0].id);if(d.length>1)setBaseline(d[1].id)}
   }).catch(()=>setError("Unable to load schedule documents.")).finally(()=>setLoading(false));
  },[id,analyze]);
 
@@ -105,13 +105,13 @@ export default function SchedulesPage({params}:{params:Promise<{id:string}>}){
 
  return <div className="mx-auto max-w-[1500px]">
   <BidWorkspaceHeader bid={bid} active="Schedules"/>
-  <PageHeader items={[{label:"Bid Workspace",href:"/bids"},{label:"Schedules"}]} title="Primavera P6 Schedule Intelligence" description="Analyze uploaded XER schedules for structure, logic and schedule-health indicators before bid submission." action={<Link href={"/bids/"+id+"/documents"} className="rounded bg-[#304354] px-4 py-2 text-xs font-semibold text-white">Upload / Open Documents</Link>}/>
+  <PageHeader items={[{label:"Bid Workspace",href:"/bids"},{label:"Schedules"}]} title="Schedule Intelligence" description="Analyze uploaded schedules across native, XML, spreadsheet and report formats against tender scope and planning-quality requirements." action={<Link href={"/bids/"+id+"/documents"} className="rounded bg-[#304354] px-4 py-2 text-xs font-semibold text-white">Upload / Open Documents</Link>}/>
 
   {error&&<div className="mb-3"><ErrorState message={error}/></div>}
-  {loading?<LoadingState label="Loading Primavera schedules…"/>:documents.length===0?<><EmptyState title="No Primavera XER schedule uploaded" description="The app has already built the expected activity universe from available bid scope. Upload a schedule later and it will be checked against this catalog." action={<Link href={"/bids/"+id+"/documents"} className="rounded bg-[#e2b635] px-4 py-2 text-sm font-semibold text-[#243241]">Open Document Repository</Link>}/>{scopeCatalog&&<ExpectedScopeCatalogPanel value={scopeCatalog}/>}{skeleton&&<ScheduleSkeletonPanel value={skeleton}/>}</>:<>
+  {loading?<LoadingState label="Loading schedule documents…"/>:documents.length===0?<><EmptyState title="No schedule document uploaded" description="The app has already built the expected activity universe from available bid scope. Upload a schedule in XER, XML, Excel, CSV, PDF, Word or another supported report form and it will be analyzed to the level its source data allows." action={<Link href={"/bids/"+id+"/documents"} className="rounded bg-[#e2b635] px-4 py-2 text-sm font-semibold text-[#243241]">Open Document Repository</Link>}/>{scopeCatalog&&<ExpectedScopeCatalogPanel value={scopeCatalog}/>}{skeleton&&<ScheduleSkeletonPanel value={skeleton}/>}</>:<>
    {scopeCatalog&&<ExpectedScopeCatalogPanel value={scopeCatalog}/>}{skeleton&&<ScheduleSkeletonPanel value={skeleton}/>}<section className="mb-3 flex flex-col gap-3 rounded border border-slate-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
     <div><div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Schedule File</div><select value={selected||""} onChange={e=>{const value=Number(e.target.value);setSelected(value);analyze(value)}} className="mt-1 min-w-[280px] max-w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800">{documents.map(d=><option key={d.id} value={d.id}>{d.document_title||d.original_filename}</option>)}</select></div>
-    <div className="text-xs text-slate-500">{documents.length} XER file{documents.length===1?"":"s"} in this bid</div>
+    <div className="text-xs text-slate-500">{documents.length} schedule document{documents.length===1?"":"s"} in this bid</div>
    </section>
 
    {documents.length>1&&<section className="mb-3 rounded border border-slate-200 bg-white p-3"><div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between"><div className="grid flex-1 gap-3 sm:grid-cols-2"><div><label className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Baseline / Earlier Version</label><select value={baseline||""} onChange={e=>{setBaseline(Number(e.target.value));setComparison(null)}} className="mt-1 w-full rounded border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800"><option value="">Select baseline</option>{documents.filter(d=>d.id!==selected).map(d=><option key={d.id} value={d.id}>{d.document_title||d.original_filename}</option>)}</select></div><div><label className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Current / Later Version</label><div className="mt-1 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700">{documents.find(d=>d.id===selected)?.document_title||documents.find(d=>d.id===selected)?.original_filename||"Current schedule"}</div></div></div><button disabled={!baseline||baseline===selected||comparing} onClick={compareVersions} className="rounded bg-[#304354] px-4 py-2 text-xs font-semibold text-white disabled:opacity-40">{comparing?"Comparing…":"Compare Versions"}</button></div><p className="mt-2 text-[11px] text-slate-500">Version comparison highlights schedule movement and logic changes; it does not by itself establish contractual delay responsibility or entitlement.</p></section>}
@@ -141,6 +141,8 @@ export default function SchedulesPage({params}:{params:Promise<{id:string}>}){
     <section className="mb-3 overflow-hidden rounded border border-slate-200 bg-white"><div className="flex flex-col gap-2 border-b bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="text-sm font-bold text-slate-900">Schedule Data Completeness</h2><p className="text-xs text-slate-500">{analysis.optimization_advisor.data_completeness.note}</p></div><StatusBadge tone={analysis.optimization_advisor.data_completeness.grade==="Complete"?"green":analysis.optimization_advisor.data_completeness.grade==="Needs Attention"?"amber":"red"}>{analysis.optimization_advisor.data_completeness.grade} · {Math.round(analysis.optimization_advisor.data_completeness.score)}%</StatusBadge></div><div className="grid gap-2 p-3 sm:grid-cols-2 lg:grid-cols-5">{analysis.optimization_advisor.data_completeness.checks.map(x=><div key={x.parameter} className="rounded border border-slate-200 bg-white p-3"><div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{x.parameter}{!x.required&&<span className="ml-1 normal-case font-medium text-slate-400">optional</span>}</div><div className={"mt-1 text-lg font-bold "+(x.percent>=95?"text-emerald-700":x.percent>=80?"text-amber-700":"text-red-700")}>{Math.round(x.percent)}%</div><div className="mt-1 text-[10px] text-slate-500">{x.populated}/{x.total} activities</div>{x.missing_activity_codes.length>0&&<div className="mt-2 max-h-20 overflow-auto rounded bg-slate-50 p-2 text-[10px] text-slate-600">Missing: {x.missing_activity_codes.filter(Boolean).slice(0,20).join(", ")}{x.missing_activity_codes.length>20?" …":""}</div>}</div>)}</div></section>
 
     <section className="mb-3 overflow-hidden rounded border border-slate-200 bg-white"><div className="flex flex-col gap-2 border-b bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="text-sm font-bold text-slate-900">Resource Loading Profile</h2><p className="text-xs text-slate-500">{analysis.optimization_advisor.resource_loading.note}</p></div><StatusBadge tone={analysis.optimization_advisor.resource_loading.status==="Broadly Resource Loaded"?"green":analysis.optimization_advisor.resource_loading.status==="Partially Resource Loaded"?"amber":"grey"}>{analysis.optimization_advisor.resource_loading.status}</StatusBadge></div><div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-4"><SummaryCard label="Eligible Activities" value={analysis.optimization_advisor.resource_loading.eligible_activities}/><SummaryCard label="With Assignments" value={analysis.optimization_advisor.resource_loading.activities_with_assignments}/><SummaryCard label="Coverage" value={Math.round(analysis.optimization_advisor.resource_loading.coverage_ratio*100)+"%"}/><SummaryCard label="Assignments" value={analysis.optimization_advisor.resource_loading.assignment_count}/></div>{analysis.optimization_advisor.resource_loading.resource_types.length>0&&<div className="flex flex-wrap gap-2 border-t p-3">{analysis.optimization_advisor.resource_loading.resource_types.map(x=><span key={x.name} className="rounded bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-700">{x.name} · {x.count}</span>)}</div>}</section>
+
+    <section className="mb-3 overflow-hidden rounded border border-slate-200 bg-white"><div className="flex flex-col gap-2 border-b bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="text-sm font-bold text-slate-900">Source Format & Analysis Capability</h2><p className="text-xs text-slate-500">{analysis.source_ingestion.source_kind} · {analysis.source_ingestion.fidelity}</p></div><StatusBadge tone={analysis.source_ingestion.fidelity==="Full Native"?"green":analysis.source_ingestion.fidelity.includes("Structured")?"amber":"grey"}>{analysis.source_ingestion.fidelity}</StatusBadge></div><div className="flex flex-wrap gap-2 p-3">{Object.entries(analysis.source_ingestion.capabilities).map(([k,v])=><span key={k} className={v?"rounded bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-700":"rounded bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-500"}>{k.replaceAll("_"," ")} · {v?"Available":"Not Available"}</span>)}</div>{analysis.source_ingestion.limitations.length>0&&<div className="border-t bg-amber-50/50 p-3 text-xs text-amber-800">{analysis.source_ingestion.limitations.map((x,i)=><div key={i}>• {x}</div>)}</div>}</section>
 
     <section className="mb-3 overflow-hidden rounded border border-slate-200 bg-white"><div className="border-b bg-slate-50 px-4 py-3"><h2 className="text-sm font-bold text-slate-900">Schedule Parameter Inventory</h2><p className="text-xs text-slate-500">{analysis.optimization_advisor.parameter_inventory.note}</p></div><div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-4"><SummaryCard label="XER Tables" value={analysis.optimization_advisor.parameter_inventory.table_count}/><SummaryCard label="Unique Fields" value={analysis.optimization_advisor.parameter_inventory.total_fields}/><SummaryCard label="Total Rows" value={analysis.optimization_advisor.parameter_inventory.total_rows}/><SummaryCard label="Calendars" value={analysis.optimization_advisor.parameter_inventory.calendar_count}/></div><div className="max-h-[320px] overflow-auto border-t"><table className="w-full min-w-[700px] text-left text-xs"><thead className="sticky top-0 bg-white text-[10px] uppercase tracking-wide text-slate-500"><tr>{["Table","Rows","Fields","Sample Fields"].map(h=><th key={h} className="px-4 py-2">{h}</th>)}</tr></thead><tbody>{analysis.optimization_advisor.parameter_inventory.tables.map(x=><tr key={x.table} className="border-t"><td className="px-4 py-3 font-semibold text-slate-900">{x.table}</td><td className="px-4 py-3">{x.rows}</td><td className="px-4 py-3">{x.field_count}</td><td className="max-w-xl px-4 py-3 text-slate-500">{x.fields.slice(0,10).join(", ")}{x.fields.length>10?" …":""}</td></tr>)}</tbody></table></div></section>
 
