@@ -5,7 +5,7 @@ import {use,useCallback,useEffect,useState} from "react";
 import {BidWorkspaceHeader} from "@/components/BidWorkspaceHeader";
 import {EmptyState,ErrorState,LoadingState,PageHeader,StatusBadge,SummaryCard} from "@/components/design-system";
 import {request} from "@/services/api";
-import type {Bid,Document,P6ActivityProfile,P6ScheduleAnalysis,P6ScheduleComparison,Page,ScheduleScopeCatalog,ScheduleScopeCoverage,ScheduleScopeItem} from "@/types";
+import type {Bid,Document,P6ActivityProfile,P6ScheduleAnalysis,P6ScheduleComparison,Page,ScheduleScopeCatalog,ScheduleScopeCoverage,ScheduleScopeItem,ScheduleSkeleton} from "@/types";
 
 const ISSUE_LABELS:Record<string,string>={
  open_start:"Open Start / No Predecessor",
@@ -35,6 +35,7 @@ export default function SchedulesPage({params}:{params:Promise<{id:string}>}){
  const [profileLoading,setProfileLoading]=useState(false);
  const [scopeCoverage,setScopeCoverage]=useState<ScheduleScopeCoverage|null>(null);
  const [scopeCatalog,setScopeCatalog]=useState<ScheduleScopeCatalog|null>(null);
+ const [skeleton,setSkeleton]=useState<ScheduleSkeleton|null>(null);
  const [scopeLoading,setScopeLoading]=useState(false);
  const [scopeReason,setScopeReason]=useState<Record<number,string>>({});
  const [scopeStatus,setScopeStatus]=useState<Record<number,string>>({});
@@ -85,9 +86,10 @@ export default function SchedulesPage({params}:{params:Promise<{id:string}>}){
   Promise.all([
    request<Bid>("/bids/"+id),
    request<Page<Document>>("/bids/"+id+"/documents?extension=xer&page_size=100"),
-   request<ScheduleScopeCatalog>("/bids/"+id+"/schedule-scope/catalog")
-  ]).then(([b,d,catalog])=>{
-   setBid(b);setDocuments(d.items);setScopeCatalog(catalog);
+   request<ScheduleScopeCatalog>("/bids/"+id+"/schedule-scope/catalog"),
+   request<ScheduleSkeleton>("/bids/"+id+"/schedule-skeleton?sync_scope=false")
+  ]).then(([b,d,catalog,nextSkeleton])=>{
+   setBid(b);setDocuments(d.items);setScopeCatalog(catalog);setSkeleton(nextSkeleton);
    if(d.items.length){setSelected(d.items[0].id);analyze(d.items[0].id);if(d.items.length>1)setBaseline(d.items[1].id)}
   }).catch(()=>setError("Unable to load schedule documents.")).finally(()=>setLoading(false));
  },[id,analyze]);
@@ -106,8 +108,8 @@ export default function SchedulesPage({params}:{params:Promise<{id:string}>}){
   <PageHeader items={[{label:"Bid Workspace",href:"/bids"},{label:"Schedules"}]} title="Primavera P6 Schedule Intelligence" description="Analyze uploaded XER schedules for structure, logic and schedule-health indicators before bid submission." action={<Link href={"/bids/"+id+"/documents"} className="rounded bg-[#304354] px-4 py-2 text-xs font-semibold text-white">Upload / Open Documents</Link>}/>
 
   {error&&<div className="mb-3"><ErrorState message={error}/></div>}
-  {loading?<LoadingState label="Loading Primavera schedules…"/>:documents.length===0?<><EmptyState title="No Primavera XER schedule uploaded" description="The app has already built the expected activity universe from available bid scope. Upload a schedule later and it will be checked against this catalog." action={<Link href={"/bids/"+id+"/documents"} className="rounded bg-[#e2b635] px-4 py-2 text-sm font-semibold text-[#243241]">Open Document Repository</Link>}/>{scopeCatalog&&<ExpectedScopeCatalogPanel value={scopeCatalog}/>}</>:<>
-   {scopeCatalog&&<ExpectedScopeCatalogPanel value={scopeCatalog}/>}<section className="mb-3 flex flex-col gap-3 rounded border border-slate-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
+  {loading?<LoadingState label="Loading Primavera schedules…"/>:documents.length===0?<><EmptyState title="No Primavera XER schedule uploaded" description="The app has already built the expected activity universe from available bid scope. Upload a schedule later and it will be checked against this catalog." action={<Link href={"/bids/"+id+"/documents"} className="rounded bg-[#e2b635] px-4 py-2 text-sm font-semibold text-[#243241]">Open Document Repository</Link>}/>{scopeCatalog&&<ExpectedScopeCatalogPanel value={scopeCatalog}/>}{skeleton&&<ScheduleSkeletonPanel value={skeleton}/>}</>:<>
+   {scopeCatalog&&<ExpectedScopeCatalogPanel value={scopeCatalog}/>}{skeleton&&<ScheduleSkeletonPanel value={skeleton}/>}<section className="mb-3 flex flex-col gap-3 rounded border border-slate-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
     <div><div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Schedule File</div><select value={selected||""} onChange={e=>{const value=Number(e.target.value);setSelected(value);analyze(value)}} className="mt-1 min-w-[280px] max-w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800">{documents.map(d=><option key={d.id} value={d.id}>{d.document_title||d.original_filename}</option>)}</select></div>
     <div className="text-xs text-slate-500">{documents.length} XER file{documents.length===1?"":"s"} in this bid</div>
    </section>
@@ -161,6 +163,10 @@ export default function SchedulesPage({params}:{params:Promise<{id:string}>}){
    </>}
   </>}
  </div>;
+}
+
+function ScheduleSkeletonPanel({value}:{value:ScheduleSkeleton}){
+ return <section className="mb-3 overflow-hidden rounded border border-slate-200 bg-white"><div className="border-b bg-slate-50 px-4 py-3"><h2 className="text-sm font-bold text-slate-900">Expected Schedule Skeleton</h2><p className="text-xs text-slate-500">{value.note}</p></div><div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-6"><SummaryCard label="Activities" value={value.summary.activities}/><SummaryCard label="Milestones" value={value.summary.milestones}/><SummaryCard label="Mandatory" value={value.summary.mandatory} tone="red"/><SummaryCard label="Need Duration" value={value.summary.needs_duration} tone="amber"/><SummaryCard label="Need Calendar" value={value.summary.needs_calendar} tone="amber"/><SummaryCard label="Logical Scope" value={value.summary.logical_scope_items}/></div>{value.items.length>0&&<div className="max-h-[560px] overflow-auto border-t"><table className="w-full min-w-[1100px] text-left text-xs"><thead className="sticky top-0 bg-white text-[10px] uppercase tracking-wide text-slate-500"><tr>{["Code","WBS / Family","Phase","Activity / Milestone","Predecessor Suggestion","Duration","Calendar","Source Strength","Planning Status"].map(h=><th key={h} className="px-3 py-2">{h}</th>)}</tr></thead><tbody>{value.items.map(x=><tr key={x.suggested_code} className="border-t align-top"><td className="px-3 py-3 font-semibold text-blue-700">{x.suggested_code}</td><td className="max-w-[180px] px-3 py-3">{x.wbs}</td><td className="px-3 py-3">{x.phase}</td><td className="max-w-sm px-3 py-3"><div className="font-semibold text-slate-900">{x.activity_name}</div><div className="mt-1 text-[10px] text-slate-500">{x.source_type}{x.source_reference&&" · "+x.source_reference}</div></td><td className="px-3 py-3">{x.predecessor_suggestion||"—"}</td><td className="px-3 py-3">{x.duration===null?<span className="font-semibold text-amber-700">Needs input</span>:x.duration}</td><td className="px-3 py-3">{x.calendar||<span className="font-semibold text-amber-700">Needs input</span>}</td><td className="px-3 py-3"><div className="font-semibold text-slate-700">{x.evidence_strength}</div><div className="text-[10px] text-slate-500">{Math.round(x.authority_score)}%</div></td><td className="px-3 py-3">{x.planning_status}</td></tr>)}</tbody></table></div>}</section>
 }
 
 function ExpectedScopeCatalogPanel({value}:{value:ScheduleScopeCatalog}){
