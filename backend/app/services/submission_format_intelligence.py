@@ -2,7 +2,7 @@ import re
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import BidRequirement
+from app.models import BidDocument,BidRequirement
 
 
 FORMAT_SIGNALS=(
@@ -16,6 +16,28 @@ SUBMISSION_WORDS=("submit","submission","furnish","provide","attach","enclose","
 FORMAT_WORDS=("form","format","annexure","schedule","appendix","template","proforma")
 
 
+def _terms(text:str)->set[str]:
+    return {x for x in re.findall(r"[a-z0-9]+",text.lower()) if len(x)>1 and x not in {"the","and","for","with","form","format","annexure","schedule","appendix"}}
+
+
+def _locate_template(documents:list[BidDocument],kind:str,name:str,requirement_text:str):
+    target=_terms(f"{name} {requirement_text}")
+    best=None;best_score=0.0
+    for doc in documents:
+        label=f"{doc.document_title or ''} {doc.original_filename or ''} {doc.document_type or ''}"
+        lower=label.lower()
+        doc_terms=_terms(label)
+        overlap=len(target&doc_terms)
+        score=overlap/max(1,len(target))
+        if kind.lower() in lower:score+=.20
+        if name.lower() in lower:score+=.35
+        score=min(1.0,score)
+        if score>best_score:
+            best=doc;best_score=score
+    if best and best_score>=.45:return best,round(best_score,2)
+    return None,0.0
+
+
 def _format_name(text:str)->tuple[str,str]:
     for kind,pattern in FORMAT_SIGNALS:
         match=pattern.search(text)
@@ -25,6 +47,7 @@ def _format_name(text:str)->tuple[str,str]:
 
 def detect_submission_formats(db:Session,bid_id:int):
     rows=db.scalars(select(BidRequirement).where(BidRequirement.bid_project_id==bid_id).order_by(BidRequirement.id)).all()
+    documents=db.scalars(select(BidDocument).where(BidDocument.bid_project_id==bid_id,BidDocument.document_status!="Archived")).all()
     items=[]
     seen=set()
     for r in rows:
@@ -38,6 +61,7 @@ def detect_submission_formats(db:Session,bid_id:int):
         if key in seen:continue
         seen.add(key)
         confidence=.94 if r.requirement_type=="Form / Format" else .88 if any(x in lower for x in ("annexure","appendix","schedule","form ")) else .78
+        template,template_confidence=_locate_template(documents,kind,name,r.requirement_text)
         items.append({
             "requirement_id":r.id,
             "format_kind":kind,
@@ -54,8 +78,11 @@ def detect_submission_formats(db:Session,bid_id:int):
             "source_section":r.source_section,
             "source_excerpt":r.source_excerpt,
             "confidence":confidence,
-            "status":"Detected",
-            "next_action":"Review the source requirement and locate the employer-provided blank template or prescribed layout.",
+            "template_document_id":template.id if template else None,
+            "template_document":(template.document_title or template.original_filename) if template else None,
+            "template_match_confidence":template_confidence,
+            "status":"Template Located" if template else "Template Missing",
+            "next_action":"Review the located employer template and confirm the required fields before controlled population." if template else "Locate or obtain the employer-provided blank template / prescribed layout before preparing the submission.",
         })
     items.sort(key=lambda x:(0 if x["mandatory"] else 1,0 if x["priority"]=="Critical" else 1,x["format_name"].lower()))
     return {
@@ -65,6 +92,8 @@ def detect_submission_formats(db:Session,bid_id:int):
             "mandatory":sum(1 for x in items if x["mandatory"]),
             "high_priority":sum(1 for x in items if x["priority"] in {"Critical","High"}),
             "with_source":sum(1 for x in items if x["source_document_id"] is not None),
+            "template_located":sum(1 for x in items if x["template_document_id"] is not None),
+            "template_missing":sum(1 for x in items if x["template_document_id"] is None),
         },
-        "version":"phase5-submission-format-intelligence-v1",
+        "version":"phase5-submission-format-intelligence-v2",
     }
