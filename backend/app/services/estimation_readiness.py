@@ -91,6 +91,36 @@ def calculate_estimation_readiness(db:Session,bid_id:int):
             "reason":"Reviewed requirement still needs clarification but has no Missing Input.",
             "recommended_action":"Review the requirement and create a Missing Input if the clarification is genuinely required.",
         })
+    for r in requirements:
+        if r.review_status=="Not Reviewed":
+            action_plan.append({
+                "source_kind":"Requirement Review",
+                "source_id":r.id,
+                "missing_input_id":None,
+                "requirement_id":r.id,
+                "title":r.requirement_title,
+                "priority":r.priority,
+                "responsible_function":r.responsible_function or suggest_responsible_function(r.requirement_category,r.requirement_text),
+                "due_date":r.due_date.isoformat() if r.due_date else None,
+                "is_overdue":bool(r.due_date and r.due_date<today),
+                "reason":"Requirement has not yet been reviewed.",
+                "recommended_action":"Review the extracted requirement, confirm its relevance and ownership, then mark the review outcome.",
+            })
+        if r.compliance_status=="Not Assessed":
+            action_plan.append({
+                "source_kind":"Compliance Assessment",
+                "source_id":r.id,
+                "missing_input_id":None,
+                "requirement_id":r.id,
+                "title":r.requirement_title,
+                "priority":r.priority,
+                "responsible_function":r.responsible_function or suggest_responsible_function(r.requirement_category,r.requirement_text),
+                "due_date":r.due_date.isoformat() if r.due_date else None,
+                "is_overdue":bool(r.due_date and r.due_date<today),
+                "reason":"Compliance has not yet been assessed.",
+                "recommended_action":"Assess whether the bid is compliant, partially compliant or non-compliant and record any required mitigation.",
+            })
+
     action_plan.sort(key=lambda x:(
         0 if x["is_overdue"] else 1,
         priority_order.get(x["priority"],4),
@@ -98,6 +128,12 @@ def calculate_estimation_readiness(db:Session,bid_id:int):
         x["title"].lower(),
     ))
     action_plan=action_plan[:12]
+    closure_summary={
+        "unreviewed_requirements":sum(1 for r in requirements if r.review_status=="Not Reviewed"),
+        "unassessed_compliance":sum(1 for r in requirements if r.compliance_status=="Not Assessed"),
+        "requirements_needing_clarification":sum(1 for r in requirements if r.review_status=="Needs Clarification"),
+        "requirements_with_open_gaps":len(blocked_ids),
+    }
 
     return {
         "overall_score":overall,
@@ -121,11 +157,12 @@ def calculate_estimation_readiness(db:Session,bid_id:int):
         "open_gaps_by_function":[{"name":k,"count":v} for k,v in by_function.most_common()],
         "open_gaps_by_category":[{"name":k,"count":v} for k,v in by_category.most_common()],
         "action_plan":action_plan,
+        "closure_summary":closure_summary,
         "methodology":{
             "information_completeness_weight":45,
             "review_completion_weight":25,
             "compliance_assessment_weight":20,
             "blocker_control_weight":10,
-            "version":"phase3-readiness-rule-v3",
+            "version":"phase3-readiness-rule-v4",
         },
     }
