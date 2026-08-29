@@ -57,7 +57,7 @@ def export_pre_bid_queries(bid_id:int,db:Session=Depends(get_db),user:User=Depen
 def export_pre_bid_queries_docx(bid_id:int,submission_only:bool=Query(False),db:Session=Depends(get_db),user:User=Depends(user_dep)):
  require_project_access(db,user,bid_id,Permission.PRE_BID_QUERY_VIEW);bid=get_bid(db,bid_id)
  conditions=[BidPreBidQuery.bid_project_id==bid_id,BidPreBidQuery.status!="Withdrawn"]
- if submission_only:conditions.append(BidPreBidQuery.status.in_(["Ready for Review","Submitted","Responded","Closed"]))
+ if submission_only:conditions.append((BidPreBidQuery.approved_at.is_not(None)) | BidPreBidQuery.status.in_(["Submitted","Responded","Closed"]))
  rows=db.scalars(select(BidPreBidQuery).where(*conditions).order_by(BidPreBidQuery.query_number.asc().nullslast(),BidPreBidQuery.id)).all()
  document=WordDocument()
  section=document.sections[0]
@@ -133,6 +133,14 @@ def pre_bid_query_suggestions(bid_id:int,db:Session=Depends(get_db),user:User=De
 def approve_query(query_id:int,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
  item=get_item(db,query_id);require_project_access(db,user,item.bid_project_id,Permission.PRE_BID_QUERY_APPROVE)
  return approve_pre_bid_query(db,item,user.id,metadata(request))
+
+@router.post("/pre-bid-queries/{query_id}/approve",response_model=PreBidQueryRead)
+def approve_query(query_id:int,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ item=get_item(db,query_id);require_project_access(db,user,item.bid_project_id,Permission.PRE_BID_QUERY_MANAGE);return approve_pre_bid_query(db,item,user.id,metadata(request))
+
+@router.post("/pre-bid-queries/{query_id}/revoke-approval",response_model=PreBidQueryRead)
+def revoke_query_approval(query_id:int,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ item=get_item(db,query_id);require_project_access(db,user,item.bid_project_id,Permission.PRE_BID_QUERY_MANAGE);return revoke_pre_bid_query_approval(db,item,user.id,metadata(request))
 
 @router.get("/pre-bid-queries/{query_id}",response_model=PreBidQueryRead)
 def pre_bid_query_detail(query_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)):
