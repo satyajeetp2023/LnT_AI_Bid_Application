@@ -24,6 +24,7 @@ from app.services.submission_readiness import build_submission_package,submissio
 from app.services.p6_xer import analyze_xer
 from app.services.schedule_requirement_alignment import align_schedule_to_requirements
 from app.services.p6_schedule_comparison import compare_xer
+from app.services.p6_schedule_optimizer import build_schedule_optimization_advisor
 from app.services.documents import DOCUMENT_CATEGORIES,archive,classify,mark_revision,update_document_metadata,update_notes,upload_document
 from app.services.document_classification import auto_classify_document
 from app.storage.base import LocalSecureStorage
@@ -193,8 +194,10 @@ def schedule_analysis(document_id:int,request:Request,long_duration_hours:float=
  if doc.duplicate_of_document_id or not doc.storage_path:raise HTTPException(422,"Document content is not available for schedule analysis")
  if doc.file_extension.lower()!="xer":raise HTTPException(422,"Schedule analysis currently supports Primavera .xer files")
  storage=LocalSecureStorage(get_settings().storage_root)
- result=analyze_xer(storage.read(doc.storage_path),long_duration_hours,near_critical_hours)
+ content=storage.read(doc.storage_path)
+ result=analyze_xer(content,long_duration_hours,near_critical_hours)
  result["tender_alignment"]=align_schedule_to_requirements(db,doc.bid_project_id,result)
+ result["optimization_advisor"]=build_schedule_optimization_advisor(content,near_critical_hours,long_duration_hours)
  db.add(AuditEvent(user_id=user.id,bid_project_id=doc.bid_project_id,event_type="schedule.xer_analyzed",entity_type="BidDocument",entity_id=str(doc.id),request_metadata=metadata(request),details={"parser_version":result.get("parser_version"),"activities":result.get("counts",{}).get("activities",0),"health_score":result.get("health",{}).get("score"),"alignment_grade":result.get("tender_alignment",{}).get("grade")}))
  db.commit()
  return result
