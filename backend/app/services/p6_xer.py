@@ -157,8 +157,20 @@ def analyze_xer(content:bytes,long_duration_hours:float=160.0)->dict:
     activity_statuses=Counter(x.get("status_code") or "Unknown" for x in tasks)
     activity_types=Counter(x.get("task_type") or "Unknown" for x in tasks)
 
+    milestone_rows=[]
+    for task in tasks:
+        if task.get("task_type") not in milestones:continue
+        finish=task.get("act_end_date") or task.get("early_end_date") or task.get("target_end_date") or task.get("late_end_date")
+        milestone_rows.append({
+            **_task_label(task),
+            "finish_date":_iso(finish),
+        })
+
     project=projects[0] if projects else {}
     data_date=project.get("last_recalc_date") or project.get("last_schedule_date") or project.get("data_date")
+    planned_start=_date(project.get("plan_start_date"))
+    planned_finish=_date(project.get("plan_end_date") or project.get("scd_end_date"))
+    planned_duration_days=(planned_finish-planned_start).total_seconds()/86400 if planned_start and planned_finish else None
     issue_counts={
         "open_start":len(no_predecessor),
         "open_finish":len(no_successor),
@@ -189,6 +201,7 @@ def analyze_xer(content:bytes,long_duration_hours:float=160.0)->dict:
             "data_date":_iso(data_date),
             "planned_start":_iso(project.get("plan_start_date")),
             "planned_finish":_iso(project.get("plan_end_date") or project.get("scd_end_date")),
+            "planned_duration_days":round(planned_duration_days,1) if planned_duration_days is not None else None,
         },
         "counts":{
             "projects":len(projects),
@@ -207,6 +220,7 @@ def analyze_xer(content:bytes,long_duration_hours:float=160.0)->dict:
             "methodology":"phase6-xer-health-v1",
             "note":"The score is a deterministic screening indicator, not a substitute for contractual schedule review or delay analysis.",
         },
+        "milestones":milestone_rows,
         "distributions":{
             "activity_statuses":[{"name":k,"count":v} for k,v in activity_statuses.most_common()],
             "activity_types":[{"name":k,"count":v} for k,v in activity_types.most_common()],
@@ -225,5 +239,5 @@ def analyze_xer(content:bytes,long_duration_hours:float=160.0)->dict:
             "missing_wbs":missing_wbs,
         },
         "source_tables":sorted(tables),
-        "parser_version":"phase6-xer-parser-v1",
+        "parser_version":"phase6-xer-parser-v2",
     }
