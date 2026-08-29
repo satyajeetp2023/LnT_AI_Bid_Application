@@ -23,6 +23,8 @@ class ScheduleScopeItem(Base):
  source_reference:Mapped[str|None]=mapped_column(String(200))
  source_excerpt:Mapped[str|None]=mapped_column(Text)
  mandatory:Mapped[bool]=mapped_column(Boolean,default=True)
+ responsible_function:Mapped[str]=mapped_column(String(100),default="Planning",index=True)
+ responsible_person:Mapped[str|None]=mapped_column(String(200))
  match_keywords:Mapped[list]=mapped_column(JSON,default=list)
  coverage_status:Mapped[str]=mapped_column(String(40),default="Not Checked",index=True)
  matched_task_code:Mapped[str|None]=mapped_column(String(100))
