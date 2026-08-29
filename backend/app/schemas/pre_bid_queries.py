@@ -57,3 +57,15 @@ class PreBidQueryUpdate(BaseModel):
 
 class PreBidQueryRead(PreBidQueryFields):
  id:int;bid_project_id:int;created_by:int;created_at:datetime;updated_at:datetime;closed_by:int|None;closed_at:datetime|None;requirement_title:str|None=None;missing_input_title:str|None=None;source_original_filename:str|None=None;source_document_title:str|None=None;model_config=ConfigDict(from_attributes=True)
+
+
+class PreBidQuerySuggestionDecision(BaseModel):
+ source_kind:str=Field(min_length=2,max_length=80)
+ source_id:int=Field(ge=1)
+ decision:str="Do Not Raise"
+ reason:str|None=Field(None,max_length=2000)
+ @field_validator("decision")
+ @classmethod
+ def decision_valid(cls,v):
+  if v not in {"Do Not Raise","Reconsider"}:raise ValueError("Unsupported suggestion decision")
+  return v
