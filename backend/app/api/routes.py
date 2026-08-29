@@ -21,6 +21,7 @@ from app.services.template_population_plan import build_population_plan
 from app.services.template_draft_generator import generate_controlled_xlsx_draft
 from app.services.prepared_artifacts import approve_artifact,artifact_dict,create_prepared_artifact,get_prepared_artifact,list_prepared_artifacts,mark_artifact_ready
 from app.services.submission_readiness import build_submission_package,submission_readiness
+from app.services.p6_xer import analyze_xer
 from app.services.documents import DOCUMENT_CATEGORIES,archive,classify,mark_revision,update_document_metadata,update_notes,upload_document
 from app.services.document_classification import auto_classify_document
 from app.storage.base import LocalSecureStorage
@@ -183,6 +184,17 @@ def prepared_artifact_ready(artifact_id:int,request:Request,db:Session=Depends(g
 def approve_prepared_artifact(artifact_id:int,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
  item=get_prepared_artifact(db,artifact_id);require_project_access(db,user,item.bid_project_id,Permission.PREPARED_ARTIFACT_APPROVE)
  return artifact_dict(approve_artifact(db,item,user.id,metadata(request)))
+
+@router.get("/documents/{document_id}/schedule-analysis")
+def schedule_analysis(document_id:int,request:Request,long_duration_hours:float=Query(160,gt=0,le=10000),db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ doc=get_doc(db,document_id);require_project_access(db,user,doc.bid_project_id,Permission.VIEW_DOCUMENT)
+ if doc.duplicate_of_document_id or not doc.storage_path:raise HTTPException(422,"Document content is not available for schedule analysis")
+ if doc.file_extension.lower()!="xer":raise HTTPException(422,"Schedule analysis currently supports Primavera .xer files")
+ storage=LocalSecureStorage(get_settings().storage_root)
+ result=analyze_xer(storage.read(doc.storage_path),long_duration_hours)
+ db.add(AuditEvent(user_id=user.id,bid_project_id=doc.bid_project_id,event_type="schedule.xer_analyzed",entity_type="BidDocument",entity_id=str(doc.id),request_metadata=metadata(request),details={"parser_version":result.get("parser_version"),"activities":result.get("counts",{}).get("activities",0),"health_score":result.get("health",{}).get("score")}))
+ db.commit()
+ return result
 
 @router.patch("/documents/{document_id}/notes",response_model=DocumentRead)
 def notes(document_id:int,payload:NotesUpdate,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
