@@ -51,18 +51,32 @@ SIGNALLING=(
     ActivityTemplate("Signalling testing and commissioning",("Wire count / continuity","Functional testing","Integrated testing","Commissioning"),("signalling","testing","commissioning"),.92),
 )
 
+TELECOM=(
+    ActivityTemplate("Telecom backbone and OFC",("Route survey","Duct / cable route preparation","OFC laying","Splicing and termination","OTDR / link testing"),("ofc","fiber","fibre","telecom","duct","splicing"),.90),
+    ActivityTemplate("Telecom system installation",("Transmission equipment","IP / data network","PA / PIS / CCTV / clock systems","Power supply and racks"),("telecom","cctv","pis","pa system","network","ip"),.88),
+    ActivityTemplate("Telecom integration and commissioning",("Equipment configuration","Subsystem testing","Integrated testing","Commissioning"),("telecom","integration","commissioning","testing"),.90),
+)
 
-def project_type_activity_library(project_type:str)->list[ActivityTemplate]:
-    text=(project_type or "").lower()
+CIVIL_STRUCTURES=(
+    ActivityTemplate("Civil survey and enabling works",("Topographic survey","Utility identification / diversion","Access and temporary works"),("survey","utility","access","temporary works"),.80),
+    ActivityTemplate("Earthwork and drainage",("Excavation / filling","Formation","Drainage works","Slope / erosion protection"),("earthwork","drainage","formation","excavation"),.86),
+    ActivityTemplate("Bridges / culverts / structural works",("Foundations","Substructure","Superstructure","Waterproofing / finishing"),("bridge","culvert","structure","pier","abutment"),.86),
+    ActivityTemplate("Station / building civil works",("Foundations","Structural frame","Architectural finishes","MEP interface readiness"),("station","building","platform","architectural"),.84),
+)
+
+
+def project_type_activity_library(project_type:str,scope_text:str="")->list[ActivityTemplate]:
+    project=(project_type or "").lower()
+    scope=(scope_text or "").lower()
+    text=f"{project} {scope}"
     groups=[RAILWAY_COMMON]
-    if any(x in text for x in ("ohe","overhead","electrification","traction")):groups.append(OHE)
-    if any(x in text for x in ("psi","substation","traction power","switching")):groups.append(PSI)
-    if any(x in text for x in ("scada","remote control","telecontrol")):groups.append(SCADA)
-    if any(x in text for x in ("track","civil","formation","permanent way")):groups.append(TRACK)
-    if any(x in text for x in ("signal","signalling","telecom","s&t")):groups.append(SIGNALLING)
-    # Railway EPC / composite projects can reasonably need several disciplines.
-    if any(x in text for x in ("railway","rail","epc","composite")) and len(groups)==1:
-        groups.extend((OHE,PSI,SCADA,TRACK,SIGNALLING))
+    if any(x in text for x in ("ohe","overhead equipment","overhead electrification","catenary","contact wire","traction electrification")):groups.append(OHE)
+    if any(x in text for x in ("psi","tss","ssp","traction substation","traction power","switching station","transformer")):groups.append(PSI)
+    if any(x in text for x in ("scada","remote control","telecontrol","rtu","plc")):groups.append(SCADA)
+    if any(x in text for x in ("track","formation","permanent way","rail laying","sleeper","ballast","turnout")):groups.append(TRACK)
+    if any(x in text for x in ("signal","signalling","interlocking","axle counter","track circuit","control table")):groups.append(SIGNALLING)
+    if any(x in text for x in ("telecom","ofc","fiber optic","fibre optic","cctv","pis","public address","ip network")):groups.append(TELECOM)
+    if any(x in text for x in ("civil","earthwork","bridge","culvert","station building","platform","drainage","structure")):groups.append(CIVIL_STRUCTURES)
     result=[];seen=set()
     for group in groups:
         for item in group:
