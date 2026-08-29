@@ -246,7 +246,6 @@ def parse_xlsx_template(content:bytes)->dict:
     for group in placeholder_groups.values():
         group["occurrence_count"]=len(group["occurrences"])
         group["sample_occurrences"]=group["occurrences"][:10]
-        del group["occurrences"]
         workbook_placeholders.append(group)
     workbook_placeholders.sort(key=lambda x:x["semantic_field"])
 
@@ -265,5 +264,5 @@ def parse_xlsx_template(content:bytes)->dict:
             "repeated_sheet_patterns":len(workbook_patterns),
             "workbook_placeholders":len(workbook_placeholders),
         },
-        "parser_version":"phase5-xlsx-template-parser-v3",
+        "parser_version":"phase5-xlsx-template-parser-v4",
     }
