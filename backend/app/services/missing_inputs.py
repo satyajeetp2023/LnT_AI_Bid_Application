@@ -4,6 +4,7 @@ from sqlalchemy import case,func,or_,select
 from sqlalchemy.orm import Session
 from app.models import AuditEvent,BidDocument,BidMissingInput,BidRequirement
 from app.services.missing_input_taxonomy import OPEN_STATUSES,RESOLVED_STATUSES
+from app.services.responsibility_assignment import suggest_responsible_function
 
 def validate_links(db:Session,project_id:int,requirement_id:int|None,document_id:int|None):
  if requirement_id is not None:
@@ -15,7 +16,8 @@ def validate_links(db:Session,project_id:int,requirement_id:int|None,document_id
 
 def create_missing_input(db:Session,project_id:int,payload,user_id:int,request_metadata:dict):
  validate_links(db,project_id,payload.requirement_id,payload.source_document_id)
- item=BidMissingInput(**payload.model_dump(),bid_project_id=project_id,created_by=user_id)
+ values=payload.model_dump();values["responsible_function"]=values.get("responsible_function") or suggest_responsible_function(values.get("input_category"),f"{values.get('missing_input_title','')} {values.get('missing_input_description','')}")
+ item=BidMissingInput(**values,bid_project_id=project_id,created_by=user_id)
  if item.status in RESOLVED_STATUSES:item.resolved_by=user_id;item.resolved_at=datetime.now(timezone.utc)
  db.add(item);db.flush();db.add(AuditEvent(user_id=user_id,bid_project_id=project_id,event_type="missing_input.created",entity_type="BidMissingInput",entity_id=str(item.id),request_metadata=request_metadata,details={"missing_input_id":item.id}));db.commit();return item
 
