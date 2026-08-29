@@ -500,6 +500,78 @@ def _match(item:ScheduleScopeItem,index:list[dict]):
     return (best["entry"]["task"] if best else None),(best["score"] if best else 0.0),candidates
 
 
+def _schedule_precision_recommendations(groups:list[dict],tasks:list[dict]):
+    task_by_code={str(x.get("task_code") or ""):x for x in tasks if x.get("task_code")}
+    group_by_member={}
+    for group in groups:
+        for item_id in group.get("member_item_ids",[]):
+            group_by_member[item_id]=group
+
+    by_task=defaultdict(list)
+    for group in groups:
+        code=str(group.get("matched_task_code") or "")
+        if code and group.get("group_coverage_status") in {"Covered","Possible Match"}:
+            by_task[code].append(group)
+
+    recommendations=[]
+    for code,matched_groups in by_task.items():
+        task=task_by_code.get(code) or {}
+        expected_names=sorted({x.get("activity_name") for x in matched_groups if x.get("activity_name")})
+        sub_names=sorted({x.get("activity_name") for x in matched_groups if x.get("activity_level") in {"Sub-Activity","BOQ Sub-Activity"}})
+        duration=max(
+            float(task.get("target_drtn_hr_cnt") or 0),
+            float(task.get("remain_drtn_hr_cnt") or 0),
+        )
+        reasons=[];score=0
+        if len(expected_names)>=3:
+            reasons.append(f"One schedule activity is matching {len(expected_names)} logical scope items.")
+            score+=20+min(20,(len(expected_names)-3)*5)
+        if len(sub_names)>=2:
+            reasons.append(f"{len(sub_names)} expected sub-activities are represented by the same Primavera activity.")
+            score+=20
+        if duration>160 and len(expected_names)>=2:
+            reasons.append(f"Activity duration is {duration:.0f} hours while covering multiple scope components.")
+            score+=15
+
+        missing_children=[]
+        parent_member_ids={item_id for g in matched_groups for item_id in g.get("member_item_ids",[])}
+        for group in groups:
+            if group.get("parent_id") in parent_member_ids and group.get("group_coverage_status")!="Covered":
+                missing_children.append(group)
+        if missing_children:
+            names=sorted({x.get("activity_name") for x in missing_children if x.get("activity_name")})
+            reasons.append(f"{len(names)} expected child activity/sub-activity item(s) are not individually covered.")
+            score+=25
+        else:
+            names=[]
+
+        if score<20:continue
+        recommendations.append({
+            "task_code":code,
+            "task_name":task.get("task_name"),
+            "duration_hours":duration,
+            "expected_components":expected_names,
+            "uncovered_child_components":names,
+            "precision_score":min(100,score),
+            "priority":"High" if score>=55 else "Medium" if score>=35 else "Low",
+            "reasons":reasons,
+            "recommendation":(
+                "Review whether this activity should be split into the expected controllable sub-activities. "
+                "Keep it grouped only when the grouping is intentional, measurable and contractually acceptable."
+            ),
+            "guardrail":"Do not split automatically. Rebuild logic and recalculate the programme in Primavera before accepting any refinement.",
+        })
+    recommendations.sort(key=lambda x:(-x["precision_score"],x["task_code"]))
+    return {
+        "candidates":recommendations,
+        "candidate_count":len(recommendations),
+        "high_priority":sum(1 for x in recommendations if x["priority"]=="High"),
+        "medium_priority":sum(1 for x in recommendations if x["priority"]=="Medium"),
+        "methodology":"phase6-scope-driven-schedule-precision-v1",
+        "note":"These recommendations use expected contract/BOQ/project scope to identify activities that may be too aggregated for precise control.",
+    }
+
+
 def evaluate_scope_coverage(db:Session,bid_id:int,xer_content:bytes,user_id:int,request_metadata:dict|None=None):
     tables=parse_xer(xer_content)
     tasks=tables.get("TASK",[])
@@ -546,9 +618,11 @@ def evaluate_scope_coverage(db:Session,bid_id:int,xer_content:bytes,user_id:int,
         x["activity_name"].lower(),
     ))
     blocking_groups=[x for x in groups if x["group_blocking"]]
+    precision_advisor=_schedule_precision_recommendations(groups,tasks)
     return {
         "items":rows,
         "groups":groups,
+        "precision_advisor":precision_advisor,
         "summary":{
             "expected":len(rows),
             "covered":sum(1 for x in rows if x["coverage_status"]=="Covered"),
@@ -565,7 +639,7 @@ def evaluate_scope_coverage(db:Session,bid_id:int,xer_content:bytes,user_id:int,
         },
         "ready":len(blocking_groups)==0 and len(groups)>0,
         "grade":"Complete" if len(blocking_groups)==0 and groups else "Action Required" if groups else "No Scope Catalog",
-        "methodology":"phase6-schedule-scope-coverage-v7",
+        "methodology":"phase6-schedule-scope-coverage-v8",
         "note":"Expected activities are independently sourced from bid scope. Missing or ambiguous coverage must be explained; 'To Be Added' remains a blocker until a revised schedule contains the activity.",
     }
 
