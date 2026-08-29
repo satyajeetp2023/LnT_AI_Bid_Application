@@ -79,9 +79,7 @@ def _relation_key(rel,task_map):
     )
 
 
-def compare_xer(baseline_content:bytes,current_content:bytes)->dict:
-    base=parse_xer(baseline_content)
-    cur=parse_xer(current_content)
+def compare_schedule_tables(base:dict[str,list[dict]],cur:dict[str,list[dict]])->dict:
     base_tasks=base.get("TASK",[])
     cur_tasks=cur.get("TASK",[])
     base_by_key={_key(x):x for x in base_tasks if _key(x)}
@@ -183,6 +181,10 @@ def compare_xer(baseline_content:bytes,current_content:bytes)->dict:
             "risk_level":"High" if delayed_milestones or newly_negative_float else "Medium" if finish_slippage or float_erosion else "Low",
             "note":"Risk level highlights schedule deterioration signals only; it is not a delay entitlement conclusion.",
         },
-        "comparison_version":"phase6-xer-comparison-v2",
+        "comparison_version":"phase6-schedule-comparison-v3",
         "note":"This is a deterministic schedule-version comparison. It does not by itself establish contractual delay responsibility or entitlement.",
     }
+
+
+def compare_xer(baseline_content:bytes,current_content:bytes)->dict:
+    return compare_schedule_tables(parse_xer(baseline_content),parse_xer(current_content))
