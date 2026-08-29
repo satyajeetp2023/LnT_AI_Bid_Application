@@ -16,7 +16,7 @@ def _owner(category:str|None,text:str|None,current:str|None)->str:
     return current or suggest_responsible_function(category,text)
 
 
-def department_work_queue(db:Session,bid_id:int,responsible_function:str|None=None):
+def department_work_queue(db:Session,bid_id:int,responsible_function:str|None=None,responsible_person:str|None=None):
     today=date.today()
     items=[]
 
@@ -27,6 +27,7 @@ def department_work_queue(db:Session,bid_id:int,responsible_function:str|None=No
     for r in requirements:
         owner=_owner(r.requirement_category,r.requirement_text,r.responsible_function)
         if responsible_function and owner!=responsible_function:continue
+        if responsible_person and r.responsible_person!=responsible_person:continue
         needs_action=r.review_status=="Not Reviewed" or r.compliance_status=="Not Assessed" or r.review_status=="Needs Clarification"
         if not needs_action:continue
         due=r.due_date.isoformat() if r.due_date else None
@@ -56,6 +57,7 @@ def department_work_queue(db:Session,bid_id:int,responsible_function:str|None=No
     for g in gaps:
         owner=_owner(g.input_category,f"{g.missing_input_title} {g.missing_input_description}",g.responsible_function)
         if responsible_function and owner!=responsible_function:continue
+        if responsible_person and g.responsible_person!=responsible_person:continue
         due=g.required_by_date.isoformat() if g.required_by_date else None
         overdue=bool(g.required_by_date and g.required_by_date<today)
         items.append({
@@ -74,6 +76,7 @@ def department_work_queue(db:Session,bid_id:int,responsible_function:str|None=No
     for q in queries:
         owner=_owner(q.query_category,q.query_text,q.responsible_function)
         if responsible_function and owner!=responsible_function:continue
+        if responsible_person and q.responsible_person!=responsible_person:continue
         due=q.target_response_date.isoformat() if q.target_response_date else None
         overdue=bool(q.target_response_date and q.target_response_date<today and q.status=="Submitted")
         action="Review query" if q.status in {"Draft","Ready for Review"} else "Follow up Employer response" if q.status=="Submitted" else "Progress query"
@@ -108,6 +111,6 @@ def department_work_queue(db:Session,bid_id:int,responsible_function:str|None=No
         "by_function":[{"name":k,"count":v} for k,v in by_function.most_common()],
         "by_type":[{"name":k,"count":v} for k,v in by_type.most_common()],
         "by_person":[{"name":k,"count":v} for k,v in Counter((x["responsible_person"] or "Unassigned") for x in items).most_common()],
-        "filter":{"responsible_function":responsible_function},
-        "version":"phase4-department-work-queue-v2",
+        "filter":{"responsible_function":responsible_function,"responsible_person":responsible_person},
+        "version":"phase4-department-work-queue-v3",
     }
