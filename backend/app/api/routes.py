@@ -27,6 +27,7 @@ from app.services.p6_schedule_comparison import compare_xer
 from app.services.p6_schedule_optimizer import activity_parameter_profile,build_schedule_optimization_advisor
 from app.services.schedule_scope_coverage import add_scope_item,disposition_scope_item,evaluate_scope_coverage,sync_scope_from_requirements
 from app.services.boq_scope_adapter import ingest_boq_scope
+from app.services.boq_document_extraction import extract_boq_rows
 from app.services.documents import DOCUMENT_CATEGORIES,archive,classify,mark_revision,update_document_metadata,update_notes,upload_document
 from app.services.document_classification import auto_classify_document
 from app.storage.base import LocalSecureStorage
@@ -231,6 +232,21 @@ def schedule_activity_profile(document_id:int,task_key:str=Query(...,min_length=
 def sync_schedule_scope(bid_id:int,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
  require_project_access(db,user,bid_id,Permission.REQUIREMENT_MANAGE);get_bid(db,bid_id)
  return sync_scope_from_requirements(db,bid_id,user.id,metadata(request))
+
+@router.post("/documents/{document_id}/extract-boq-scope")
+def extract_document_boq_scope(document_id:int,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ doc=get_doc(db,document_id);require_project_access(db,user,doc.bid_project_id,Permission.REQUIREMENT_MANAGE)
+ if doc.duplicate_of_document_id or not doc.storage_path:raise HTTPException(422,"Document content is not available for BOQ extraction")
+ if doc.file_extension.lower() not in {"xlsx","csv"}:
+  return {"detected":False,"rows":0,"tables":0,"ingested":{"created":0,"updated":0,"skipped":0}}
+ storage=LocalSecureStorage(get_settings().storage_root)
+ extracted=extract_boq_rows(doc.file_extension,storage.read(doc.storage_path))
+ ingested={"rows_received":0,"created":0,"updated":0,"skipped":0}
+ if extracted.get("detected"):
+  ingested=ingest_boq_scope(db,doc.bid_project_id,extracted.get("rows") or [],user.id,metadata(request))
+ db.add(AuditEvent(user_id=user.id,bid_project_id=doc.bid_project_id,event_type="schedule.boq_document_checked",entity_type="BidDocument",entity_id=str(doc.id),request_metadata=metadata(request),details={"detected":bool(extracted.get("detected")),"rows":len(extracted.get("rows") or []),"tables":len(extracted.get("tables") or [])}))
+ db.commit()
+ return {"detected":bool(extracted.get("detected")),"rows":len(extracted.get("rows") or []),"tables":len(extracted.get("tables") or []),"ingested":ingested,"extractor_version":extracted.get("version")}
 
 @router.post("/bids/{bid_id}/schedule-scope/boq")
 def ingest_schedule_boq_scope(bid_id:int,payload:dict,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
