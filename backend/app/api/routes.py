@@ -28,6 +28,7 @@ from app.services.p6_schedule_optimizer import activity_parameter_profile,build_
 from app.services.schedule_scope_coverage import add_scope_item,disposition_scope_item,evaluate_scope_coverage,schedule_scope_catalog,sync_scope_from_requirements
 from app.services.boq_scope_adapter import ingest_boq_scope
 from app.services.boq_document_extraction import extract_boq_rows
+from app.services.schedule_skeleton import build_schedule_skeleton
 from app.services.documents import DOCUMENT_CATEGORIES,archive,classify,mark_revision,update_document_metadata,update_notes,upload_document
 from app.services.document_classification import auto_classify_document
 from app.storage.base import LocalSecureStorage
@@ -254,6 +255,12 @@ def ingest_schedule_boq_scope(bid_id:int,payload:dict,request:Request,db:Session
  rows=payload.get("rows") or []
  if not isinstance(rows,list):raise HTTPException(422,"rows must be a list of BOQ items")
  return ingest_boq_scope(db,bid_id,rows,user.id,metadata(request))
+
+@router.get("/bids/{bid_id}/schedule-skeleton")
+def get_schedule_skeleton(bid_id:int,request:Request,sync_scope:bool=Query(True),db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.REQUIREMENT_VIEW);get_bid(db,bid_id)
+ if sync_scope:sync_scope_from_requirements(db,bid_id,user.id,metadata(request))
+ return build_schedule_skeleton(db,bid_id)
 
 @router.get("/bids/{bid_id}/schedule-scope/catalog")
 def get_schedule_scope_catalog(bid_id:int,request:Request,sync:bool=Query(True),db:Session=Depends(get_db),user:User=Depends(user_dep)):
