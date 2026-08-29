@@ -1,6 +1,7 @@
 from datetime import datetime,timezone
 from hashlib import sha256
 from pathlib import Path
+import re
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -9,6 +10,12 @@ from sqlalchemy.orm import Session
 
 from app.models import AuditEvent,BidDocument,BidPreparedArtifact
 from app.storage.base import StorageProvider
+
+
+def _safe_stem(value:str)->str:
+    stem=Path(value).stem
+    safe=re.sub(r"[^A-Za-z0-9._ -]+","_",stem).strip(" .")
+    return safe[:180] or "prepared_artifact"
 
 
 def artifact_dict(item:BidPreparedArtifact):
@@ -50,7 +57,7 @@ def create_prepared_artifact(
         BidPreparedArtifact.template_document_id==template.id,
     )) or 0
     version=int(current)+1
-    stem=Path(template.original_filename).stem
+    stem=_safe_stem(template.original_filename)
     stored_filename=f"{stem}_prepared_v{version}_{uuid4().hex[:8]}.xlsx"
     storage_path=storage.save(template.bid_project_id,stored_filename,data)
     compact={k:v for k,v in generation_summary.items() if k not in {"written","unresolved"}}
