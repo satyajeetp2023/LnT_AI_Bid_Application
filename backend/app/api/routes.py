@@ -113,6 +113,43 @@ def download(document_id:int,request:Request,db:Session=Depends(get_db),user:Use
  doc=get_doc(db,document_id); require_project_access(db,user,doc.bid_project_id,Permission.DOWNLOAD_DOCUMENT)
  if not doc.storage_path: raise HTTPException(404,"Document content not available")
  data=LocalSecureStorage(get_settings().storage_root).read(doc.storage_path); db.add(AuditEvent(user_id=user.id,bid_project_id=doc.bid_project_id,event_type="document.downloaded",entity_type="BidDocument",entity_id=str(doc.id),request_metadata=metadata(request))); db.commit(); safe=doc.original_filename.replace('"',''); return Response(data,media_type=doc.mime_type,headers={"Content-Disposition":f'attachment; filename="{safe}"'})
+@router.get("/bids/{bid_id}/members")
+def project_members(bid_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.VIEW_DOCUMENT);get_bid(db,bid_id)
+ memberships=db.scalars(select(ProjectMembership).where(ProjectMembership.bid_project_id==bid_id).order_by(ProjectMembership.role)).all()
+ result=[]
+ for membership in memberships:
+  member=db.get(User,membership.user_id)
+  if member and member.is_active:
+   result.append({"user_id":member.id,"name":member.full_name,"email":member.email,"project_role":membership.role})
+ return result
+
+@router.post("/bids/{bid_id}/work-items/assign-person")
+def assign_work_item_person(bid_id:int,payload:dict,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ get_bid(db,bid_id)
+ entity_type=str(payload.get("entity_type","")).strip()
+ entity_id=int(payload.get("entity_id",0))
+ target_user_id=payload.get("user_id")
+ model=None;permission=None
+ if entity_type=="Requirement":model=BidRequirement;permission=Permission.REQUIREMENT_MANAGE
+ elif entity_type=="Missing Input":model=BidMissingInput;permission=Permission.MISSING_INPUT_MANAGE
+ elif entity_type=="Pre-Bid Query":model=BidPreBidQuery;permission=Permission.PRE_BID_QUERY_MANAGE
+ else:raise HTTPException(422,"Unsupported work item type")
+ require_project_access(db,user,bid_id,permission)
+ item=db.get(model,entity_id)
+ if not item or item.bid_project_id!=bid_id:raise HTTPException(404,"Work item not found in this bid")
+ person_name=None
+ if target_user_id is not None:
+  target_user_id=int(target_user_id)
+  membership=db.scalar(select(ProjectMembership).where(ProjectMembership.bid_project_id==bid_id,ProjectMembership.user_id==target_user_id))
+  target=db.get(User,target_user_id)
+  if not membership or not target or not target.is_active:raise HTTPException(422,"Responsible person must be an active member of this bid")
+  person_name=target.full_name
+ item.responsible_person=person_name
+ db.add(AuditEvent(user_id=user.id,bid_project_id=bid_id,event_type="work_item.person_assigned",entity_type=entity_type,entity_id=str(entity_id),request_metadata=metadata(request),details={"responsible_person":person_name,"responsible_user_id":target_user_id}))
+ db.commit()
+ return {"entity_type":entity_type,"entity_id":entity_id,"responsible_person":person_name}
+
 @router.get("/bids/{bid_id}/department-work-queue")
 def get_department_work_queue(bid_id:int,responsible_function:str|None=None,db:Session=Depends(get_db),user:User=Depends(user_dep)):
  require_project_access(db,user,bid_id,Permission.REQUIREMENT_VIEW);get_bid(db,bid_id);return department_work_queue(db,bid_id,responsible_function)
