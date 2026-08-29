@@ -6,13 +6,14 @@ from sqlalchemy import func,select
 from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.database.session import get_db
-from app.models import AuditEvent,BidDocument,BidProject,BidRequirement,ProjectMembership,User
+from app.models import AuditEvent,BidDocument,BidMissingInput,BidPreBidQuery,BidProject,BidRequirement,ProjectMembership,User
 from app.schemas.requirements import RequirementCreate,RequirementExtractionSummary,RequirementRead,RequirementUpdate
 from app.schemas.bids import AutoClassifyRequest,BidCreate,BidRead,BidUpdate,ClassificationUpdate,DocumentMetadataUpdate,DocumentRead,NotesUpdate,RevisionCreate
 from app.security.auth import Permission,current_user,is_admin,require_permission,require_project_access
 from app.services.bids import create_bid,list_bids,update_bid
 from app.services.requirements import create_requirement,list_requirements,update_requirement
 from app.services.requirement_extraction import extract_requirements_from_document
+from app.services.responsibility_assignment import suggest_responsible_function
 from app.services.documents import DOCUMENT_CATEGORIES,archive,classify,mark_revision,update_document_metadata,update_notes,upload_document
 from app.services.document_classification import auto_classify_document
 from app.storage.base import LocalSecureStorage
@@ -111,6 +112,31 @@ def download(document_id:int,request:Request,db:Session=Depends(get_db),user:Use
  doc=get_doc(db,document_id); require_project_access(db,user,doc.bid_project_id,Permission.DOWNLOAD_DOCUMENT)
  if not doc.storage_path: raise HTTPException(404,"Document content not available")
  data=LocalSecureStorage(get_settings().storage_root).read(doc.storage_path); db.add(AuditEvent(user_id=user.id,bid_project_id=doc.bid_project_id,event_type="document.downloaded",entity_type="BidDocument",entity_id=str(doc.id),request_metadata=metadata(request))); db.commit(); safe=doc.original_filename.replace('"',''); return Response(data,media_type=doc.mime_type,headers={"Content-Disposition":f'attachment; filename="{safe}"'})
+@router.post("/bids/{bid_id}/auto-assign-owners")
+def auto_assign_owners(bid_id:int,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.REQUIREMENT_MANAGE);get_bid(db,bid_id)
+ counts={"requirements":0,"missing_inputs":0,"pre_bid_queries":0}
+ requirements=db.scalars(select(BidRequirement).where(BidRequirement.bid_project_id==bid_id)).all()
+ for item in requirements:
+  if item.responsible_function:continue
+  item.responsible_function=suggest_responsible_function(item.requirement_category,item.requirement_text);counts["requirements"]+=1
+ missing_inputs=db.scalars(select(BidMissingInput).where(BidMissingInput.bid_project_id==bid_id)).all()
+ for item in missing_inputs:
+  if item.responsible_function:continue
+  if item.requirement and item.requirement.responsible_function:item.responsible_function=item.requirement.responsible_function
+  else:item.responsible_function=suggest_responsible_function(item.input_category,item.missing_input_description)
+  counts["missing_inputs"]+=1
+ pre_bid_queries=db.scalars(select(BidPreBidQuery).where(BidPreBidQuery.bid_project_id==bid_id)).all()
+ for item in pre_bid_queries:
+  if item.responsible_function:continue
+  if item.requirement and item.requirement.responsible_function:item.responsible_function=item.requirement.responsible_function
+  elif item.missing_input and item.missing_input.responsible_function:item.responsible_function=item.missing_input.responsible_function
+  else:item.responsible_function=suggest_responsible_function(item.query_category,item.query_text)
+  counts["pre_bid_queries"]+=1
+ db.add(AuditEvent(user_id=user.id,bid_project_id=bid_id,event_type="bid.responsibility_auto_assigned",entity_type="BidProject",entity_id=str(bid_id),request_metadata=metadata(request),details=counts))
+ db.commit()
+ return counts
+
 @router.post("/bids/{bid_id}/requirements",response_model=RequirementRead,status_code=201)
 def add_requirement(bid_id:int,payload:RequirementCreate,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
  require_project_access(db,user,bid_id,Permission.REQUIREMENT_MANAGE);get_bid(db,bid_id);return create_requirement(db,bid_id,payload,user.id,metadata(request))
