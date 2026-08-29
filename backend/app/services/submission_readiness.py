@@ -1,6 +1,7 @@
 import csv
 import io
 import zipfile
+import re
 from datetime import datetime,timezone
 
 from sqlalchemy import select
@@ -10,6 +11,11 @@ from app.models import BidPreparedArtifact
 from app.services.estimation_readiness import calculate_estimation_readiness
 from app.services.submission_format_intelligence import detect_submission_formats
 from app.storage.base import StorageProvider
+
+
+def _safe_zip_name(value:str)->str:
+    safe=re.sub(r"[^A-Za-z0-9._ -]+","_",value).strip(" .")
+    return safe[:180] or "artifact"
 
 
 def submission_readiness(db:Session,bid_id:int):
@@ -123,11 +129,12 @@ def build_submission_package(db:Session,bid_id:int,storage:StorageProvider):
         writer.writerow(["Artifact ID","Artifact Name","Template","Version","Checksum SHA-256","File Size","Approved At"])
         used_names=set()
         for item in artifacts:
-            base=f"{item.artifact_name}.xlsx"
+            safe_name=_safe_zip_name(item.artifact_name)
+            base=f"{safe_name}.xlsx"
             filename=base
             counter=2
             while filename.lower() in used_names:
-                filename=f"{item.artifact_name}_{counter}.xlsx";counter+=1
+                filename=f"{safe_name}_{counter}.xlsx";counter+=1
             used_names.add(filename.lower())
             archive.writestr(filename,storage.read(item.storage_path))
             writer.writerow([
