@@ -200,7 +200,7 @@ def schedule_analysis(document_id:int,request:Request,long_duration_hours:float=
  return result
 
 @router.get("/documents/{document_id}/schedule-comparison")
-def schedule_comparison(document_id:int,baseline_document_id:int=Query(...,ge=1),request:Request=None,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+def schedule_comparison(document_id:int,request:Request,baseline_document_id:int=Query(...,ge=1),db:Session=Depends(get_db),user:User=Depends(user_dep)):
  current=get_doc(db,document_id);baseline=get_doc(db,baseline_document_id)
  require_project_access(db,user,current.bid_project_id,Permission.VIEW_DOCUMENT)
  if current.bid_project_id!=baseline.bid_project_id:raise HTTPException(422,"Baseline and current schedule must belong to the same bid")
