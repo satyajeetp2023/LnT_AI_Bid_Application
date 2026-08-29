@@ -12,7 +12,7 @@ from app.database.session import get_db
 from app.models import AuditEvent,BidPreBidQuery,BidPreBidQueryDecision,BidProject,User
 from app.schemas.pre_bid_queries import PreBidQueryCreate,PreBidQueryRead,PreBidQuerySuggestionDecision,PreBidQueryUpdate
 from app.security.auth import Permission,current_user,require_project_access
-from app.services.pre_bid_queries import approve_pre_bid_query,create_pre_bid_query,list_pre_bid_queries,pre_bid_query_summary,update_pre_bid_query
+from app.services.pre_bid_queries import approve_pre_bid_query,create_pre_bid_query,list_pre_bid_queries,pre_bid_query_summary,revoke_pre_bid_query_approval,update_pre_bid_query
 from app.services.pre_bid_query_intelligence import suggest_pre_bid_queries
 
 router=APIRouter()
@@ -134,13 +134,9 @@ def approve_query(query_id:int,request:Request,db:Session=Depends(get_db),user:U
  item=get_item(db,query_id);require_project_access(db,user,item.bid_project_id,Permission.PRE_BID_QUERY_APPROVE)
  return approve_pre_bid_query(db,item,user.id,metadata(request))
 
-@router.post("/pre-bid-queries/{query_id}/approve",response_model=PreBidQueryRead)
-def approve_query(query_id:int,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
- item=get_item(db,query_id);require_project_access(db,user,item.bid_project_id,Permission.PRE_BID_QUERY_MANAGE);return approve_pre_bid_query(db,item,user.id,metadata(request))
-
 @router.post("/pre-bid-queries/{query_id}/revoke-approval",response_model=PreBidQueryRead)
 def revoke_query_approval(query_id:int,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
- item=get_item(db,query_id);require_project_access(db,user,item.bid_project_id,Permission.PRE_BID_QUERY_MANAGE);return revoke_pre_bid_query_approval(db,item,user.id,metadata(request))
+ item=get_item(db,query_id);require_project_access(db,user,item.bid_project_id,Permission.PRE_BID_QUERY_APPROVE);return revoke_pre_bid_query_approval(db,item,user.id,metadata(request))
 
 @router.get("/pre-bid-queries/{query_id}",response_model=PreBidQueryRead)
 def pre_bid_query_detail(query_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)):
