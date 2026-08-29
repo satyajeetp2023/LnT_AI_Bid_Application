@@ -101,6 +101,10 @@ def compare_xer(baseline_content:bytes,current_content:bytes)->dict:
     milestone_types={"TT_Mile","TT_FinMile","TT_StartMile","TT_FinishMile"}
     milestone_changes=[x for x in changes if x.get("task_type") in milestone_types and x["finish_variance_days"] is not None and abs(x["finish_variance_days"])>.01]
 
+    newly_negative_float=[x for x in changes if x["baseline_total_float_hours"]>=0 and x["current_total_float_hours"]<0]
+    float_erosion=[x for x in changes if x["float_change_hours"]<0]
+    delayed_milestones=[x for x in milestone_changes if (x["finish_variance_days"] or 0)>0]
+
     base_task_id_map={x.get("task_id"):x for x in base_tasks}
     cur_task_id_map={x.get("task_id"):x for x in cur_tasks}
     base_rel={_relation_key(x,base_task_id_map) for x in base.get("TASKPRED",[])}
@@ -116,6 +120,10 @@ def compare_xer(baseline_content:bytes,current_content:bytes)->dict:
     finish_slippage.sort(key=lambda x:x["finish_variance_days"],reverse=True)
     start_slippage.sort(key=lambda x:x["start_variance_days"],reverse=True)
     milestone_changes.sort(key=lambda x:abs(x["finish_variance_days"]),reverse=True)
+
+    newly_negative_float.sort(key=lambda x:x["current_total_float_hours"])
+    float_erosion.sort(key=lambda x:x["float_change_hours"])
+    delayed_milestones.sort(key=lambda x:x["finish_variance_days"],reverse=True)
 
     return {
         "baseline":{
@@ -144,6 +152,9 @@ def compare_xer(baseline_content:bytes,current_content:bytes)->dict:
             "milestone_changes":len(milestone_changes),
             "added_relationships":len(added_rel),
             "deleted_relationships":len(deleted_rel),
+            "newly_negative_float":len(newly_negative_float),
+            "float_erosion":len(float_erosion),
+            "delayed_milestones":len(delayed_milestones),
             "data_date_shift_days":_days(cur_dd,base_dd),
         },
         "added_activities":[{
@@ -164,6 +175,14 @@ def compare_xer(baseline_content:bytes,current_content:bytes)->dict:
         "deleted_relationships":[{
             "predecessor":x[0],"successor":x[1],"type":x[2],"lag_hours":x[3]
         } for x in deleted_rel],
-        "comparison_version":"phase6-xer-comparison-v1",
+        "risk_summary":{
+            "newly_negative_float":newly_negative_float[:50],
+            "largest_float_erosion":float_erosion[:50],
+            "delayed_milestones":delayed_milestones[:50],
+            "largest_finish_slippages":finish_slippage[:50],
+            "risk_level":"High" if delayed_milestones or newly_negative_float else "Medium" if finish_slippage or float_erosion else "Low",
+            "note":"Risk level highlights schedule deterioration signals only; it is not a delay entitlement conclusion.",
+        },
+        "comparison_version":"phase6-xer-comparison-v2",
         "note":"This is a deterministic schedule-version comparison. It does not by itself establish contractual delay responsibility or entitlement.",
     }
