@@ -87,6 +87,7 @@ def build_schedule_optimization_advisor(
         if rel.get("task_id"):preds[rel.get("task_id")].append(rel)
         if rel.get("pred_task_id"):succs[rel.get("pred_task_id")].append(rel)
 
+    milestone_types={"TT_Mile","TT_FinMile","TT_StartMile","TT_FinishMile"}
     task_resources=Counter(x.get("task_id") for x in assignments if x.get("task_id"))
     active_task_ids={x.get("task_id") for x in tasks if x.get("task_id") and x.get("task_type") not in milestone_types}
     assigned_task_ids={x.get("task_id") for x in assignments if x.get("task_id")}
@@ -105,7 +106,6 @@ def build_schedule_optimization_advisor(
     else:
         loading_status="Partially Resource Loaded"
 
-    milestone_types={"TT_Mile","TT_FinMile","TT_StartMile","TT_FinishMile"}
     complete_statuses={"TK_Complete","Complete","Completed"}
 
     candidates=[]
