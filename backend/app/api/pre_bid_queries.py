@@ -1,5 +1,9 @@
 from datetime import date
+import csv
+import io
 from fastapi import APIRouter,Depends,Header,HTTPException,Query,Request
+from fastapi.responses import StreamingResponse
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.database.session import get_db
 from app.models import BidPreBidQuery,BidProject,User
@@ -27,6 +31,24 @@ def add_pre_bid_query(bid_id:int,payload:PreBidQueryCreate,request:Request,db:Se
 @router.get("/bids/{bid_id}/pre-bid-queries")
 def pre_bid_queries(bid_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep),search:str|None=None,query_category:str|None=None,priority:str|None=None,status:str|None=None,responsible_function:str|None=None,requirement_id:int|None=None,missing_input_id:int|None=None,source_document_id:int|None=None,target_response_from:date|None=None,target_response_to:date|None=None,page:int=Query(1,ge=1),page_size:int=Query(20,ge=1,le=100)):
  require_project_access(db,user,bid_id,Permission.PRE_BID_QUERY_VIEW);get_bid(db,bid_id);rows,total=list_pre_bid_queries(db,bid_id,locals(),page,page_size);return {"items":[PreBidQueryRead.model_validate(x).model_dump(mode="json") for x in rows],"total":total,"page":page,"page_size":page_size,"summary":pre_bid_query_summary(db,bid_id)}
+
+@router.get("/bids/{bid_id}/pre-bid-queries/export.csv")
+def export_pre_bid_queries(bid_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.PRE_BID_QUERY_VIEW);bid=get_bid(db,bid_id)
+ rows=db.scalars(select(BidPreBidQuery).where(BidPreBidQuery.bid_project_id==bid_id,BidPreBidQuery.status!="Withdrawn").order_by(BidPreBidQuery.id)).all()
+ output=io.StringIO(newline="")
+ writer=csv.writer(output)
+ writer.writerow(["Query No.","Query Title","Tender Reference / Source","Clause","Page","Pre-Bid Query","Category","Priority","Status","Responsible Function","Target Response Date","Employer Response","Response Reference","Response Date"])
+ for item in rows:
+  writer.writerow([
+   item.query_number or item.id,item.query_title,item.source_document_title or item.source_original_filename or "",
+   item.source_clause or "",item.source_page or "",item.query_text,item.query_category,item.priority,item.status,
+   item.responsible_function or "",item.target_response_date.isoformat() if item.target_response_date else "",
+   item.employer_response or "",item.response_reference or "",item.response_date.isoformat() if item.response_date else "",
+  ])
+ body="\ufeff"+output.getvalue()
+ filename=f"{bid.bid_id}_pre_bid_queries.csv"
+ return StreamingResponse(iter([body]),media_type="text/csv; charset=utf-8",headers={"Content-Disposition":f'attachment; filename="{filename}"'})
 
 @router.get("/bids/{bid_id}/pre-bid-query-suggestions")
 def pre_bid_query_suggestions(bid_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)):
