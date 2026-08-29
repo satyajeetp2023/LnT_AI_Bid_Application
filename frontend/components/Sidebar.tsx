@@ -17,10 +17,11 @@ export function Sidebar({mobileOpen=false,onClose}:{mobileOpen?:boolean;onClose?
   {n:"Pre-Bid Queries",h:bidId?`/bids/${bidId}/pre-bid-queries`:undefined,i:FileQuestion},
   {n:"Work Queue",h:bidId?`/bids/${bidId}/work-queue`:undefined,i:FileCheck2},
   {n:"Bid Preparation",h:bidId?`/bids/${bidId}/bid-preparation`:undefined,i:FileCheck2},
+  {n:"Submission",h:bidId?`/bids/${bidId}/submission`:undefined,i:FileCheck2},
   {n:"Review & Approval",h:bidId?`/bids/${bidId}/review-approval`:undefined,i:ShieldCheck},
  ];
  const future=[
-  {n:"Schedules",i:FileCheck2},{n:"Submission",i:FileCheck2},{n:"Bid Results",i:BarChart3},{n:"Historical Intelligence",i:History},{n:"Reports & Analytics",i:BarChart3}
+  {n:"Schedules",i:FileCheck2},{n:"Bid Results",i:BarChart3},{n:"Historical Intelligence",i:History},{n:"Reports & Analytics",i:BarChart3}
  ];
  const item=(x:any)=>{
   const selected=x.h?(x.h==="/"?p===x.h:x.h==="/bids"?p==="/bids":x.h==="/bids/new"?p==="/bids/new":p===x.h||p.startsWith(x.h+"/")):false;
