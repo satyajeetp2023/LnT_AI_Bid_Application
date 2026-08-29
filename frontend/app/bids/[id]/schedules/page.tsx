@@ -86,10 +86,10 @@ export default function SchedulesPage({params}:{params:Promise<{id:string}>}){
   Promise.all([
    request<Bid>("/bids/"+id),
    request<Page<Document>>("/bids/"+id+"/documents?extension=xer&page_size=100"),
-   request<ScheduleScopeCatalog>("/bids/"+id+"/schedule-scope/catalog"),
-   request<ScheduleSkeleton>("/bids/"+id+"/schedule-skeleton?sync_scope=false")
-  ]).then(([b,d,catalog,nextSkeleton])=>{
-   setBid(b);setDocuments(d.items);setScopeCatalog(catalog);setSkeleton(nextSkeleton);
+   request<ScheduleScopeCatalog>("/bids/"+id+"/schedule-scope/catalog")
+  ]).then(async([b,d,catalog])=>{
+   setBid(b);setDocuments(d.items);setScopeCatalog(catalog);
+   setSkeleton(await request<ScheduleSkeleton>("/bids/"+id+"/schedule-skeleton?sync_scope=false"));
    if(d.items.length){setSelected(d.items[0].id);analyze(d.items[0].id);if(d.items.length>1)setBaseline(d.items[1].id)}
   }).catch(()=>setError("Unable to load schedule documents.")).finally(()=>setLoading(false));
  },[id,analyze]);
