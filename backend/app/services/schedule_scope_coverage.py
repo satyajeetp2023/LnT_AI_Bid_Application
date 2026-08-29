@@ -1,4 +1,5 @@
 import re
+from collections import defaultdict
 from datetime import datetime,timezone
 from decimal import Decimal
 from difflib import SequenceMatcher
@@ -267,30 +268,101 @@ def add_scope_item(
     return _scope_item_dict(item)
 
 
-def _match(item:ScheduleScopeItem,tasks:list[dict]):
-    target=_terms(" ".join(item.match_keywords or [])+" "+item.activity_name)
-    if not target:return None,0.0
-    best=None;best_score=0.0
+def _wbs_paths(rows:list[dict]):
+    by_id={x.get("wbs_id"):x for x in rows if x.get("wbs_id")}
+    cache={}
+    def path(wbs_id):
+        if not wbs_id:return ""
+        if wbs_id in cache:return cache[wbs_id]
+        parts=[];seen=set();current=by_id.get(wbs_id)
+        while current and current.get("wbs_id") not in seen:
+            seen.add(current.get("wbs_id"))
+            label=current.get("wbs_name") or current.get("wbs_short_name") or ""
+            if label:parts.append(str(label))
+            current=by_id.get(current.get("parent_wbs_id"))
+        result=" > ".join(reversed(parts))
+        cache[wbs_id]=result
+        return result
+    return path
+
+
+def _activity_search_index(tables:dict[str,list[dict]]):
+    tasks=tables.get("TASK",[])
+    wbs_path=_wbs_paths(tables.get("PROJWBS",[]))
+    code_rows={x.get("actv_code_id"):x for x in tables.get("ACTVCODE",[]) if x.get("actv_code_id")}
+    type_rows={x.get("actv_code_type_id"):x for x in tables.get("ACTVTYPE",[]) if x.get("actv_code_type_id")}
+    task_codes=defaultdict(list)
+    for row in tables.get("TASKACTV",[]):
+        task_id=row.get("task_id");code=code_rows.get(row.get("actv_code_id")) or {}
+        ctype=type_rows.get(code.get("actv_code_type_id")) or {}
+        code_label=" ".join(str(x) for x in (
+            ctype.get("actv_code_type") or ctype.get("actv_code_type_name") or "",
+            code.get("short_name") or code.get("actv_code_name") or code.get("actv_code") or "",
+        ) if x)
+        if task_id and code_label:task_codes[task_id].append(code_label)
+
+    index=[]
     for task in tasks:
-        label=f'{task.get("task_code") or ""} {task.get("task_name") or ""}'
-        words=_terms(label)
+        wbs=wbs_path(task.get("wbs_id"))
+        codes=task_codes.get(task.get("task_id"),[])
+        task_name=str(task.get("task_name") or "")
+        task_code=str(task.get("task_code") or "")
+        context=" ".join([task_code,task_name,wbs,*codes])
+        index.append({
+            "task":task,
+            "task_name":task_name,
+            "task_code":task_code,
+            "wbs_path":wbs,
+            "activity_codes":codes,
+            "context":context,
+            "terms":_terms(context),
+        })
+    return index
+
+
+def _match(item:ScheduleScopeItem,index:list[dict]):
+    target=_terms(" ".join(item.match_keywords or [])+" "+item.activity_name)
+    if not target:return None,0.0,[]
+    scored=[]
+    for entry in index:
+        words=entry["terms"]
         if not words:continue
-        overlap=len(target&words)/max(1,len(target))
-        name_ratio=SequenceMatcher(None,item.activity_name.lower(),str(task.get("task_name") or "").lower()).ratio()
-        contains=1.0 if item.activity_name.lower() in str(task.get("task_name") or "").lower() else 0.0
-        score=max(contains,.70*overlap+.30*name_ratio)
-        if score>best_score:
-            best=task;best_score=score
-    return best,round(best_score,3)
+        matched=sorted(target&words)
+        overlap=len(matched)/max(1,len(target))
+        task_name=entry["task_name"].lower()
+        name_ratio=SequenceMatcher(None,item.activity_name.lower(),task_name).ratio()
+        contains=1.0 if item.activity_name.lower() in task_name and task_name else 0.0
+        context_bonus=min(.12,len(matched)*.02) if matched else 0.0
+        score=min(1.0,max(contains,.62*overlap+.28*name_ratio+context_bonus))
+        scored.append({
+            "entry":entry,
+            "score":round(score,3),
+            "matched_terms":matched,
+        })
+    scored.sort(key=lambda x:(-x["score"],x["entry"]["task_code"]))
+    best=scored[0] if scored else None
+    candidates=[{
+        "task_code":x["entry"]["task_code"] or None,
+        "task_name":x["entry"]["task_name"] or None,
+        "wbs_path":x["entry"]["wbs_path"] or None,
+        "activity_codes":x["entry"]["activity_codes"],
+        "score":x["score"],
+        "matched_terms":x["matched_terms"],
+    } for x in scored[:3] if x["score"]>=.25]
+    return (best["entry"]["task"] if best else None),(best["score"] if best else 0.0),candidates
 
 
 def evaluate_scope_coverage(db:Session,bid_id:int,xer_content:bytes,user_id:int,request_metadata:dict|None=None):
-    tasks=parse_xer(xer_content).get("TASK",[])
+    tables=parse_xer(xer_content)
+    tasks=tables.get("TASK",[])
+    search_index=_activity_search_index(tables)
+    candidate_matches={}
     items=db.scalars(select(ScheduleScopeItem).where(
         ScheduleScopeItem.bid_project_id==bid_id
     ).order_by(ScheduleScopeItem.id)).all()
     for item in items:
-        task,confidence=_match(item,tasks)
+        task,confidence,candidates=_match(item,search_index)
+        candidate_matches[item.id]=candidates
         previous=item.coverage_status
         if task and confidence>=.72:
             item.coverage_status="Covered"
@@ -314,7 +386,7 @@ def evaluate_scope_coverage(db:Session,bid_id:int,xer_content:bytes,user_id:int,
         details={"expected_items":len(items),"schedule_activities":len(tasks)},
     ))
     db.commit()
-    rows=[_scope_item_dict(x) for x in items]
+    rows=[{**_scope_item_dict(x),"candidate_matches":candidate_matches.get(x.id,[])} for x in items]
     authority_order={"BOQ":0,"Contract / Technical Requirement":1,"Manual":2,"Project-Type Knowledge":3}
     coverage_order={"Missing":0,"Possible Match":1,"Not Checked":2,"Covered":3}
     rows.sort(key=lambda x:(
@@ -341,7 +413,7 @@ def evaluate_scope_coverage(db:Session,bid_id:int,xer_content:bytes,user_id:int,
         },
         "ready":len(blocking)==0 and len(rows)>0,
         "grade":"Complete" if len(blocking)==0 and rows else "Action Required" if rows else "No Scope Catalog",
-        "methodology":"phase6-schedule-scope-coverage-v4",
+        "methodology":"phase6-schedule-scope-coverage-v5",
         "note":"Expected activities are independently sourced from bid scope. Missing or ambiguous coverage must be explained; 'To Be Added' remains a blocker until a revised schedule contains the activity.",
     }
 
