@@ -8,7 +8,7 @@ A release candidate is eligible for controlled deployment only when all three br
 - Internal UAT
 - Release Readiness
 
-Release Readiness validates production configuration, database migrations and rollback/reapply, dependency audits, backend/frontend regression tests, PostgreSQL UAT, database backup/restore, production frontend build, Docker image builds, runtime container smoke tests and Docker Compose rendering.
+Release Readiness validates production configuration, Phase 1–9 schema migration, data-preserving rollback/reapply, backend/frontend dependency audits, backend/frontend regression tests, PostgreSQL UAT, API performance/concurrency thresholds, database dependency failure/recovery, storage durability/path traversal, PostgreSQL backup/restore, reproducible frontend installation from package-lock.json, production frontend build, non-root backend/frontend container execution, live production security headers, individual container runtime health and a full Docker Compose stack smoke.
 
 A green release gate means the application build is internally deployable. It does not replace L&T cyber-security approval, penetration testing, infrastructure approval or enterprise identity-provider onboarding.
 
@@ -78,11 +78,11 @@ Application rollback:
 4. For a required schema rollback, take a fresh backup and use the explicitly tested Alembic downgrade target.
 5. Re-run readiness and authenticated smoke checks.
 
-Migrations 0022 and 0023 are exercised by the automated release rollback/reapply smoke. Production rollback decisions still require assessment of live data created after deployment.
+Migrations 0022 and 0023 are exercised by the automated release rollback/reapply smoke. The release gate also creates a marker bid before downgrade and verifies that pre-existing bid data survives the rollback/reapply cycle. Production rollback decisions still require assessment of live data created after deployment.
 
 ## Security operations
 
-Production controls include OIDC bearer-token verification, RBAC/project membership checks, source-linked audit events, CSP, anti-framing, no-store responses, request IDs, upload validation, bounded parsing, non-root containers and dependency-audit release gates.
+Production controls include OIDC bearer-token verification, RBAC/project membership checks, source-linked audit events with request-ID correlation, CSP, HSTS, anti-framing, no-store responses, request IDs, upload validation, bounded parsing, non-root containers, reproducible frontend dependency locking and dependency-audit release gates.
 
 Operational teams should additionally centralize logs, monitor repeated authentication failures and rejected uploads, configure alerting for readiness failures, rotate secrets according to policy and retain audit data according to the approved records schedule.
 
@@ -92,4 +92,4 @@ Deterministic engines remain authoritative for calculations, readiness and decis
 
 ## Release evidence to retain
 
-Retain the release commit SHA, workflow run links/results, migration revision, dependency-audit results, database backup identifier, image digests, deployment date, environment configuration version (without secrets), cyber-security approval reference and production smoke-test record.
+Retain the release commit SHA, workflow run links/results for Internal CI, Internal UAT and Release Readiness, migration revision, dependency-audit results, performance/concurrency result, database backup identifier, image digests, deployment date, environment configuration version (without secrets), cyber-security approval reference and production smoke-test record.
