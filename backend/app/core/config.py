@@ -8,6 +8,11 @@ class Settings(BaseSettings):
     environment: str = "development"
     secret_key: str = "development-only-change-me"
     cors_origins: str = "http://localhost:3000,http://localhost:3001"
+    auth_mode: str = "development_header"
+    oidc_issuer: str | None = None
+    oidc_audience: str | None = None
+    oidc_jwks_url: str | None = None
+    oidc_email_claim: str = "email"
     storage_root: Path = Path("storage")
     max_file_size_mb: int = 50
     max_batch_size_mb: int = 250
@@ -31,6 +36,12 @@ class Settings(BaseSettings):
                 raise ValueError("Production CORS_ORIGINS must explicitly list approved origins")
             if any("localhost" in x.lower() or "127.0.0.1" in x for x in origins):
                 raise ValueError("Production CORS_ORIGINS cannot use localhost origins")
+            if self.auth_mode!="oidc":
+                raise ValueError("Production AUTH_MODE must be oidc")
+            if not self.oidc_issuer or not self.oidc_audience or not self.oidc_jwks_url:
+                raise ValueError("Production OIDC_ISSUER, OIDC_AUDIENCE and OIDC_JWKS_URL are required")
+            if not self.oidc_jwks_url.lower().startswith("https://"):
+                raise ValueError("Production OIDC_JWKS_URL must use HTTPS")
             if self.max_file_size_mb>200 or self.max_batch_size_mb>1000:
                 raise ValueError("Production upload limits exceed the approved safety ceiling")
         return self
