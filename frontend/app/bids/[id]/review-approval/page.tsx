@@ -5,7 +5,7 @@ import {use,useCallback,useEffect,useState} from "react";
 import {BidWorkspaceHeader} from "@/components/BidWorkspaceHeader";
 import {EmptyState,ErrorState,LoadingState,PageHeader,PriorityBadge,StatusBadge,SummaryCard} from "@/components/design-system";
 import {request} from "@/services/api";
-import type {Bid,EstimationReadiness,PreparedArtifact,PreBidQuery,PreBidQueryPage} from "@/types";
+import type {Bid,EstimationReadiness,PreparedArtifact,PreBidQuery,PreBidQueryPage,SubmissionReadiness} from "@/types";
 
 const emptySummary={total:0,draft:0,submitted:0,responded:0,open:0,overdue:0};
 
@@ -15,6 +15,7 @@ export default function ReviewApprovalPage({params}:{params:Promise<{id:string}>
  const [items,setItems]=useState<PreBidQuery[]>([]);
  const [readiness,setReadiness]=useState<EstimationReadiness|null>(null);
  const [artifacts,setArtifacts]=useState<PreparedArtifact[]>([]);
+ const [submissionReadiness,setSubmissionReadiness]=useState<SubmissionReadiness|null>(null);
  const [loading,setLoading]=useState(true);
  const [error,setError]=useState("");
 
@@ -24,8 +25,9 @@ export default function ReviewApprovalPage({params}:{params:Promise<{id:string}>
    request<Bid>(`/bids/${id}`),
    request<PreBidQueryPage>(`/bids/${id}/pre-bid-queries?page_size=100`),
    request<EstimationReadiness>(`/bids/${id}/estimation-readiness`),
-   request<PreparedArtifact[]>(`/bids/${id}/prepared-artifacts`)
-  ]).then(([b,q,r,a])=>{setBid(b);setItems(q.items);setReadiness(r);setArtifacts(a)})
+   request<PreparedArtifact[]>(`/bids/${id}/prepared-artifacts`),
+   request<SubmissionReadiness>(`/bids/${id}/submission-readiness`)
+  ]).then(([b,q,r,a,s])=>{setBid(b);setItems(q.items);setReadiness(r);setArtifacts(a);setSubmissionReadiness(s)})
     .catch(()=>setError("Unable to load the review queue. Please try again."))
     .finally(()=>setLoading(false));
  },[id]);
@@ -63,6 +65,9 @@ export default function ReviewApprovalPage({params}:{params:Promise<{id:string}>
   </div>
 
   {readiness&&<section className={"mb-3 overflow-hidden rounded border "+(readiness.grade==="Ready"?"border-emerald-200 bg-emerald-50":"border-amber-200 bg-amber-50")}><div className="grid gap-3 p-4 sm:grid-cols-[140px_1fr_auto] sm:items-center"><div><div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Estimation Readiness</div><div className="mt-1 text-2xl font-bold text-slate-900">{Math.round(readiness.overall_score)}%</div><div className={"text-xs font-semibold "+(readiness.grade==="Ready"?"text-emerald-700":"text-amber-700")}>{readiness.grade}</div></div><div className="text-xs leading-5 text-slate-700">{readiness.grade==="Ready"?"Readiness checks are sufficiently complete for management review.":"Management review can continue, but the bid still has unresolved readiness work."}<div className="mt-1 flex flex-wrap gap-2 text-[11px]"><span>{readiness.closure_summary.unreviewed_requirements} unreviewed</span><span>·</span><span>{readiness.closure_summary.unassessed_compliance} compliance not assessed</span><span>·</span><span>{readiness.counts.open_missing_inputs} open gaps</span><span>·</span><span>{readiness.counts.critical_open} critical</span></div></div><Link href={`/bids/${id}/missing-inputs`} className="inline-flex rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-blue-700">Open Readiness</Link></div></section>}
+
+  {submissionReadiness&&<section className={"mb-3 overflow-hidden rounded border "+(submissionReadiness.summary.intelligence_blockers>0?"border-red-200 bg-red-50":"border-emerald-200 bg-emerald-50")}><div className="grid gap-3 p-4 md:grid-cols-[180px_1fr_auto] md:items-center"><div><div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Bid Intelligence Gate</div><div className={"mt-1 text-xl font-bold "+(submissionReadiness.summary.intelligence_blockers>0?"text-red-700":"text-emerald-700")}>{submissionReadiness.summary.intelligence_blockers>0?"Action Required":"Clear"}</div></div><div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-700 sm:grid-cols-4"><div><span className="font-semibold">{submissionReadiness.summary.critical_clause_risk_blockers}</span> critical clause risk{submissionReadiness.summary.critical_clause_risk_blockers===1?"":"s"}</div><div><span className="font-semibold">{submissionReadiness.summary.high_clause_risk_warnings}</span> high-risk warning{submissionReadiness.summary.high_clause_risk_warnings===1?"":"s"}</div><div><span className="font-semibold">{submissionReadiness.summary.drawing_boq_blockers}</span> drawing/BOQ blocker{submissionReadiness.summary.drawing_boq_blockers===1?"":"s"}</div><div><span className="font-semibold">{submissionReadiness.summary.drawing_boq_warnings}</span> drawing/BOQ warning{submissionReadiness.summary.drawing_boq_warnings===1?"":"s"}</div></div><Link href={`/bids/${id}/copilot`} className="inline-flex rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-blue-700">Open Copilot</Link></div></section>}
+
 
   {error?<ErrorState message={error}/>:loading?<LoadingState label="Loading review queue…"/>:<div className="space-y-3">
    <section className="overflow-hidden border border-slate-200 bg-white">
