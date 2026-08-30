@@ -35,7 +35,7 @@ jobs:
 
       - name: Commit generated lockfile
         run: |
-          if git diff --quiet -- frontend/package-lock.json; then
+          if [ -z "$(git status --porcelain -- frontend/package-lock.json)" ]; then
             echo "No lockfile change to commit"
             exit 0
           fi
