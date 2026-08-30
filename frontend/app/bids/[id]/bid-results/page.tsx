@@ -4,7 +4,7 @@ import {use,useEffect,useState,type ReactNode} from "react";
 import {BidWorkspaceHeader} from "@/components/BidWorkspaceHeader";
 import {ErrorState,LoadingState,PageHeader,StatusBadge,SummaryCard} from "@/components/design-system";
 import {request} from "@/services/api";
-import type {Bid,BidOutcomeResponse,HistoricalBidPrice} from "@/types";
+import type {Bid,BidOutcomeResponse,HistoricalBidImportPreview,HistoricalBidPrice} from "@/types";
 
 const emptyPrice=(rank:number):HistoricalBidPrice=>({rank,bidder_name:"",bid_value:0,currency:"INR",is_ours:false,source_reference:null});
 const inputClass="w-full rounded border border-slate-300 bg-white px-2.5 py-2 text-xs text-slate-800 outline-none focus:border-[#c69b2d] focus:ring-2 focus:ring-[#d5aa35]/20";
@@ -26,6 +26,8 @@ export default function BidResultsPage({params}:{params:Promise<{id:string}>}){
  const [reason,setReason]=useState("");
  const [notes,setNotes]=useState("");
  const [prices,setPrices]=useState<HistoricalBidPrice[]>([1,2,3,4].map(emptyPrice));
+ const [importing,setImporting]=useState(false);
+ const [importPreview,setImportPreview]=useState<HistoricalBidImportPreview|null>(null);
 
  const apply=(x:BidOutcomeResponse)=>{
   setResult(x);
@@ -53,6 +55,27 @@ export default function BidResultsPage({params}:{params:Promise<{id:string}>}){
 
  const updatePrice=(rank:number,patch:Partial<HistoricalBidPrice>)=>{
   setPrices(rows=>rows.map(x=>x.rank===rank?{...x,...patch}:x));
+ };
+ const previewImport=async(file:File)=>{
+  setImporting(true);setError("");
+  try{
+   const form=new FormData();form.append("file",file);
+   const preview=await request<HistoricalBidImportPreview>("/bids/"+id+"/outcome/import-preview",{method:"POST",body:form});
+   setImportPreview(preview);
+   if(preview.detected){
+    const candidate=preview.outcome_candidate;
+    if(candidate){
+     setStatus(candidate.result_status||"Result Awaited");
+     setOurRank(candidate.our_rank?String(candidate.our_rank):"");
+     setOurBidValue(candidate.our_bid_value!==null&&candidate.our_bid_value!==undefined?String(candidate.our_bid_value):"");
+     setAwardedBidder(candidate.awarded_bidder||"");
+     setSourceReference(candidate.source_reference||"");
+    }
+    const byRank=new Map(preview.prices.map(x=>[x.rank,x]));
+    setPrices([1,2,3,4].map(rank=>byRank.get(rank)||emptyPrice(rank)));
+   }
+  }catch(e){setError(e instanceof Error?e.message:"Unable to preview historical result file.")}
+  finally{setImporting(false)}
  };
 
  const save=async()=>{
@@ -101,6 +124,21 @@ export default function BidResultsPage({params}:{params:Promise<{id:string}>}){
    <SummaryCard label="Gap to L1" value={result?.price_summary.our_gap_to_l1_percent!==null&&result?.price_summary.our_gap_to_l1_percent!==undefined?result.price_summary.our_gap_to_l1_percent+"%":"—"} tone={(result?.price_summary.our_gap_to_l1_percent||0)>0?"amber":undefined}/>
    <SummaryCard label="Recorded Margin" value={margin?margin+"%":"—"}/>
   </div>
+
+  <section className="mb-3 rounded border border-slate-200 bg-white p-3">
+   <div className="flex flex-wrap items-center justify-between gap-3">
+    <div><div className="text-sm font-bold text-slate-900">Import Tender Result</div><div className="text-xs text-slate-500">Upload CSV/XLSX result tabulation. The system prepares a preview only. Nothing is saved until you review and click Save Result.</div></div>
+    <label className="cursor-pointer rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:border-[#d5aa35]">
+     {importing?"Reading...":"Choose Result File"}
+     <input type="file" accept=".csv,.xlsx" className="hidden" disabled={importing} onChange={e=>{const file=e.target.files?.[0];if(file)previewImport(file);e.currentTarget.value=""}}/>
+    </label>
+   </div>
+   {importPreview&&<div className="mt-3 rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+    <div className="font-semibold">{importPreview.detected?"Preview loaded from "+importPreview.source_filename:"Result structure not detected"}</div>
+    <div className="mt-1">{importPreview.note||"Review the extracted values before saving."}</div>
+    {importPreview.warnings.length>0&&<ul className="mt-2 list-disc space-y-1 pl-5">{importPreview.warnings.map((x,i)=><li key={i}>{x}</li>)}</ul>}
+   </div>}
+  </section>
 
   <section className="mb-3 rounded border border-slate-200 bg-white p-3">
    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
