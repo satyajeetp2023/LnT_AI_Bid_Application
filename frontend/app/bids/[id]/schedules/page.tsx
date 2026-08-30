@@ -5,7 +5,7 @@ import {use,useCallback,useEffect,useState} from "react";
 import {BidWorkspaceHeader} from "@/components/BidWorkspaceHeader";
 import {EmptyState,ErrorState,LoadingState,PageHeader,StatusBadge,SummaryCard} from "@/components/design-system";
 import {request} from "@/services/api";
-import type {Bid,Document,P6ActivityProfile,P6ScheduleAnalysis,P6ScheduleComparison,PlanningPackageAnalysis,ScheduleScopeCatalog,ScheduleScopeCoverage,ScheduleScopeItem,ScheduleSkeleton,ScheduleSourceProfile} from "@/types";
+import type {Bid,Document,P6ActivityProfile,P6ScheduleAnalysis,P6ScheduleComparison,PlanningPackageAnalysis,PlanningPackageFinding,PlanningPackageFindingsResponse,ScheduleScopeCatalog,ScheduleScopeCoverage,ScheduleScopeItem,ScheduleSkeleton,ScheduleSourceProfile} from "@/types";
 
 const ISSUE_LABELS:Record<string,string>={
  open_start:"Open Start / No Predecessor",
@@ -30,6 +30,8 @@ export default function SchedulesPage({params}:{params:Promise<{id:string}>}){
  const [selected,setSelected]=useState<number|null>(null);
  const [analysis,setAnalysis]=useState<P6ScheduleAnalysis|null>(null);
  const [planningPackage,setPlanningPackage]=useState<PlanningPackageAnalysis|null>(null);
+ const [planningFindings,setPlanningFindings]=useState<PlanningPackageFindingsResponse|null>(null);
+ const [planningFindingState,setPlanningFindingState]=useState<Record<number,{disposition:string;comment:string}>>({});
  const [sourceProfile,setSourceProfile]=useState<ScheduleSourceProfile|null>(null);
  const [baseline,setBaseline]=useState<number|null>(null);
  const [comparison,setComparison]=useState<P6ScheduleComparison|null>(null);
@@ -55,15 +57,23 @@ export default function SchedulesPage({params}:{params:Promise<{id:string}>}){
     setAnalysis(null);setScopeCoverage(null);
     return;
    }
-   const [nextAnalysis,nextCoverage,nextPlanningPackage]=await Promise.all([
+   const [nextAnalysis,nextCoverage,planningRefresh]=await Promise.all([
     request<P6ScheduleAnalysis>("/documents/"+documentId+"/schedule-analysis"),
     request<ScheduleScopeCoverage>("/documents/"+documentId+"/schedule-scope-coverage"),
-    request<PlanningPackageAnalysis>("/documents/"+documentId+"/planning-package-analysis")
+    request<{analysis:PlanningPackageAnalysis;findings:PlanningPackageFindingsResponse}>("/documents/"+documentId+"/refresh-planning-package-findings",{method:"POST"})
    ]);
-   setAnalysis(nextAnalysis);setScopeCoverage(nextCoverage);setPlanningPackage(nextPlanningPackage);
+   setAnalysis(nextAnalysis);setScopeCoverage(nextCoverage);setPlanningPackage(planningRefresh.analysis);setPlanningFindings(planningRefresh.findings);
   }catch{setError("Unable to inspect this schedule document.");setAnalysis(null);setScopeCoverage(null);setPlanningPackage(null);setSourceProfile(null)}
   finally{setAnalyzing(false);setScopeLoading(false)}
  },[]);
+
+ const savePlanningFinding=async(item:PlanningPackageFinding)=>{
+  const state=planningFindingState[item.id]||{disposition:item.disposition||"To Be Revised",comment:item.reviewer_comment||""};
+  try{
+   await request("/planning-package-findings/"+item.id+"/review",{method:"POST",body:JSON.stringify(state)});
+   setPlanningFindings(await request<PlanningPackageFindingsResponse>("/bids/"+id+"/planning-package-findings"));
+  }catch(e){setError(e instanceof Error?e.message:"Unable to save planning-package review.")}
+ };
 
  const inspectActivity=async(taskKey:string)=>{
   if(!selected)return;
@@ -161,6 +171,7 @@ export default function SchedulesPage({params}:{params:Promise<{id:string}>}){
        {planningPackage.separate_plan_matching.some(x=>x.match_status!=="Matched")&&<div className="rounded border border-slate-200 bg-white"><div className="border-b bg-slate-50 px-3 py-2 text-xs font-bold text-slate-800">Separate Plan Link Review</div><div className="max-h-52 overflow-auto p-2">{planningPackage.separate_plan_matching.filter(x=>x.match_status!=="Matched").map(x=><div key={x.id} className="border-b px-2 py-2 text-xs last:border-b-0"><div className="font-semibold text-slate-800">{x.resource_name}</div><div className="mt-0.5 text-[10px] text-slate-500">{x.activity_reference||x.work_front||"No activity/work-front reference"} · {x.match_status}{x.matched_task_code&&" → "+x.matched_task_code}</div>{x.timeline_status!=="Not Checked"&&<div className={x.timeline_status==="Aligned / Overlapping"?"mt-1 text-[10px] font-semibold text-emerald-700":x.timeline_status==="Dates Not Provided"?"mt-1 text-[10px] font-semibold text-slate-500":"mt-1 text-[10px] font-semibold text-red-700"}>Timing: {x.timeline_status}</div>}</div>)}</div></div>}
       </div>
      </div>
+     {planningFindings&&planningFindings.summary.open>0&&<div className="border-t p-3"><div className="mb-2 flex flex-wrap items-center justify-between gap-2"><div><div className="text-xs font-bold text-slate-800">Planning Actions</div><div className="text-[10px] text-slate-500">{planningFindings.summary.open} open · {planningFindings.summary.high_open} high · {planningFindings.summary.medium_open} medium</div></div></div><div className="space-y-2">{planningFindings.items.filter(x=>x.status==="Open").slice(0,30).map(item=>{const state=planningFindingState[item.id]||{disposition:item.disposition||"To Be Revised",comment:item.reviewer_comment||""};return <div key={item.id} className={item.severity==="High"?"rounded border border-red-200 bg-red-50/30 p-3":"rounded border border-amber-200 bg-amber-50/30 p-3"}><div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between"><div><div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{item.finding_type}{item.task_code&&" · "+item.task_code}</div><div className="mt-1 text-sm font-semibold text-slate-900">{item.title}</div><div className="mt-1 text-xs leading-5 text-slate-600">{item.description}</div></div><StatusBadge tone={item.severity==="High"?"red":"amber"}>{item.severity}</StatusBadge></div><div className="mt-3 grid gap-2 lg:grid-cols-[190px_1fr_auto] lg:items-end"><div><label className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Disposition</label><select value={state.disposition} onChange={e=>setPlanningFindingState({...planningFindingState,[item.id]:{...state,disposition:e.target.value}})} className="mt-1 w-full rounded border border-slate-300 bg-white px-2 py-2 text-xs">{["To Be Revised","Resolved","Accepted / Explained","Not Applicable","Escalate"].map(x=><option key={x}>{x}</option>)}</select></div><div><label className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Planner Comment</label><input value={state.comment} onChange={e=>setPlanningFindingState({...planningFindingState,[item.id]:{...state,comment:e.target.value}})} className="mt-1 w-full rounded border border-slate-300 bg-white px-2 py-2 text-xs" placeholder="Explain revision, adequacy or accepted planning basis"/></div><button onClick={()=>savePlanningFinding(item)} className="rounded bg-[#304354] px-3 py-2 text-xs font-semibold text-white">Save</button></div></div>})}</div></div>}
      <div className="border-t bg-slate-50 px-3 py-2 text-[10px] text-slate-500">{planningPackage.note}</div>
     </section>}
 
