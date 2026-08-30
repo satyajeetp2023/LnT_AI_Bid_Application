@@ -5,6 +5,12 @@ export const DEFAULT_REQUEST_TIMEOUT_MS=30000;
 
 export type ApiRequestInit=RequestInit&{timeoutMs?:number};
 
+export class ApiError extends Error{
+ status:number;
+ requestId:string|null;
+ constructor(message:string,status:number,requestId:string|null=null){super(message);this.name="ApiError";this.status=status;this.requestId=requestId}
+}
+
 function timeoutMessage(timeoutMs:number){
  const seconds=Math.max(1,Math.round(timeoutMs/1000));
  return `The service did not respond within ${seconds} seconds. Please try again.`;
@@ -64,18 +70,32 @@ export async function authenticatedFetch(path:string,init:ApiRequestInit={}):Pro
 
 async function responseError(r:Response,fallback="Request failed"){
  const e=await r.json().catch(()=>({detail:fallback}));
- return new Error(e.detail||fallback);
+ return new ApiError(e.detail||fallback,r.status,r.headers.get("x-request-id"));
 }
 
 export async function request<T>(path:string,init:ApiRequestInit={}):Promise<T>{
  const r=await authenticatedFetch(path,init);
- if(!r.ok)throw await responseError(r);
+ if(!r.ok){
+  const error=await responseError(r);
+  if(r.status===403&&typeof window!=="undefined"&&!window.location.pathname.startsWith("/access-denied")){
+   const from=window.location.pathname+window.location.search;
+   window.location.assign("/access-denied?from="+encodeURIComponent(from)+(error.requestId?"&requestId="+encodeURIComponent(error.requestId):""));
+  }
+  throw error;
+ }
  return r.json();
 }
 
 export async function downloadFile(path:string,fallbackFilename:string,init:ApiRequestInit={}):Promise<string>{
  const r=await authenticatedFetch(path,init);
- if(!r.ok)throw await responseError(r,"Download failed");
+ if(!r.ok){
+  const error=await responseError(r,"Download failed");
+  if(r.status===403&&typeof window!=="undefined"&&!window.location.pathname.startsWith("/access-denied")){
+   const from=window.location.pathname+window.location.search;
+   window.location.assign("/access-denied?from="+encodeURIComponent(from)+(error.requestId?"&requestId="+encodeURIComponent(error.requestId):""));
+  }
+  throw error;
+ }
  const blob=await r.blob();
  const disposition=r.headers.get("content-disposition")||"";
  const match=disposition.match(/filename\*?=(?:UTF-8''|")?([^";]+)"?/i);
