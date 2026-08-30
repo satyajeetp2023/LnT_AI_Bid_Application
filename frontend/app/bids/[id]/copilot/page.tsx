@@ -4,7 +4,7 @@ import {use,useEffect,useState} from "react";
 import {BidWorkspaceHeader} from "@/components/BidWorkspaceHeader";
 import {ErrorState,LoadingState,PageHeader,StatusBadge,SummaryCard} from "@/components/design-system";
 import {request} from "@/services/api";
-import type {Bid,ClauseRiskFinding,ClauseRiskSummary,ContractClauseVariationResponse,DrawingBoqFinding,DrawingBoqSummary,DrawingVisionStatus,FirmRiskLibrary,TenderKnowledgeStatus,TenderQAResponse} from "@/types";
+import type {Bid,ClauseRiskFinding,ClauseRiskSummary,ContractClauseVariationResponse,DrawingBoqFinding,DrawingBoqSummary,DrawingVisionStatus,FirmRiskLibrary,TenderKnowledgeStatus,TenderQAResponse,TenderSemanticStatus} from "@/types";
 
 const dispositions=["Open","Escalate","Mitigated / Qualified","Accept Risk","Not Applicable","False Positive"];
 const drawingDispositions=["Confirmed Variance","BOQ Correct","Drawing Correct","Different Scope","Unit Conversion Required","False Match","Escalate"];
@@ -18,6 +18,7 @@ export default function CopilotPage({params}:{params:Promise<{id:string}>}){
  const [visionStatus,setVisionStatus]=useState<DrawingVisionStatus|null>(null);
  const [knowledgeStatus,setKnowledgeStatus]=useState<TenderKnowledgeStatus|null>(null);
  const [clauseVariations,setClauseVariations]=useState<ContractClauseVariationResponse|null>(null);
+ const [semanticStatus,setSemanticStatus]=useState<TenderSemanticStatus|null>(null);
  const [loading,setLoading]=useState(true);
  const [error,setError]=useState("");
  const [question,setQuestion]=useState("");
@@ -39,9 +40,10 @@ export default function CopilotPage({params}:{params:Promise<{id:string}>}){
    request<FirmRiskLibrary>("/firm-risk-library"),
    request<DrawingVisionStatus>("/bids/"+id+"/drawing-vision-status"),
    request<TenderKnowledgeStatus>("/bids/"+id+"/tender-knowledge-status"),
-   request<ContractClauseVariationResponse>("/bids/"+id+"/contract-clause-variations")
+   request<ContractClauseVariationResponse>("/bids/"+id+"/contract-clause-variations"),
+   request<TenderSemanticStatus>("/bids/"+id+"/tender-semantic-status")
   ])
-   .then(([b,r,d,l,v,k,cv])=>{setBid(b);setRisks(r);setDrawing(d);setLibrary(l);setVisionStatus(v);setKnowledgeStatus(k);setClauseVariations(cv)})
+   .then(([b,r,d,l,v,k,cv,s])=>{setBid(b);setRisks(r);setDrawing(d);setLibrary(l);setVisionStatus(v);setKnowledgeStatus(k);setClauseVariations(cv);setSemanticStatus(s)})
    .catch(()=>setError("Unable to load Bid Intelligence Copilot."))
    .finally(()=>setLoading(false));
  },[id]);
@@ -88,7 +90,7 @@ export default function CopilotPage({params}:{params:Promise<{id:string}>}){
   {error&&<div className="mb-3"><ErrorState message={error}/></div>}
 
   <div className="mb-3 grid gap-3 sm:grid-cols-3">
-   <div className="rounded border border-slate-200 bg-white p-3"><div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Tender Q&A</div><div className="mt-1 text-sm font-semibold text-slate-900">Bid-scoped · Source linked</div><div className="mt-1 text-[10px] text-slate-500">Conflicting numeric values are surfaced instead of silently resolved.</div>{knowledgeStatus&&<div className={knowledgeStatus.summary.index_coverage_percent>=100?"mt-2 text-[10px] font-semibold text-emerald-700":"mt-2 text-[10px] font-semibold text-amber-700"}>Knowledge index: {Math.round(knowledgeStatus.summary.index_coverage_percent)}% · {knowledgeStatus.summary.chunks} chunks</div>}</div>
+   <div className="rounded border border-slate-200 bg-white p-3"><div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Tender Q&A</div><div className="mt-1 text-sm font-semibold text-slate-900">Bid-scoped · Source linked</div><div className="mt-1 text-[10px] text-slate-500">Conflicting numeric values are surfaced instead of silently resolved.</div>{knowledgeStatus&&<div className={knowledgeStatus.summary.index_coverage_percent>=100?"mt-2 text-[10px] font-semibold text-emerald-700":"mt-2 text-[10px] font-semibold text-amber-700"}>Knowledge index: {Math.round(knowledgeStatus.summary.index_coverage_percent)}% · {knowledgeStatus.summary.chunks} chunks</div>}{semanticStatus&&<div className={semanticStatus.available?"mt-1 text-[10px] font-semibold text-emerald-700":"mt-1 text-[10px] font-semibold text-slate-500"}>Semantic RAG: {semanticStatus.mode}</div>}</div>
    <div className="rounded border border-slate-200 bg-white p-3"><div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Firm Risk Library</div><div className="mt-1 text-sm font-semibold text-slate-900">{library?library.summary.patterns:"—"} active patterns</div><div className="mt-1 text-[10px] text-slate-500">{library?library.summary.firm_reviewed:0} human-promoted precedent pattern{library?.summary.firm_reviewed===1?"":"s"}.</div></div>
    <div className="rounded border border-slate-200 bg-white p-3"><div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Drawing ↔ BOQ</div><div className="mt-1 text-sm font-semibold text-slate-900">{drawing?drawing.summary.open_reviews:"—"} review item{drawing?.summary.open_reviews===1?"":"s"}</div><div className="mt-1 text-[10px] text-slate-500">Quantity evidence never overwrites the BOQ automatically.</div>{visionStatus&&<div className={visionStatus.available?"mt-2 text-[10px] font-semibold text-emerald-700":"mt-2 text-[10px] font-semibold text-amber-700"}>Vision: {visionStatus.mode}</div>}</div>
   </div>
