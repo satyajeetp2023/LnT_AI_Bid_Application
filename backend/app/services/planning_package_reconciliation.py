@@ -24,6 +24,13 @@ STAFF_ROLE_PATTERNS={
  "Contracts / Commercial":("contracts manager","commercial manager","quantity surveyor"),
 }
 
+STAFF_PHASE_PATTERNS={
+ "Construction Manager":("construction","installation","erection","foundation","laying"),
+ "Survey":("survey","setting out"),
+ "Design / Engineering":("design","engineering","drawing","approval"),
+ "Testing & Commissioning":("testing","commissioning","trial","energisation","energization"),
+}
+
 
 
 
@@ -371,6 +378,48 @@ def reconcile_planning_package(db:Session,bid_id:int,tables:dict[str,list[dict]]
    "contract_signals":matched_signals,
   })
 
+ phase_windows=[]
+ for phase_role,signals in STAFF_PHASE_PATTERNS.items():
+  phase_tasks=[]
+  for task in tasks:
+   text=f"{task.get('task_code','')} {task.get('task_name','')}".lower()
+   if not any(signal in text for signal in signals):continue
+   start,finish=_task_dates(task)
+   if start or finish:phase_tasks.append((task,start,finish))
+  starts=[x[1] for x in phase_tasks if x[1]];finishes=[x[2] for x in phase_tasks if x[2]]
+  if starts or finishes:
+   phase_windows.append({
+    "role":phase_role,"signals":list(signals),
+    "start":min(starts).isoformat() if starts else None,
+    "finish":max(finishes).isoformat() if finishes else None,
+    "matched_activities":len(phase_tasks),
+   })
+ phase_by_role={x["role"]:x for x in phase_windows}
+ required_roles={x["role"] for x in required_staff}
+ phase_timing_checks=[]
+ for role in sorted(required_roles & set(STAFF_PHASE_PATTERNS)):
+  window=phase_by_role.get(role)
+  if not window:continue
+  role_signals=STAFF_ROLE_PATTERNS[role]
+  matched_staff=[x for x in staff if any(signal in f"{x.resource_name} {x.role_or_trade or ''}".lower() for signal in role_signals)]
+  if not matched_staff:continue
+  phase_start=_date(window.get("start"));phase_finish=_date(window.get("finish"))
+  for entry in matched_staff:
+   if not entry.start_date and not entry.finish_date:status="Dates Not Provided"
+   elif phase_start and entry.start_date and entry.start_date>phase_start and phase_finish and entry.finish_date and entry.finish_date<phase_finish:status="Partial Phase Coverage"
+   elif phase_start and entry.start_date and entry.start_date>phase_start:status="Starts After Phase"
+   elif phase_finish and entry.finish_date and entry.finish_date<phase_finish:status="Ends Before Phase"
+   else:status="Covers Phase"
+   phase_timing_checks.append({
+    "role":role,"resource_entry_id":entry.id,"resource_name":entry.resource_name,
+    "staff_start":entry.start_date.isoformat() if entry.start_date else None,
+    "staff_finish":entry.finish_date.isoformat() if entry.finish_date else None,
+    "phase_start":window.get("start"),"phase_finish":window.get("finish"),
+    "matched_activities":window.get("matched_activities",0),"status":status,
+    "basis":"Explicit tender staff requirement + matching schedule activity phase",
+   })
+ phase_timing_gaps=[x for x in phase_timing_checks if x["status"] not in {"Covers Phase","Dates Not Provided"}]
+
  temporal_misalignment=[x for x in external_matches if x.get("timeline_status") in {"Starts After Activity","Ends Before Activity"}]
 
  issues=[]
@@ -400,6 +449,8 @@ def reconcile_planning_package(db:Session,bid_id:int,tables:dict[str,list[dict]]
  missing_contract_staff=[x for x in required_staff if not x["present_in_staff_plan"]]
  if missing_contract_staff:
   issues.append({"severity":"High","type":"Contract Staff Requirement","message":"Contract-required staff roles are not identifiable in the Staff Plan: "+", ".join(x["role"] for x in missing_contract_staff)})
+ if phase_timing_gaps:
+  issues.append({"severity":"High","type":"Staff Phase Timing","message":f"{len(phase_timing_gaps)} contract-required staff deployment entries do not cover the matching schedule phase window."})
 
  unlinked=[x for x in external_matches if x["match_status"]=="Unlinked"]
  if unlinked:
@@ -424,7 +475,10 @@ def reconcile_planning_package(db:Session,bid_id:int,tables:dict[str,list[dict]]
    "project_start":project_start,"project_finish":project_finish,
    "contract_required_roles":required_staff,
    "missing_contract_required_roles":[x["role"] for x in required_staff if not x["present_in_staff_plan"]],
-   "note":"Staff timing is compared with the programme timeline. Staff-role checks are raised only where the tender evidence explicitly requires that role; otherwise no staffing norm is invented.",
+   "phase_windows":phase_windows,
+   "phase_timing_checks":phase_timing_checks,
+   "phase_timing_gaps":len(phase_timing_gaps),
+   "note":"Staff timing is compared with the programme timeline and, where the tender explicitly requires a role, with matching schedule activity phases. No staffing norm is invented.",
   },
   "time_phased_resource_profile":{
    "months":profile_rows,
@@ -450,13 +504,14 @@ def reconcile_planning_package(db:Session,bid_id:int,tables:dict[str,list[dict]]
    "resource_timing_misalignments":len(temporal_misalignment),
    "contract_required_staff_roles":len(required_staff),
    "missing_contract_staff_roles":len(missing_contract_staff),
+   "staff_phase_timing_gaps":len(phase_timing_gaps),
    "productivity_shortfalls":len(productivity_shortfalls),
    "concurrent_resource_reviews":len(concurrency_reviews),
    "undated_resource_entries":sum(1 for x in entries if not x.start_date and not x.finish_date),
    "high_issues":sum(1 for x in issues if x["severity"]=="High"),
    "medium_issues":sum(1 for x in issues if x["severity"]=="Medium"),
   },
-  "version":"integrated-planning-package-v5",
+  "version":"integrated-planning-package-v6",
   "note":"This reconciles evidence supplied by the bidder. It does not invent crew sizes, equipment quantities, staff norms or productivity assumptions.",
  }
 
