@@ -14,8 +14,8 @@ test("GAP-005 hides Create New Bid without create permission",async()=>{
  render(<Sidebar/>);
  await screen.findByText("Overview");
  fireEvent.click(screen.getByText("Overview"));
- await screen.findByText("Dashboard");
- expect(screen.queryByText("Create New Bid")).not.toBeInTheDocument();
+ await screen.findAllByText("Dashboard");
+ expect(screen.queryAllByText("Create New Bid")).toHaveLength(0);
 });
 
 test("GAP-005 does not treat /bids/new as a bid workspace",async()=>{
@@ -24,6 +24,6 @@ test("GAP-005 does not treat /bids/new as a bid workspace",async()=>{
  render(<Sidebar/>);
  const intelligence=await screen.findByText("Tender Intelligence");
  fireEvent.click(intelligence);
- await screen.findByText("Document Repository");
- expect(screen.getByText("Document Repository").closest("[aria-disabled='true']")).not.toBeNull();
+ const documents=await screen.findAllByText("Document Repository");
+ expect(documents.every(item=>item.closest("[aria-disabled='true']")!==null)).toBe(true);
 });
