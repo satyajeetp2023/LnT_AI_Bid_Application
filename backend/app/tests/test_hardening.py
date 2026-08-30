@@ -278,3 +278,17 @@ def test_current_bid_comparison_aggregates_competitors_from_only_comparable_bids
     assert competitor["appearances"]==2
     assert competitor["l1_wins"]==2
     assert competitor["l1_rate_percent"]==100.0
+
+
+def test_rejected_historical_result_preview_is_audited(client,bid_payload):
+    bid=client.post("/api/v1/bids",json={**bid_payload,"bid_id":"AUDIT-PREVIEW","tender_reference_no":"AUDIT-PREVIEW"}).json()
+    rejected=client.post(
+        f"/api/v1/bids/{bid['id']}/outcome/import-preview",
+        files={"file":("bad.pdf",b"not a real pdf","application/pdf")},
+    )
+    assert rejected.status_code==422
+    events=[x for x in client.get("/api/v1/audit").json() if x["bid_project_id"]==bid["id"]]
+    event=next(x for x in events if x["event_type"]=="historical_bid.import_rejected")
+    assert event["details"]["filename"]=="bad.pdf"
+    assert len(event["details"]["sha256"])==64
+    assert "signature" in event["details"]["reason"].lower()
