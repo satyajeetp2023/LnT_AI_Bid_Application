@@ -47,6 +47,7 @@ from app.services.schedule_ingestion import SCHEDULE_EXTENSIONS,ingest_schedule
 from app.services.documents import DOCUMENT_CATEGORIES,archive,classify,mark_revision,update_document_metadata,update_notes,upload_document
 from app.services.document_classification import auto_classify_document
 from app.services.historical_bid_intelligence import get_bid_outcome,historical_bid_intelligence,upsert_bid_outcome
+from app.services.historical_bid_comparison import historical_comparison
 from app.services.historical_result_import import preview_historical_result
 from app.storage.base import LocalSecureStorage
 router=APIRouter()
@@ -102,6 +103,12 @@ async def preview_bid_outcome_import(bid_id:int,file:UploadFile=File(...),db:Ses
 def portfolio_historical_bid_intelligence(db:Session=Depends(get_db),user:User=Depends(user_dep)):
  visible=list_bids(db,user)
  return historical_bid_intelligence(db,[x.id for x in visible])
+
+@router.get("/bids/{bid_id}/historical-comparison")
+def bid_historical_comparison(bid_id:int,limit:int=Query(10,ge=1,le=50),db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.VIEW_DOCUMENT)
+ current=get_bid(db,bid_id);visible=list_bids(db,user)
+ return historical_comparison(db,current,[x.id for x in visible],limit)
 
 @router.get("/dashboard/summary")
 def dashboard(db:Session=Depends(get_db),user:User=Depends(user_dep)):
