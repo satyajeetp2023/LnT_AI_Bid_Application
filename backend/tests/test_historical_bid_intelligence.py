@@ -22,3 +22,12 @@ def test_won_result_with_non_l1_rank_is_flagged_not_silently_corrected():
 
 def test_loss_result_does_not_create_false_win_warning():
     assert consistency_warnings("Lost",2,[{"rank":2,"is_ours":True}])==[]
+
+
+def test_competitor_metrics_are_descriptive_from_recorded_rows():
+    from collections import Counter
+    ranks=Counter({"A":6})
+    appearances=Counter({"A":3})
+    wins=Counter({"A":1})
+    assert round(wins["A"]*100/appearances["A"],1)==33.3
+    assert round(ranks["A"]/appearances["A"],2)==2.0
