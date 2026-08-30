@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     max_file_size_mb: int = 50
     max_batch_size_mb: int = 250
     max_files_per_batch: int = 100
-    allowed_extensions: frozenset[str] = frozenset({"pdf","doc","docx","xls","xlsx","csv","txt","jpg","jpeg","png","zip","xer","xml"})
+    allowed_extensions: frozenset[str] = frozenset({"pdf","doc","docx","xls","xlsx","csv","txt","jpg","jpeg","png","zip","xer","xml","mpp"})
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 @lru_cache
