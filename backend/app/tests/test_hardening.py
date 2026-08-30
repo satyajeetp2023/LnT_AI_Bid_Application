@@ -145,10 +145,10 @@ def test_historical_intelligence_filters_are_server_side(client,bid_payload):
         response=client.put(
             f"/api/v1/bids/{bid['id']}/outcome",
             json={
-                "result_status":"Lost","our_rank":2,"our_bid_value":110,
+                "result_status":"Lost","our_rank":2,"our_bid_value":110,"source_reference":"Official Result Notice",
                 "prices":[
-                    {"bidder_name":competitor,"rank":1,"bid_value":100,"currency":"INR","is_ours":False},
-                    {"bidder_name":"L&T","rank":2,"bid_value":110,"currency":"INR","is_ours":True},
+                    {"bidder_name":competitor,"rank":1,"bid_value":100,"currency":"INR","is_ours":False,"source_reference":"Official Result Notice"},
+                    {"bidder_name":"L&T","rank":2,"bid_value":110,"currency":"INR","is_ours":True,"source_reference":"Official Result Notice"},
                 ],
             },
         )
