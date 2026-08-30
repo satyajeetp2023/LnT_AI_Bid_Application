@@ -1,7 +1,7 @@
 from datetime import date,datetime,timezone
 from decimal import Decimal
 
-from sqlalchemy import CheckConstraint,Date,DateTime,ForeignKey,Integer,Numeric,String,Text
+from sqlalchemy import CheckConstraint,Date,DateTime,ForeignKey,Integer,JSON,Numeric,String,Text
 from sqlalchemy.orm import Mapped,mapped_column
 
 from app.database.session import Base
@@ -74,3 +74,17 @@ class ExecutionLearningFactor(Base):
  updated_by:Mapped[int|None]=mapped_column(ForeignKey("users.id"))
  created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=now)
  updated_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=now,onupdate=now)
+
+
+class BidDecisionSnapshot(Base):
+ __tablename__="bid_decision_snapshots"
+ id:Mapped[int]=mapped_column(primary_key=True)
+ bid_project_id:Mapped[int]=mapped_column(ForeignKey("bid_projects.id",ondelete="CASCADE"),index=True)
+ snapshot_version:Mapped[str]=mapped_column(String(80))
+ decision_posture:Mapped[str]=mapped_column(String(60),index=True)
+ readiness_score:Mapped[Decimal]=mapped_column(Numeric(6,2))
+ confidence_level:Mapped[str]=mapped_column(String(30))
+ payload:Mapped[dict]=mapped_column(JSON)
+ checksum:Mapped[str]=mapped_column(String(64),index=True)
+ created_by:Mapped[int]=mapped_column(ForeignKey("users.id"))
+ created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=now,index=True)
