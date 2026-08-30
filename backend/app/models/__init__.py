@@ -4,3 +4,4 @@ from .bid_preparation import *
 from .schedule_scope import *
 from .productivity import *
 from .clause_risk import *
+from .drawing_boq import *
