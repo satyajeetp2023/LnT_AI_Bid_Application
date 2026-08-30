@@ -104,3 +104,20 @@ def test_historical_comparison_uses_completed_visible_bid(client,bid_payload):
     assert competitor["l1_wins"]==1
     assert competitor["l1_rate_percent"]==100.0
     assert competitor["average_rank"]==1.0
+
+
+def test_result_import_preview_is_audited_without_saving_outcome(client,bid_payload):
+    bid=client.post("/api/v1/bids",json={**bid_payload,"bid_id":"BID-AUDIT","tender_reference_no":"T-AUDIT"}).json()
+    payload=b"Rank,Bidder Name,Bid Value,Currency,Our Bid\n1,Competitor A,100,INR,No\n2,Larsen & Toubro,108,INR,Yes\n"
+    preview=client.post(
+        f"/api/v1/bids/{bid['id']}/outcome/import-preview",
+        files={"file":("result.csv",payload,"text/csv")},
+    )
+    assert preview.status_code==200
+    assert preview.json()["requires_review"] is True
+    assert client.get(f"/api/v1/bids/{bid['id']}/outcome").json()["outcome"] is None
+    events=client.get("/api/v1/audit").json()
+    event=next(x for x in events if x["event_type"]=="historical_bid.import_previewed")
+    assert event["details"]["filename"]=="result.csv"
+    assert len(event["details"]["sha256"])==64
+    assert event["details"]["price_rows"]==2
