@@ -4,6 +4,7 @@ import re
 from decimal import Decimal,InvalidOperation
 
 from openpyxl import load_workbook
+from pypdf import PdfReader
 
 
 ALIASES={
@@ -43,6 +44,60 @@ def _money(value):
 def _truthy(value):
  return _norm(value) in {"yes","y","true","1","ours","our bid","l&t","lt","l and t"}
 
+def _finalize(prices,warnings,filename,parser_version):
+ prices.sort(key=lambda x:x["rank"])
+ ours=[x for x in prices if x["is_ours"]]
+ if len(ours)>1:warnings.append("More than one row appears to be marked as our bid.")
+ outcome={
+  "result_status":"Won" if len(ours)==1 and ours[0]["rank"]==1 else "Lost" if len(ours)==1 else "Result Awaited",
+  "our_rank":ours[0]["rank"] if len(ours)==1 else None,
+  "our_bid_value":ours[0]["bid_value"] if len(ours)==1 else None,
+  "awarded_bidder":next((x["bidder_name"] for x in prices if x["rank"]==1),None),
+  "source_reference":filename or None,
+ }
+ return {
+  "detected":bool(prices),"source_filename":filename,"outcome_candidate":outcome,"prices":prices,
+  "warnings":warnings,"requires_review":True,
+  "note":"Preview only. No bid outcome or bidder price is saved until an authorized user reviews and explicitly saves it.",
+  "parser_version":parser_version,
+ }
+
+
+def _preview_pdf_text(text:str,filename:str):
+ if len(text.strip())<40:
+  return {
+   "detected":False,"source_filename":filename,"prices":[],
+   "warnings":["PDF has insufficient extractable text. Scanned/image result notices require vision/OCR review."],
+   "requires_review":True,"parser_version":"phase7-historical-result-pdf-v1",
+  }
+ prices=[];warnings=[];seen_ranks=set();seen_bidders=set()
+ pattern=re.compile(r"^\s*(?:L\s*)?(\d{1,3})\s+(.+?)\s+([0-9][0-9,]*(?:\.[0-9]+)?)\s*(INR|USD|EUR|GBP)?\s*$",re.I)
+ for line_no,line in enumerate(text.splitlines(),start=1):
+  match=pattern.match(line.strip())
+  if not match:continue
+  rank=int(match.group(1));bidder=match.group(2).strip(" -|");value=_money(match.group(3));currency=(match.group(4) or "INR").upper()
+  if rank>100 or not bidder or value is None:continue
+  if rank in seen_ranks:
+   warnings.append(f"Duplicate rank {rank} detected at PDF text line {line_no}; review required.");continue
+  key=bidder.lower()
+  if key in seen_bidders:
+   warnings.append(f"Duplicate bidder '{bidder}' detected at PDF text line {line_no}; review required.");continue
+  seen_ranks.add(rank);seen_bidders.add(key)
+  prices.append({"bidder_name":bidder,"rank":rank,"bid_value":float(value),"currency":currency,"is_ours":_norm(bidder) in {"l&t","larsen & toubro","larsen and toubro","lt"},"source_reference":filename or None})
+ if not prices:
+  warnings.append("No ranked bidder-price rows could be read from the PDF text; manual review is required.")
+ return _finalize(prices,warnings,filename,"phase7-historical-result-pdf-v1")
+
+
+def _preview_pdf(content:bytes,filename:str):
+ try:
+  reader=PdfReader(io.BytesIO(content))
+  text="\n".join(page.extract_text() or "" for page in reader.pages)
+ except Exception:
+  return {"detected":False,"source_filename":filename,"prices":[],"warnings":["PDF could not be safely parsed; manual review is required."],"requires_review":True,"parser_version":"phase7-historical-result-pdf-v1"}
+ return _preview_pdf_text(text,filename)
+
+
 
 def _matrix(extension,content):
  if extension=="csv":
@@ -55,7 +110,9 @@ def _matrix(extension,content):
 
 
 def preview_historical_result(extension:str,content:bytes,filename:str=""):
- matrix=_matrix(extension.lower(),content)
+ extension=extension.lower()
+ if extension=="pdf":return _preview_pdf(content,filename)
+ matrix=_matrix(extension,content)
  best=None
  for row_index,row in enumerate(matrix[:50]):
   mapping={}
@@ -95,19 +152,4 @@ def preview_historical_result(extension:str,content:bytes,filename:str=""):
    "bidder_name":bidder,"rank":rank,"bid_value":float(value),"currency":currency,
    "is_ours":is_ours,"source_reference":filename or None,
   })
- prices.sort(key=lambda x:x["rank"])
- ours=[x for x in prices if x["is_ours"]]
- if len(ours)>1:warnings.append("More than one row appears to be marked as our bid.")
- outcome={
-  "result_status":"Won" if ours and ours[0]["rank"]==1 else "Lost" if ours else "Result Awaited",
-  "our_rank":ours[0]["rank"] if len(ours)==1 else None,
-  "our_bid_value":ours[0]["bid_value"] if len(ours)==1 else None,
-  "awarded_bidder":next((x["bidder_name"] for x in prices if x["rank"]==1),None),
-  "source_reference":filename or None,
- }
- return {
-  "detected":bool(prices),"source_filename":filename,"outcome_candidate":outcome,"prices":prices,
-  "warnings":warnings,"requires_review":True,
-  "note":"Preview only. No bid outcome or bidder price is saved until an authorized user reviews and explicitly saves it.",
-  "parser_version":"phase7-historical-result-preview-v1",
- }
+ return _finalize(prices,warnings,filename,"phase7-historical-result-preview-v1")
