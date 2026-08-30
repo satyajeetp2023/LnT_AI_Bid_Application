@@ -1,5 +1,6 @@
 import io
 
+from docx import Document
 from openpyxl import Workbook
 
 from app.services.p6_xer import analyze_schedule_tables
@@ -61,3 +62,43 @@ def test_primavera_style_xml_normalizes_activity_and_relationship():
     assert len(ing["tables"]["TASKPRED"])==1
     assert ing["capabilities"]["logic"] is True
     assert ing["capabilities"]["float"] is True
+
+
+def test_iso_duration_is_parsed_as_hours_not_days():
+    xml=b"""<?xml version="1.0"?>
+<Project>
+  <Activity>
+    <Id>A100</Id><Name>Foundation</Name>
+    <OriginalDuration>PT80H</OriginalDuration>
+    <TotalFloat>PT16H</TotalFloat>
+  </Activity>
+</Project>"""
+    ing=ingest_schedule("xml",xml)
+    task=ing["tables"]["TASK"][0]
+    assert task["target_drtn_hr_cnt"]==80
+    assert task["total_float_hr_cnt"]==16
+
+
+def test_word_schedule_table_is_extracted():
+    document=Document()
+    table=document.add_table(rows=1,cols=6)
+    headers=["Activity ID","Activity Name","WBS","Start Date","Finish Date","Duration"]
+    for i,value in enumerate(headers):
+        table.rows[0].cells[i].text=value
+    row=table.add_row().cells
+    values=["A100","OHE Foundation","OHE","2026-01-01","2026-01-10","10 days"]
+    for i,value in enumerate(values):
+        row[i].text=value
+    stream=io.BytesIO();document.save(stream)
+    ing=ingest_schedule("docx",stream.getvalue())
+    assert ing["detected"] is True
+    assert ing["fidelity"]=="Report / Limited"
+    assert ing["tables"]["TASK"][0]["task_code"]=="A100"
+    assert ing["tables"]["TASK"][0]["target_drtn_hr_cnt"]==80
+
+
+def test_mpp_is_recognized_as_native_binary_but_not_falsely_parsed():
+    ing=ingest_schedule("mpp",b"not-a-real-mpp")
+    assert ing["detected"] is False
+    assert ing["source_kind"]=="Microsoft Project MPP"
+    assert ing["fidelity"]=="Native Binary / Parser Required"
