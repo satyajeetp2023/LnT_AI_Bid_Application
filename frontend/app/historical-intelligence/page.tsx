@@ -5,13 +5,15 @@ import {EmptyState,ErrorState,LoadingState,PageHeader,SummaryCard} from "@/compo
 import {request} from "@/services/api";
 import type {HistoricalBidIntelligence} from "@/types";
 
+type HistoricalBidIntelligenceWithSpread=HistoricalBidIntelligence&{market_spread:{samples:number;average_l2_to_l1_percent:number|null;average_l3_to_l1_percent:number|null;average_l4_to_l1_percent:number|null}};
+
 export default function HistoricalIntelligencePage(){
- const [data,setData]=useState<HistoricalBidIntelligence|null>(null);
+ const [data,setData]=useState<HistoricalBidIntelligenceWithSpread|null>(null);
  const [loading,setLoading]=useState(true);
  const [error,setError]=useState("");
 
  useEffect(()=>{
-  request<HistoricalBidIntelligence>("/historical-bids/intelligence")
+  request<HistoricalBidIntelligenceWithSpread>("/historical-bids/intelligence")
    .then(setData).catch(()=>setError("Unable to load historical bid intelligence."))
    .finally(()=>setLoading(false));
  },[]);
@@ -21,7 +23,7 @@ export default function HistoricalIntelligencePage(){
  if(!data)return null;
 
  return <div className="mx-auto max-w-[1500px]">
-  <PageHeader items={[{label:"Review & Insights"},{label:"Historical Intelligence"}]} title="Historical Bid Intelligence" description="Descriptive win/loss and competitor intelligence from recorded tender results."/>
+  <PageHeader items={[{label:"Review & Insights"},{label:"Historical Intelligence"}]} title="Historical Bid Intelligence" description="Descriptive win/loss, competitor and market-spread intelligence from recorded tender results."/>
   <div className="mb-3 grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-7">
    <SummaryCard label="Recorded" value={data.summary.recorded}/>
    <SummaryCard label="Completed" value={data.summary.completed??0}/>
@@ -33,6 +35,15 @@ export default function HistoricalIntelligencePage(){
   </div>
 
   {data.summary.recorded===0?<EmptyState title="No historical results recorded yet" description="Bid Results will populate this page as tender outcomes are captured."/>:<>
+   <section className="mb-3 rounded border border-slate-200 bg-white p-3">
+    <div className="mb-3"><h2 className="text-sm font-bold text-slate-900">Recorded Market Price Spread</h2><p className="text-xs text-slate-500">Average premium of L2, L3 and L4 over L1 from completed tenders with ranked price evidence.</p></div>
+    <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+     <SummaryCard label="Spread Samples" value={data.market_spread.samples}/>
+     <SummaryCard label="Avg L2 vs L1" value={data.market_spread.average_l2_to_l1_percent!==null?data.market_spread.average_l2_to_l1_percent+"%":"—"}/>
+     <SummaryCard label="Avg L3 vs L1" value={data.market_spread.average_l3_to_l1_percent!==null?data.market_spread.average_l3_to_l1_percent+"%":"—"}/>
+     <SummaryCard label="Avg L4 vs L1" value={data.market_spread.average_l4_to_l1_percent!==null?data.market_spread.average_l4_to_l1_percent+"%":"—"}/>
+    </div>
+   </section>
    <div className="mb-3 grid gap-3 lg:grid-cols-2">
     <GroupTable title="Win Rate by Project Type" rows={data.by_project_type}/>
     <GroupTable title="Win Rate by Client" rows={data.by_client}/>
