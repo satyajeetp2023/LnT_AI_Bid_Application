@@ -1,11 +1,11 @@
 import re
 from collections import Counter,defaultdict
-from datetime import datetime
+from datetime import datetime,timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import BidRequirement,PlanningResourceEntry
+from app.models import BidRequirement,PlanningPackageFinding,PlanningResourceEntry
 
 
 MILESTONE_TYPES={"TT_Mile","TT_FinMile","TT_StartMile","TT_FinishMile"}
@@ -236,3 +236,135 @@ def reconcile_planning_package(db:Session,bid_id:int,tables:dict[str,list[dict]]
   "version":"integrated-planning-package-v2",
   "note":"This reconciles evidence supplied by the bidder. It does not invent crew sizes, equipment quantities, staff norms or productivity assumptions.",
  }
+
+
+def _finding_candidates(analysis:dict):
+ candidates=[]
+ for issue in analysis.get("issues",[]):
+  key="issue:"+re.sub(r"[^a-z0-9]+","-",issue["type"].lower()).strip("-")
+  candidates.append({
+   "finding_key":key,"finding_type":issue["type"],"severity":issue["severity"],
+   "title":issue["type"],"description":issue["message"],
+   "task_code":None,"task_name":None,"source_reference":None,
+  })
+ for row in analysis.get("activity_resource_coverage",[]):
+  if row.get("coverage_status")!="Uncovered":continue
+  task_key=str(row.get("task_code") or row.get("task_id") or row.get("task_name") or "unknown")
+  candidates.append({
+   "finding_key":"uncovered-activity:"+task_key,
+   "finding_type":"Uncovered Activity","severity":"High",
+   "title":"Scheduled activity has no identifiable resource coverage",
+   "description":f"{task_key} - {row.get('task_name') or 'Unnamed activity'} is not resource-loaded in the schedule and has no matched separate resource/equipment-plan entry.",
+   "task_code":row.get("task_code"),"task_name":row.get("task_name"),"source_reference":None,
+  })
+ for row in analysis.get("separate_plan_matching",[]):
+  if row.get("timeline_status") in {"Starts After Activity","Ends Before Activity"}:
+   candidates.append({
+    "finding_key":f"resource-timing:{row['id']}",
+    "finding_type":"Resource Timing","severity":"Medium",
+    "title":"Resource deployment does not cover linked activity period",
+    "description":f"{row.get('resource_name')} - {row.get('timeline_status')} for {row.get('matched_task_code') or row.get('matched_task_name') or 'linked activity'}.",
+    "task_code":row.get("matched_task_code"),"task_name":row.get("matched_task_name"),
+    "source_reference":row.get("activity_reference") or row.get("work_front"),
+   })
+  if row.get("match_status")=="Unlinked":
+   candidates.append({
+    "finding_key":f"unlinked-resource:{row['id']}",
+    "finding_type":"Unlinked Resource","severity":"Medium",
+    "title":"Separate-plan resource is not linked to a schedule activity",
+    "description":f"{row.get('resource_name')} has no reliable link to a scheduled activity/work front.",
+    "task_code":None,"task_name":None,"source_reference":row.get("activity_reference") or row.get("work_front"),
+   })
+ for role in analysis.get("staff_plan",{}).get("missing_contract_required_roles",[]):
+  candidates.append({
+   "finding_key":"contract-staff:"+re.sub(r"[^a-z0-9]+","-",role.lower()).strip("-"),
+   "finding_type":"Contract Staff Requirement","severity":"High",
+   "title":"Contract-required staff role missing from Staff Plan",
+   "description":f"{role} is explicitly indicated by tender requirement evidence but is not identifiable in the bidder Staff Plan.",
+   "task_code":None,"task_name":None,"source_reference":role,
+  })
+ # Dedupe by stable key, keeping highest severity.
+ priority={"High":2,"Medium":1,"Low":0}
+ dedup={}
+ for candidate in candidates:
+  previous=dedup.get(candidate["finding_key"])
+  if previous is None or priority.get(candidate["severity"],0)>priority.get(previous["severity"],0):
+   dedup[candidate["finding_key"]]=candidate
+ return list(dedup.values())
+
+
+def sync_planning_package_findings(
+ db:Session,bid_id:int,schedule_document_id:int,analysis:dict
+):
+ candidates=_finding_candidates(analysis)
+ current={x.finding_key:x for x in db.scalars(select(PlanningPackageFinding).where(
+  PlanningPackageFinding.bid_project_id==bid_id
+ )).all()}
+ active_keys=set()
+ created=updated=cleared=0
+ for item in candidates:
+  key=item["finding_key"];active_keys.add(key)
+  row=current.get(key)
+  if row:
+   row.schedule_document_id=schedule_document_id
+   row.finding_type=item["finding_type"];row.severity=item["severity"]
+   row.title=item["title"];row.description=item["description"]
+   row.task_code=item["task_code"];row.task_name=item["task_name"];row.source_reference=item["source_reference"]
+   if row.status in {"Open","Cleared by Re-analysis"}:
+    row.status="Open";row.disposition=None;row.reviewer_comment=None;row.reviewed_by=None;row.reviewed_at=None
+   updated+=1
+  else:
+   db.add(PlanningPackageFinding(
+    bid_project_id=bid_id,schedule_document_id=schedule_document_id,
+    responsible_function="Planning",status="Open",**item
+   ));created+=1
+ for key,row in current.items():
+  if key in active_keys:continue
+  if row.status=="Open":
+   row.status="Cleared by Re-analysis"
+   row.disposition="No Longer Detected"
+   row.reviewer_comment="The issue was not detected in the latest integrated planning-package analysis."
+   row.reviewed_at=datetime.now(timezone.utc)
+   cleared+=1
+ db.commit()
+ return {
+  "created":created,"updated":updated,"cleared":cleared,
+  "active_findings":len(candidates),
+ }
+
+
+def planning_package_findings(db:Session,bid_id:int):
+ rows=db.scalars(select(PlanningPackageFinding).where(
+  PlanningPackageFinding.bid_project_id==bid_id
+ ).order_by(PlanningPackageFinding.status,PlanningPackageFinding.severity,PlanningPackageFinding.created_at)).all()
+ return {
+  "items":[{
+   "id":x.id,"schedule_document_id":x.schedule_document_id,"finding_key":x.finding_key,
+   "finding_type":x.finding_type,"severity":x.severity,"title":x.title,"description":x.description,
+   "task_code":x.task_code,"task_name":x.task_name,"source_reference":x.source_reference,
+   "responsible_function":x.responsible_function,"responsible_person":x.responsible_person,
+   "status":x.status,"disposition":x.disposition,"reviewer_comment":x.reviewer_comment,
+  } for x in rows],
+  "summary":{
+   "total":len(rows),"open":sum(1 for x in rows if x.status=="Open"),
+   "high_open":sum(1 for x in rows if x.status=="Open" and x.severity=="High"),
+   "medium_open":sum(1 for x in rows if x.status=="Open" and x.severity=="Medium"),
+   "cleared":sum(1 for x in rows if x.status=="Cleared by Re-analysis"),
+  },
+  "version":"integrated-planning-package-findings-v1",
+ }
+
+
+def review_planning_package_finding(db:Session,finding_id:int,disposition:str,comment:str|None,user_id:int):
+ allowed={"Resolved","Accepted / Explained","To Be Revised","Not Applicable","Escalate"}
+ if disposition not in allowed:raise ValueError("Unsupported planning-package disposition")
+ row=db.get(PlanningPackageFinding,finding_id)
+ if not row:raise ValueError("Planning-package finding not found")
+ reviewer_comment=(comment or "").strip() or None
+ if disposition in {"Resolved","Accepted / Explained","Not Applicable"} and not reviewer_comment:
+  raise ValueError("A reviewer comment is required to close a planning-package finding")
+ row.disposition=disposition;row.reviewer_comment=reviewer_comment
+ row.status="Open" if disposition in {"To Be Revised","Escalate"} else "Closed"
+ row.reviewed_by=user_id;row.reviewed_at=datetime.now(timezone.utc)
+ db.commit();db.refresh(row)
+ return {"id":row.id,"status":row.status,"disposition":row.disposition,"reviewer_comment":row.reviewer_comment}
