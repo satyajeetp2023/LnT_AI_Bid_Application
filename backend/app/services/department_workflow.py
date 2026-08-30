@@ -4,7 +4,7 @@ from datetime import date,timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import BidMissingInput,BidPreBidQuery,BidRequirement
+from app.models import BidClauseRiskFinding,BidMissingInput,BidPreBidQuery,BidRequirement
 from app.services.missing_input_taxonomy import RESOLVED_STATUSES
 from app.services.responsibility_assignment import suggest_responsible_function
 from app.services.schedule_scope_coverage import schedule_scope_catalog
@@ -90,6 +90,29 @@ def department_work_queue(db:Session,bid_id:int,responsible_function:str|None=No
             "source_page":q.source_page,"source_clause":q.source_clause,
         })
 
+    risks=db.scalars(select(BidClauseRiskFinding).where(
+        BidClauseRiskFinding.bid_project_id==bid_id,
+        BidClauseRiskFinding.review_status!="Closed",
+        BidClauseRiskFinding.severity.in_(["Critical","High"]),
+    )).all()
+    for risk in risks:
+        owner=risk.responsible_function or "Contracts"
+        person=risk.responsible_person
+        if responsible_function and owner!=responsible_function:continue
+        if responsible_person and person!=responsible_person:continue
+        items.append({
+            "entity_type":"Clause Risk","entity_id":risk.id,"title":risk.risk_title,
+            "priority":"Critical" if risk.severity=="Critical" else "High",
+            "responsible_function":owner,"responsible_person":person,
+            "status":risk.reviewer_disposition or risk.review_status,
+            "due_date":None,"is_overdue":False,
+            "action":"Review contractual risk",
+            "reason":"AI/rule screening found an onerous clause pattern that still requires Contracts disposition.",
+            "route":f"/bids/{bid_id}/copilot",
+            "source_document":f"Document #{risk.source_document_id}",
+            "source_page":risk.source_page,"source_clause":risk.source_clause,
+        })
+
     scope_catalog=schedule_scope_catalog(db,bid_id)
     for scope in scope_catalog.get("groups",[]):
         if not scope.get("group_blocking"):continue
@@ -166,6 +189,8 @@ def department_work_queue(db:Session,bid_id:int,responsible_function:str|None=No
         owner=_owner(g.input_category,f"{g.missing_input_title} {g.missing_input_description}",g.responsible_function);functions.add(owner)
     for q in all_queries:
         owner=_owner(q.query_category,q.query_text,q.responsible_function);functions.add(owner)
+    all_risks=db.scalars(select(BidClauseRiskFinding).where(BidClauseRiskFinding.bid_project_id==bid_id)).all()
+    if all_risks:functions.add("Contracts")
     mandatory_scope=[x for x in scope_catalog.get("groups",[]) if x.get("mandatory")]
     if mandatory_scope:functions.add("Planning")
 
@@ -187,6 +212,10 @@ def department_work_queue(db:Session,bid_id:int,responsible_function:str|None=No
             if owner!=function_name:continue
             total+=1
             if q.status in {"Responded","Closed","Withdrawn"}:completed+=1
+        if function_name=="Contracts":
+            for risk in all_risks:
+                total+=1
+                if risk.review_status=="Closed":completed+=1
         if function_name=="Planning":
             for scope in mandatory_scope:
                 total+=1
@@ -221,5 +250,5 @@ def department_work_queue(db:Session,bid_id:int,responsible_function:str|None=No
         "department_control":department_control,
         "department_progress":progress_rows,
         "filter":{"responsible_function":responsible_function,"responsible_person":responsible_person},
-        "version":"phase4-department-work-queue-v7",
+        "version":"phase4-department-work-queue-v8",
     }
