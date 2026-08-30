@@ -49,9 +49,14 @@ def activity_parameter_profile_from_tables(tables:dict[str,list[dict]],task_key:
     wbs_id=task.get("wbs_id")
     wbs=next((x for x in tables.get("PROJWBS",[]) if x.get("wbs_id")==wbs_id),None)
     resources={x.get("rsrc_id"):x for x in tables.get("RSRC",[]) if x.get("rsrc_id")}
+    source_parameters=task.get("_source_fields") if isinstance(task.get("_source_fields"),dict) else {
+        k:v for k,v in task.items() if not str(k).startswith("_")
+    }
+    normalized_task={k:v for k,v in task.items() if not str(k).startswith("_")}
     return {
         "task_key":task_key,
-        "task":task,
+        "task":normalized_task,
+        "source_parameters":source_parameters,
         "wbs":wbs,
         "calendar":calendar,
         "predecessors":predecessors,
@@ -66,7 +71,7 @@ def activity_parameter_profile_from_tables(tables:dict[str,list[dict]],task_key:
             "resource_assignment_count":len(assignments),
             "activity_code_count":len(task_codes),
         },
-        "profile_version":"phase6-activity-parameter-profile-v2",
+        "profile_version":"phase6-activity-parameter-profile-v3",
     }
 
 
