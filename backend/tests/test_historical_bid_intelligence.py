@@ -1,3 +1,7 @@
+import pytest
+from pydantic import ValidationError
+from app.schemas.historical_bids import BidOutcomeUpsert
+
 from app.services.historical_bid_intelligence import consistency_warnings,price_summary
 
 
@@ -31,3 +35,14 @@ def test_competitor_metrics_are_descriptive_from_recorded_rows():
     wins=Counter({"A":1})
     assert round(wins["A"]*100/appearances["A"],1)==33.3
     assert round(ranks["A"]/appearances["A"],2)==2.0
+
+
+def test_bidder_duplicate_validation_normalizes_case_and_whitespace():
+    with pytest.raises(ValidationError):
+        BidOutcomeUpsert(
+            result_status="Lost",
+            prices=[
+                {"bidder_name":"ABC Ltd","rank":1,"bid_value":100},
+                {"bidder_name":" abc   ltd ","rank":2,"bid_value":110},
+            ],
+        )
