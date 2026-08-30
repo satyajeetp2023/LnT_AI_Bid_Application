@@ -175,5 +175,32 @@ jobs:
             --build-arg NEXT_PUBLIC_OIDC_SCOPE="openid profile email" \
             -t railway-bid-frontend:release-test ./frontend
 
+      - name: Runtime smoke backend container
+        env:
+          PGPASSWORD: release-test-password
+        run: |
+          docker run -d --name railway-bid-backend-smoke --network host \
+            -e ENVIRONMENT=development \
+            -e DATABASE_URL=postgresql+psycopg://railway:release-test-password@localhost:5432/railway_bid \
+            -e STORAGE_ROOT=/tmp/release-smoke-storage \
+            railway-bid-backend:release-test
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/api/v1/health/ready >/tmp/backend-ready.json; then break; fi
+            sleep 2
+          done
+          cat /tmp/backend-ready.json
+          grep -q '"status":"ready"' /tmp/backend-ready.json
+          docker rm -f railway-bid-backend-smoke
+
+      - name: Runtime smoke frontend container
+        run: |
+          docker run -d --name railway-bid-frontend-smoke --network host railway-bid-frontend:release-test
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3000/ >/tmp/frontend-home.html; then break; fi
+            sleep 2
+          done
+          test -s /tmp/frontend-home.html
+          docker rm -f railway-bid-frontend-smoke
+
       - name: Validate compose model
         run: docker compose config >/tmp/compose.rendered.yml
