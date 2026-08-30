@@ -381,3 +381,69 @@ def test_phase8_unchanged_save_preserves_review_and_real_change_resets_it(client
     assert changed.status_code==200
     assert changed.json()["execution"]["review_status"]=="Draft"
     assert changed.json()["learning_eligible"] is False
+
+
+def test_phase8_learning_factors_require_source_and_future_lesson_before_review(client,bid_payload):
+    bid=client.post("/api/v1/bids",json={**bid_payload,"bid_id":"EXEC-FACTOR","tender_reference_no":"EXEC-FACTOR"}).json()
+    assert client.put(
+        f"/api/v1/bids/{bid['id']}/outcome",
+        json={"result_status":"Won","our_rank":1,"our_bid_value":1000,"prices":[{"bidder_name":"L&T","rank":1,"bid_value":1000,"currency":"INR","is_ours":True}]},
+    ).status_code==200
+    assert client.put(
+        f"/api/v1/bids/{bid['id']}/execution-outcome",
+        json={"execution_status":"In Progress","data_date":"2026-08-30","actual_start_date":"2026-01-01","actual_cost":500,"source_reference":"Monthly certified cost report"},
+    ).status_code==200
+
+    created=client.post(
+        f"/api/v1/bids/{bid['id']}/execution-learning-factors",
+        json={
+            "factor_category":"Planning","impact_area":"Time","direction":"Adverse",
+            "title":"Late access to work fronts","description":"Work fronts were released later than assumed.",
+            "quantified_impact":45,"impact_unit":"days",
+        },
+    )
+    assert created.status_code==201
+    factor_id=created.json()["id"]
+    assert client.post(f"/api/v1/execution-learning-factors/{factor_id}/review").status_code==409
+
+    updated=client.put(
+        f"/api/v1/execution-learning-factors/{factor_id}",
+        json={
+            "factor_category":"Planning","impact_area":"Time","direction":"Adverse",
+            "title":"Late access to work fronts","description":"Work fronts were released later than assumed.",
+            "quantified_impact":45,"impact_unit":"days",
+            "source_reference":"Approved EOT record","source_excerpt":"Access delay accepted for 45 days.",
+            "lesson_for_future_bids":"Explicitly model access-release milestones and float in future baseline schedules.",
+        },
+    )
+    assert updated.status_code==200
+    reviewed=client.post(f"/api/v1/execution-learning-factors/{factor_id}/review")
+    assert reviewed.status_code==200
+    assert reviewed.json()["review_status"]=="Reviewed"
+
+    portfolio=client.get("/api/v1/execution-learning/intelligence")
+    assert portfolio.status_code==200
+    body=portfolio.json()
+    assert body["summary"]["reviewed_factors"]>=1
+    assert body["factor_summary"]["adverse"]>=1
+    assert any(x["name"]=="Planning" for x in body["factor_summary"]["by_category"])
+
+
+def test_phase8_read_only_member_cannot_create_or_review_learning_factor(client,bid_payload):
+    bid=client.post("/api/v1/bids",json={**bid_payload,"bid_id":"EXEC-FACTOR-RBAC","tender_reference_no":"EXEC-FACTOR-RBAC"}).json()
+    assert client.put(
+        f"/api/v1/bids/{bid['id']}/outcome",
+        json={"result_status":"Won","our_rank":1,"our_bid_value":1000,"prices":[{"bidder_name":"L&T","rank":1,"bid_value":1000,"currency":"INR","is_ours":True}]},
+    ).status_code==200
+    assert client.put(
+        f"/api/v1/bids/{bid['id']}/execution-outcome",
+        json={"execution_status":"In Progress","data_date":"2026-08-30","actual_cost":500,"source_reference":"Monthly report"},
+    ).status_code==200
+    assert client.post(f"/api/v1/bids/{bid['id']}/members",json={"user_id":2,"role":"Read Only"}).status_code==200
+    headers={"X-User-ID":"2"}
+    denied=client.post(
+        f"/api/v1/bids/{bid['id']}/execution-learning-factors",
+        json={"factor_category":"Cost","impact_area":"Cost","direction":"Adverse","title":"Cost variance","description":"Observed variance."},
+        headers=headers,
+    )
+    assert denied.status_code==403
