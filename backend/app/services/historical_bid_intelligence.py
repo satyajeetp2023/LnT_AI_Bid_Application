@@ -155,12 +155,15 @@ def upsert_bid_outcome(db:Session,bid:BidProject,payload,user_id:int,request_met
  return get_bid_outcome(db,bid.id)
 
 
-def historical_bid_intelligence(db:Session,bid_ids:list[int]):
+def historical_bid_intelligence(db:Session,bid_ids:list[int],result_from=None,result_to=None):
  if not bid_ids:
   return {"summary":{"recorded":0,"won":0,"lost":0,"win_rate_percent":None},"by_project_type":[],"by_client":[],"competitors":[],"market_spread":{"samples":0,"average_l2_to_l1_percent":None,"average_l3_to_l1_percent":None,"average_l4_to_l1_percent":None},"data_quality":{"completed_results":0,"outcome_source_coverage_percent":None,"price_source_coverage_percent":None,"complete_l1_l4_coverage_percent":None,"results_with_our_bid_marked_percent":None},"version":"phase7-historical-bid-intelligence-v3","note":"Descriptive only. No predictive judgement is produced."}
  outcomes=db.scalars(select(BidOutcome).where(BidOutcome.bid_project_id.in_(bid_ids))).all()
+ if result_from:outcomes=[x for x in outcomes if x.result_date is not None and x.result_date>=result_from]
+ if result_to:outcomes=[x for x in outcomes if x.result_date is not None and x.result_date<=result_to]
+ selected_ids={x.bid_project_id for x in outcomes}
  projects={x.id:x for x in db.scalars(select(BidProject).where(BidProject.id.in_(bid_ids))).all()}
- prices=db.scalars(select(BidPriceRecord).where(BidPriceRecord.bid_project_id.in_(bid_ids))).all()
+ prices=[] if not selected_ids else db.scalars(select(BidPriceRecord).where(BidPriceRecord.bid_project_id.in_(selected_ids))).all()
  completed=[x for x in outcomes if x.result_status in {"Won","Lost"}]
  won=[x for x in completed if x.result_status=="Won"]
  gaps=[];margins=[];ranks=[];market_spreads=[]
