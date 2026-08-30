@@ -1,12 +1,12 @@
 """harden historical bid result constraints
 
-Revision ID: 0020_historical_bid_constraints
-Revises: 0019_historical_bid_results
+Revision ID: 0020
+Revises: 0019
 """
 from alembic import op
 
-revision="0020_historical_bid_constraints"
-down_revision="0019_historical_bid_results"
+revision="0020"
+down_revision="0019"
 branch_labels=None
 depends_on=None
 
