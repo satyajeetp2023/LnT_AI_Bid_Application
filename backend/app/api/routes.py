@@ -32,6 +32,7 @@ from app.services.boq_document_extraction import extract_boq_rows
 from app.services.schedule_skeleton import build_schedule_skeleton
 from app.services.productivity_benchmarks import activity_key,benchmark_summary
 from app.services.clause_risk_intelligence import bid_clause_risk_summary,firm_risk_library,promote_finding_to_firm_pattern,review_clause_risk,scan_document_clause_risks
+from app.services.contract_clause_variation import contract_clause_variations
 from app.services.drawing_boq_verification import drawing_boq_summary,record_drawing_observations,review_drawing_boq_finding,verify_drawing_boq
 from app.services.drawing_quantity_extraction import drawing_vision_status,get_drawing_quantity_provider
 from app.services.tender_qa import tender_question_answer
@@ -422,6 +423,11 @@ def review_clause_risk_finding(finding_id:int,payload:dict,request:Request,db:Se
  db.add(AuditEvent(user_id=user.id,bid_project_id=finding.bid_project_id,event_type="clause_risk.reviewed",entity_type="BidClauseRiskFinding",entity_id=str(finding_id),request_metadata=metadata(request),details={"disposition":result["reviewer_disposition"]}))
  db.commit()
  return result
+
+@router.get("/bids/{bid_id}/contract-clause-variations")
+def get_contract_clause_variations(bid_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.REQUIREMENT_VIEW);get_bid(db,bid_id)
+ return contract_clause_variations(db,bid_id)
 
 @router.get("/firm-risk-library")
 def get_firm_risk_library(db:Session=Depends(get_db),user:User=Depends(user_dep)):
