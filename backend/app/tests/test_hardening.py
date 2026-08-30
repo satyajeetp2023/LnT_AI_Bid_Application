@@ -83,7 +83,7 @@ def test_historical_comparison_uses_completed_visible_bid(client,bid_payload):
             "our_rank":2,
             "our_bid_value":108,
             "prices":[
-                {"bidder_name":"A","rank":1,"bid_value":100,"currency":"INR","is_ours":False},
+                {"bidder_name":"Competitor A","rank":1,"bid_value":100,"currency":"INR","is_ours":False},
                 {"bidder_name":"L&T","rank":2,"bid_value":108,"currency":"INR","is_ours":True},
             ],
         },
