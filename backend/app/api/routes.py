@@ -37,6 +37,7 @@ from app.services.drawing_boq_verification import drawing_boq_summary,record_dra
 from app.services.drawing_quantity_extraction import drawing_vision_status,get_drawing_quantity_provider
 from app.services.tender_qa import tender_question_answer
 from app.services.tender_knowledge_index import index_tender_document,tender_knowledge_status
+from app.services.tender_semantic_retrieval import tender_semantic_status
 from app.services.schedule_ingestion import SCHEDULE_EXTENSIONS,ingest_schedule
 from app.services.documents import DOCUMENT_CATEGORIES,archive,classify,mark_revision,update_document_metadata,update_notes,upload_document
 from app.services.document_classification import auto_classify_document
@@ -385,6 +386,11 @@ def index_document_tender_knowledge(document_id:int,request:Request,db:Session=D
 def get_tender_knowledge_status(bid_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)):
  require_project_access(db,user,bid_id,Permission.REQUIREMENT_VIEW);get_bid(db,bid_id)
  return tender_knowledge_status(db,bid_id)
+
+@router.get("/bids/{bid_id}/tender-semantic-status")
+def get_tender_semantic_status(bid_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.REQUIREMENT_VIEW);get_bid(db,bid_id)
+ return tender_semantic_status()
 
 @router.post("/bids/{bid_id}/tender-qa")
 def ask_tender(bid_id:int,payload:dict,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
