@@ -41,8 +41,13 @@ def current_user(db:Session,x_user_id:int|None=None,authorization:str|None=None)
  if not user or not user.is_active:raise HTTPException(403,"Verified enterprise identity is not provisioned for this application")
  return user
 def is_admin(user:User)->bool: return any(r.name==RoleName.SYSTEM_ADMIN for r in user.roles)
+def effective_permissions(user:User)->set[Permission]:
+ permissions:set[Permission]=set()
+ for role in user.roles: permissions.update(ROLE_PERMISSIONS.get(role.name,set()))
+ return permissions
+
 def require_permission(user:User,permission:Permission)->None:
- if not any(permission in ROLE_PERMISSIONS.get(r.name,set()) for r in user.roles): raise HTTPException(403,f"Permission denied: {permission.value}")
+ if permission not in effective_permissions(user): raise HTTPException(403,f"Permission denied: {permission.value}")
 def require_project_access(db:Session,user:User,project_id:int,permission:Permission)->None:
  require_permission(user,permission)
  if is_admin(user): return
