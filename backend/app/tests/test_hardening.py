@@ -10,6 +10,9 @@ def test_security_headers_are_present(client):
     assert response.headers["x-content-type-options"]=="nosniff"
     assert response.headers["x-frame-options"]=="DENY"
     assert response.headers["referrer-policy"]=="no-referrer"
+    assert response.headers["permissions-policy"]=="camera=(), microphone=(), geolocation=()"
+    assert response.headers["cache-control"]=="no-store"
+    assert response.headers["x-request-id"]
 
 
 def test_disguised_executable_upload_is_rejected(client,bid_payload):
@@ -517,3 +520,15 @@ def test_phase9_read_only_member_cannot_freeze_decision_snapshot(client,bid_payl
     headers={"X-User-ID":"2"}
     assert client.get(f"/api/v1/bids/{bid['id']}/decision-snapshots",headers=headers).status_code==200
     assert client.post(f"/api/v1/bids/{bid['id']}/decision-snapshots",headers=headers).status_code==403
+
+
+def test_liveness_and_readiness_probes(client):
+    live=client.get("/api/v1/health/live")
+    assert live.status_code==200
+    assert live.json()["status"]=="ok"
+    ready=client.get("/api/v1/health/ready")
+    assert ready.status_code==200
+    body=ready.json()
+    assert body["status"]=="ready"
+    assert body["database"]=="connected"
+    assert body["storage"]=="writable"
