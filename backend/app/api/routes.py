@@ -7,7 +7,7 @@ from sqlalchemy import func,select
 from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.database.session import get_db
-from app.models import AuditEvent,BidClauseRiskFinding,BidDocument,BidMissingInput,BidPreBidQuery,BidPreparedArtifact,BidProject,BidRequirement,ProductivityBenchmark,ProjectMembership,ScheduleScopeItem,User
+from app.models import AuditEvent,BidClauseRiskFinding,BidDocument,BidMissingInput,BidPreBidQuery,BidPreparedArtifact,BidProject,BidRequirement,DrawingBoqFinding,ProductivityBenchmark,ProjectMembership,ScheduleScopeItem,User
 from app.schemas.requirements import RequirementCreate,RequirementExtractionSummary,RequirementRead,RequirementUpdate
 from app.schemas.bids import AutoClassifyRequest,BidCreate,BidRead,BidUpdate,ClassificationUpdate,DocumentMetadataUpdate,DocumentRead,NotesUpdate,RevisionCreate
 from app.security.auth import Permission,current_user,is_admin,require_permission,require_project_access
@@ -32,6 +32,7 @@ from app.services.boq_document_extraction import extract_boq_rows
 from app.services.schedule_skeleton import build_schedule_skeleton
 from app.services.productivity_benchmarks import activity_key,benchmark_summary
 from app.services.clause_risk_intelligence import bid_clause_risk_summary,firm_risk_library,promote_finding_to_firm_pattern,review_clause_risk,scan_document_clause_risks
+from app.services.drawing_boq_verification import drawing_boq_summary,record_drawing_observations,review_drawing_boq_finding,verify_drawing_boq
 from app.services.tender_qa import tender_question_answer
 from app.services.schedule_ingestion import SCHEDULE_EXTENSIONS,ingest_schedule
 from app.services.documents import DOCUMENT_CATEGORIES,archive,classify,mark_revision,update_document_metadata,update_notes,upload_document
@@ -421,6 +422,39 @@ def promote_clause_risk_pattern(finding_id:int,payload:dict,request:Request,db:S
  require_project_access(db,user,finding.bid_project_id,Permission.REQUIREMENT_MANAGE)
  try:return promote_finding_to_firm_pattern(db,finding_id,payload,user.id)
  except ValueError as exc:raise HTTPException(422,str(exc)) from None
+
+@router.post("/documents/{document_id}/drawing-quantity-observations")
+def add_drawing_quantity_observations(document_id:int,payload:dict,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ doc=get_doc(db,document_id);require_project_access(db,user,doc.bid_project_id,Permission.REQUIREMENT_MANAGE)
+ observations=payload.get("observations") or []
+ if not isinstance(observations,list) or not observations:raise HTTPException(422,"observations must be a non-empty list")
+ method=str(payload.get("extraction_method") or "Vision Extraction").strip()[:60]
+ try:
+  recorded=record_drawing_observations(db,doc.bid_project_id,doc.id,observations,user.id,method,metadata(request))
+  verification=verify_drawing_boq(db,doc.bid_project_id,user.id,metadata(request))
+  return {"recorded":recorded,"verification":verification}
+ except ValueError as exc:raise HTTPException(422,str(exc)) from None
+
+@router.get("/bids/{bid_id}/drawing-boq")
+def get_drawing_boq_verification(bid_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.REQUIREMENT_VIEW);get_bid(db,bid_id)
+ return drawing_boq_summary(db,bid_id)
+
+@router.post("/bids/{bid_id}/drawing-boq/verify")
+def run_drawing_boq_verification(bid_id:int,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.REQUIREMENT_MANAGE);get_bid(db,bid_id)
+ return verify_drawing_boq(db,bid_id,user.id,metadata(request))
+
+@router.post("/drawing-boq/{finding_id}/review")
+def review_drawing_boq(finding_id:int,payload:dict,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ finding=db.get(DrawingBoqFinding,finding_id)
+ if not finding:raise HTTPException(404,"Drawing/BOQ finding not found")
+ require_project_access(db,user,finding.bid_project_id,Permission.REQUIREMENT_MANAGE)
+ try:result=review_drawing_boq_finding(db,finding_id,str(payload.get("disposition") or ""),payload.get("comment"),user.id)
+ except ValueError as exc:raise HTTPException(422,str(exc)) from None
+ db.add(AuditEvent(user_id=user.id,bid_project_id=finding.bid_project_id,event_type="drawing_boq.reviewed",entity_type="DrawingBoqFinding",entity_id=str(finding_id),request_metadata=metadata(request),details={"disposition":result["reviewer_disposition"]}))
+ db.commit()
+ return result
 
 @router.get("/bids/{bid_id}/schedule-skeleton")
 def get_schedule_skeleton(bid_id:int,request:Request,sync_scope:bool=Query(True),db:Session=Depends(get_db),user:User=Depends(user_dep)):
