@@ -23,13 +23,9 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Generate lockfile if missing
+      - name: Refresh and validate lockfile
         working-directory: frontend
         run: |
-          if [ -f package-lock.json ]; then
-            echo "package-lock.json already exists"
-            exit 0
-          fi
           npm install --package-lock-only --ignore-scripts
           npm ci --ignore-scripts
 
