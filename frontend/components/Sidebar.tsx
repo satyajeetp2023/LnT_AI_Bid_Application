@@ -19,6 +19,7 @@ export function Sidebar({mobileOpen=false,onClose}:{mobileOpen?:boolean;onClose?
  const [activeGroup,setActiveGroup]=useState<string|null>(null);
  const [query,setQuery]=useState("");
  const closeTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
+ const flyoutRef=useRef<HTMLElement|null>(null);
 
  const cancelClose=()=>{
   if(closeTimer.current){
@@ -126,8 +127,8 @@ export function Sidebar({mobileOpen=false,onClose}:{mobileOpen?:boolean;onClose?
      {groups.map(group=>{
       const isOpen=activeGroup===group.id;
       const containsRoute=routeGroup===group.id;
-      return <div key={group.id} onMouseEnter={()=>openGroup(group.id)} onMouseLeave={scheduleClose}>
-       <button onFocus={()=>openGroup(group.id)} onClick={()=>{setQuery("");setActiveGroup(isOpen?null:group.id)}} className={`flex w-full items-center gap-3 rounded px-3 py-2.5 text-left transition ${isOpen?"bg-white/12 text-white":containsRoute?"bg-white/8 text-[#f3cc58]":"text-slate-200 hover:bg-white/8 hover:text-white"}`}>
+      return <div key={group.id} onPointerEnter={e=>{if(e.pointerType==="mouse")openGroup(group.id)}} onPointerLeave={e=>{if(e.pointerType==="mouse")scheduleClose()}}>
+       <button onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();openGroup(group.id);setTimeout(()=>flyoutRef.current?.querySelector<HTMLElement>("a[href]")?.focus(),0)}} onClick={()=>{setQuery("");setActiveGroup(isOpen?null:group.id)}} className={`flex w-full items-center gap-3 rounded px-3 py-2.5 text-left transition ${isOpen?"bg-white/12 text-white":containsRoute?"bg-white/8 text-[#f3cc58]":"text-slate-200 hover:bg-white/8 hover:text-white"}`}>
         <group.i size={15}/><span className="min-w-0 flex-1"><span className="block truncate text-[11.8px] font-semibold">{group.n}</span><span className="mt-0.5 hidden truncate text-[8.5px] font-normal text-slate-400 md:block">{group.description}</span></span><ChevronRight size={13} className={`transition-transform md:rotate-0 ${isOpen?"rotate-90":""}`}/>
        </button>
        {isOpen&&<div className="mt-1 space-y-0.5 rounded bg-[#293b49] p-1.5 md:hidden">{group.items.map(x=>renderItem(x,"dark"))}</div>}
@@ -143,8 +144,9 @@ export function Sidebar({mobileOpen=false,onClose}:{mobileOpen?:boolean;onClose?
   </aside>
 
   {showFlyout&&<section
-   onMouseEnter={cancelClose}
-   onMouseLeave={()=>{if(!normalized)scheduleClose()}}
+   ref={flyoutRef}
+   onPointerEnter={e=>{if(e.pointerType==="mouse")cancelClose()}}
+   onPointerLeave={e=>{if(e.pointerType==="mouse"&&!normalized)scheduleClose()}}
    className="fixed left-[216px] z-50 hidden w-[292px] overflow-hidden rounded-lg border border-slate-200 bg-white text-slate-800 shadow-[0_12px_34px_rgba(15,23,42,.20)] md:block"
    style={{top:normalized?72:Math.min(430,132+Math.max(0,groups.findIndex(g=>g.id===activeGroup))*52)}}
   >
