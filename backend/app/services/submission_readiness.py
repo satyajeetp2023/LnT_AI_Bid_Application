@@ -7,7 +7,7 @@ from datetime import datetime,timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import BidClauseRiskFinding,BidPreparedArtifact,DrawingBoqFinding
+from app.models import BidClauseRiskFinding,BidPreparedArtifact,DrawingBoqFinding,PlanningPackageFinding
 from app.services.estimation_readiness import calculate_estimation_readiness
 from app.services.submission_format_intelligence import detect_submission_formats
 from app.storage.base import StorageProvider
@@ -89,12 +89,23 @@ def submission_readiness(db:Session,bid_id:int):
         DrawingBoqFinding.bid_project_id==bid_id,
         DrawingBoqFinding.review_status=="Open",
     )).all()
+    planning_findings=db.scalars(select(PlanningPackageFinding).where(
+        PlanningPackageFinding.bid_project_id==bid_id,
+        PlanningPackageFinding.status=="Open",
+    )).all()
+    planning_blockers=[x for x in planning_findings if x.severity=="High"]
+    planning_warnings=[x for x in planning_findings if x.severity=="Medium"]
     drawing_blockers=[x for x in drawing_findings if x.finding_status in {"Quantity Variance","No BOQ Match"}]
     drawing_warnings=[x for x in drawing_findings if x.finding_status in {"Unit Review","BOQ Quantity Unavailable"}]
     for finding in drawing_blockers:
         blockers.append(f'Drawing/BOQ review unresolved: {finding.finding_status}' + (f' ({finding.boq_reference})' if finding.boq_reference else ''))
     for finding in drawing_warnings:
         warnings.append(f'Drawing/BOQ review required: {finding.finding_status}' + (f' ({finding.boq_reference})' if finding.boq_reference else ''))
+
+    for finding in planning_blockers:
+        blockers.append(f'Planning package unresolved: {finding.title}' + (f' ({finding.task_code})' if finding.task_code else ''))
+    for finding in planning_warnings:
+        warnings.append(f'Planning package review required: {finding.title}' + (f' ({finding.task_code})' if finding.task_code else ''))
 
     if not detected["items"]:
         warnings.append("No employer-prescribed submission formats were detected automatically; manual tender-package confirmation is required.")
@@ -130,13 +141,15 @@ def submission_readiness(db:Session,bid_id:int):
             "drawing_boq_blockers":len(drawing_blockers),
             "drawing_boq_warnings":len(drawing_warnings),
             "intelligence_blockers":len(critical_clause_risks)+len(drawing_blockers),
+            "planning_package_blockers":len(planning_blockers),
+            "planning_package_warnings":len(planning_warnings),
             "total_blockers":len(blockers),
         },
         "estimation_readiness":{
             "overall_score":estimation["overall_score"],
             "grade":estimation["grade"],
         },
-        "version":"phase5-submission-readiness-v3",
+        "version":"phase5-submission-readiness-v4",
     }
 
 
