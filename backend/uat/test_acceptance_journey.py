@@ -27,6 +27,7 @@ def test_phase_1_to_7_acceptance_journey():
     assert health.status_code==200
     assert health.json()=={"status":"ok","database":"connected"}
     assert client.get("/api/v1/auth/me",headers=admin).status_code==200
+    assert client.get("/api/v1/auth/me").status_code==422
 
     # RBAC: read-only user cannot create a bid.
     bid_payload={
@@ -169,6 +170,17 @@ def test_phase_1_to_7_acceptance_journey():
     assert planning_resources.status_code==200,planning_resources.text
 
     # Phase 7: capture final outcome, L1-L4 and verify descriptive intelligence.
+    preview=client.post(
+        f"/api/v1/bids/{bid_id}/outcome/import-preview",
+        files={"file":("uat_result.csv",b"Rank,Bidder Name,Bid Value,Currency,Our Bid\n1,Competitor A,1000,INR,No\n2,Larsen & Toubro,1080,INR,Yes\n3,Competitor C,1120,INR,No\n4,Competitor D,1180,INR,No\n","text/csv")},
+        headers=admin,
+    )
+    assert preview.status_code==200,preview.text
+    preview_body=preview.json()
+    assert preview_body["requires_review"] is True
+    assert preview_body["outcome_candidate"]["our_rank"]==2
+    assert len(preview_body["prices"])==4
+
     outcome_payload={
         "result_status":"Lost",
         "result_date":"2026-12-20",
