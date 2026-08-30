@@ -33,6 +33,7 @@ from app.services.schedule_skeleton import build_schedule_skeleton
 from app.services.productivity_benchmarks import activity_key,benchmark_summary
 from app.services.clause_risk_intelligence import bid_clause_risk_summary,firm_risk_library,promote_finding_to_firm_pattern,review_clause_risk,scan_document_clause_risks
 from app.services.drawing_boq_verification import drawing_boq_summary,record_drawing_observations,review_drawing_boq_finding,verify_drawing_boq
+from app.services.drawing_quantity_extraction import drawing_vision_status,get_drawing_quantity_provider
 from app.services.tender_qa import tender_question_answer
 from app.services.schedule_ingestion import SCHEDULE_EXTENSIONS,ingest_schedule
 from app.services.documents import DOCUMENT_CATEGORIES,archive,classify,mark_revision,update_document_metadata,update_notes,upload_document
@@ -422,6 +423,30 @@ def promote_clause_risk_pattern(finding_id:int,payload:dict,request:Request,db:S
  require_project_access(db,user,finding.bid_project_id,Permission.REQUIREMENT_MANAGE)
  try:return promote_finding_to_firm_pattern(db,finding_id,payload,user.id)
  except ValueError as exc:raise HTTPException(422,str(exc)) from None
+
+@router.get("/bids/{bid_id}/drawing-vision-status")
+def get_drawing_vision_status(bid_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.REQUIREMENT_VIEW);get_bid(db,bid_id)
+ return drawing_vision_status()
+
+@router.post("/documents/{document_id}/extract-drawing-quantities")
+def extract_drawing_quantities(document_id:int,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ doc=get_doc(db,document_id);require_project_access(db,user,doc.bid_project_id,Permission.REQUIREMENT_MANAGE)
+ if not doc.storage_path:raise HTTPException(422,"Drawing content is not available")
+ provider=get_drawing_quantity_provider()
+ result=provider.extract(doc.file_extension,LocalSecureStorage(get_settings().storage_root).read(doc.storage_path))
+ if not provider.available:
+  return {"available":False,"provider":result.provider,"provider_version":result.provider_version,"candidates":0,"limitations":result.limitations}
+ observations=[{
+  "item_name":x.item_name,"quantity":x.quantity,"unit":x.unit,"source_page":x.source_page,
+  "drawing_reference":x.drawing_reference,"item_category":x.item_category,"evidence_text":x.evidence_text,
+  "evidence_region":x.evidence_region,"confidence":x.confidence,
+ } for x in result.candidates]
+ if not observations:
+  return {"available":True,"provider":result.provider,"provider_version":result.provider_version,"candidates":0,"limitations":result.limitations}
+ recorded=record_drawing_observations(db,doc.bid_project_id,doc.id,observations,user.id,f"{result.provider} {result.provider_version}",metadata(request))
+ verification=verify_drawing_boq(db,doc.bid_project_id,user.id,metadata(request))
+ return {"available":True,"provider":result.provider,"provider_version":result.provider_version,"candidates":len(observations),"recorded":recorded,"verification":verification,"limitations":result.limitations}
 
 @router.post("/documents/{document_id}/drawing-quantity-observations")
 def add_drawing_quantity_observations(document_id:int,payload:dict,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
