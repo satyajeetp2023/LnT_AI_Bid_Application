@@ -4,7 +4,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import AuditEvent,BidOutcome,BidProject,ExecutionOutcome
+from app.models import AuditEvent,BidOutcome,BidProject,ExecutionLearningFactor,ExecutionOutcome
 
 
 def _f(value):return float(value) if value is not None else None
@@ -132,6 +132,67 @@ def review_execution_outcome(db:Session,bid:BidProject,user_id:int,request_metad
  ))
  db.commit()
  return get_execution_outcome(db,bid.id)
+
+
+def _factor_record(factor:ExecutionLearningFactor):
+ return {
+  "id":factor.id,"bid_project_id":factor.bid_project_id,"execution_outcome_id":factor.execution_outcome_id,
+  "factor_category":factor.factor_category,"impact_area":factor.impact_area,"direction":factor.direction,
+  "title":factor.title,"description":factor.description,"quantified_impact":_f(factor.quantified_impact),
+  "impact_unit":factor.impact_unit,"source_reference":factor.source_reference,"source_excerpt":factor.source_excerpt,
+  "lesson_for_future_bids":factor.lesson_for_future_bids,"review_status":factor.review_status,
+  "reviewed_by":factor.reviewed_by,"reviewed_at":factor.reviewed_at.isoformat() if factor.reviewed_at else None,
+  "updated_at":factor.updated_at.isoformat() if factor.updated_at else None,
+ }
+
+
+def list_execution_factors(db:Session,bid_id:int):
+ _won_outcome(db,bid_id)
+ rows=db.scalars(select(ExecutionLearningFactor).where(ExecutionLearningFactor.bid_project_id==bid_id).order_by(ExecutionLearningFactor.id.desc())).all()
+ return {
+  "items":[_factor_record(x) for x in rows],
+  "summary":{"total":len(rows),"reviewed":sum(x.review_status=="Reviewed" for x in rows),"draft":sum(x.review_status=="Draft" for x in rows),"adverse":sum(x.direction=="Adverse" for x in rows),"favorable":sum(x.direction=="Favorable" for x in rows)},
+  "note":"Only reviewed, source-backed factors are reusable in portfolio learning.",
+  "version":"phase8-execution-factors-v1",
+ }
+
+
+def create_execution_factor(db:Session,bid:BidProject,payload,user_id:int,request_metadata:dict|None=None):
+ _won_outcome(db,bid.id)
+ execution=db.scalar(select(ExecutionOutcome).where(ExecutionOutcome.bid_project_id==bid.id))
+ if not execution:raise HTTPException(409,"Record execution actuals before adding execution learning factors")
+ factor=ExecutionLearningFactor(bid_project_id=bid.id,execution_outcome_id=execution.id,created_by=user_id,updated_by=user_id,**payload.model_dump())
+ try:
+  db.add(factor);db.flush()
+  db.add(AuditEvent(user_id=user_id,bid_project_id=bid.id,event_type="execution_learning.factor_created",entity_type="ExecutionLearningFactor",entity_id=str(factor.id),request_metadata=request_metadata or {},details={"category":factor.factor_category,"impact_area":factor.impact_area,"direction":factor.direction}))
+  db.commit()
+ except Exception:
+  db.rollback();raise
+ return _factor_record(factor)
+
+
+def update_execution_factor(db:Session,factor:ExecutionLearningFactor,payload,user_id:int,request_metadata:dict|None=None):
+ values=payload.model_dump()
+ if all(getattr(factor,key)==value for key,value in values.items()):return _factor_record(factor)
+ for key,value in values.items():setattr(factor,key,value)
+ factor.updated_by=user_id;factor.review_status="Draft";factor.reviewed_by=None;factor.reviewed_at=None
+ try:
+  db.add(AuditEvent(user_id=user_id,bid_project_id=factor.bid_project_id,event_type="execution_learning.factor_updated",entity_type="ExecutionLearningFactor",entity_id=str(factor.id),request_metadata=request_metadata or {},details={"category":factor.factor_category,"impact_area":factor.impact_area,"direction":factor.direction}))
+  db.commit()
+ except Exception:
+  db.rollback();raise
+ return _factor_record(factor)
+
+
+def review_execution_factor(db:Session,factor:ExecutionLearningFactor,user_id:int,request_metadata:dict|None=None):
+ missing=[]
+ if not (factor.source_reference or "").strip():missing.append("source reference")
+ if not (factor.lesson_for_future_bids or "").strip():missing.append("lesson for future bids")
+ if missing:raise HTTPException(409,"Execution learning factor cannot be reviewed until these fields are provided: "+", ".join(missing))
+ factor.review_status="Reviewed";factor.reviewed_by=user_id;factor.reviewed_at=datetime.now(timezone.utc);factor.updated_by=user_id
+ db.add(AuditEvent(user_id=user_id,bid_project_id=factor.bid_project_id,event_type="execution_learning.factor_reviewed",entity_type="ExecutionLearningFactor",entity_id=str(factor.id),request_metadata=request_metadata or {},details={"category":factor.factor_category,"impact_area":factor.impact_area,"direction":factor.direction}))
+ db.commit()
+ return _factor_record(factor)
 
 
 def execution_learning_intelligence(db:Session,bid_ids:list[int]):
