@@ -545,6 +545,24 @@ def _match(item:ScheduleScopeItem,index:list[dict]):
     return (best["entry"]["task"] if best else None),(best["score"] if best else 0.0),candidates
 
 
+def _boq_quantity_evidence(group:dict):
+    result=[]
+    for evidence in group.get("evidence",[]):
+        if evidence.get("source_type")!="BOQ":continue
+        text=str(evidence.get("why_expected") or "")
+        match=re.search(r"\|\s*Qty:\s*([0-9,]+(?:\.\d+)?)\s*([^|]*)",text,re.I)
+        if not match:continue
+        quantity=_number(match.group(1).replace(",",""))
+        if quantity is None:continue
+        unit=(match.group(2) or "").strip() or None
+        result.append({
+            "source_reference":evidence.get("source_reference"),
+            "quantity":quantity,
+            "unit":unit,
+        })
+    return result
+
+
 def _schedule_precision_recommendations(groups:list[dict],tasks:list[dict]):
     task_by_code={str(x.get("task_code") or ""):x for x in tasks if x.get("task_code")}
     group_by_member={}
@@ -567,6 +585,20 @@ def _schedule_precision_recommendations(groups:list[dict],tasks:list[dict]):
             _number(task.get("target_drtn_hr_cnt")),
             _number(task.get("remain_drtn_hr_cnt")),
         )
+        boq_evidence=[]
+        for group in matched_groups:
+            boq_evidence.extend(_boq_quantity_evidence(group))
+        duration_days=(duration/8.0) if duration>0 else None
+        productivity_indicators=[]
+        if duration_days:
+            for evidence in boq_evidence:
+                productivity_indicators.append({
+                    **evidence,
+                    "duration_working_days":round(duration_days,2),
+                    "implied_rate_per_working_day":round(evidence["quantity"]/duration_days,4),
+                    "interpretation":"Calculated from BOQ quantity and scheduled duration only; no benchmark judgement applied.",
+                })
+
         reasons=[];score=0
         if len(expected_names)>=3:
             reasons.append(f"One schedule activity is matching {len(expected_names)} logical scope items.")
@@ -576,6 +608,12 @@ def _schedule_precision_recommendations(groups:list[dict],tasks:list[dict]):
             score+=20
         if duration>160 and len(expected_names)>=2:
             reasons.append(f"Activity duration is {duration:.0f} hours while covering multiple scope components.")
+            score+=15
+        if duration>160 and boq_evidence:
+            reasons.append("A quantity-bearing BOQ scope item is represented by one long-duration schedule activity.")
+            score+=15
+        if len(boq_evidence)>=2:
+            reasons.append(f"{len(boq_evidence)} BOQ quantity items map to the same schedule activity.")
             score+=15
 
         missing_children=[]
@@ -597,12 +635,13 @@ def _schedule_precision_recommendations(groups:list[dict],tasks:list[dict]):
             "duration_hours":duration,
             "expected_components":expected_names,
             "uncovered_child_components":names,
+            "boq_productivity_indicators":productivity_indicators,
             "precision_score":min(100,score),
             "priority":"High" if score>=55 else "Medium" if score>=35 else "Low",
             "reasons":reasons,
             "recommendation":(
-                "Review whether this activity should be split into the expected controllable sub-activities. "
-                "Keep it grouped only when the grouping is intentional, measurable and contractually acceptable."
+                "Review whether this activity should be split into expected controllable sub-activities or measurable work fronts. "
+                "For quantity-bearing BOQ scope, use the implied rate as a planning indicator and validate it against approved productivity assumptions before changing duration."
             ),
             "guardrail":"Do not split automatically. Rebuild logic and recalculate the programme in Primavera before accepting any refinement.",
         })
@@ -612,7 +651,7 @@ def _schedule_precision_recommendations(groups:list[dict],tasks:list[dict]):
         "candidate_count":len(recommendations),
         "high_priority":sum(1 for x in recommendations if x["priority"]=="High"),
         "medium_priority":sum(1 for x in recommendations if x["priority"]=="Medium"),
-        "methodology":"phase6-scope-driven-schedule-precision-v1",
+        "methodology":"phase6-scope-driven-schedule-precision-v2",
         "note":"These recommendations use expected contract/BOQ/project scope to identify activities that may be too aggregated for precise control.",
     }
 
