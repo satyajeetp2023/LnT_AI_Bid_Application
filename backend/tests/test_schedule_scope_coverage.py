@@ -67,3 +67,11 @@ def test_distinct_boq_references_do_not_consolidate():
     ]
     groups=_consolidate_rows(rows)
     assert len(groups)==2
+
+
+def test_scope_catalog_has_no_unbound_reverse_coverage_state():
+    # The independent scope catalog has no uploaded schedule context, so reverse
+    # coverage must remain zero rather than referencing evaluation-only state.
+    source=__import__("inspect").getsource(schedule_scope_catalog)
+    assert "len(unmapped)" not in source
+    assert '"unmapped_schedule_activities":0' in source
