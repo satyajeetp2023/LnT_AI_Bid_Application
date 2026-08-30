@@ -17,8 +17,9 @@ describe("GAP-002 API request timeout and cancellation",()=>{
   })));
   const {request}=await import("./api");
   const pending=request("/slow",{timeoutMs:25,retries:0});
+  const rejection=expect(pending).rejects.toThrow("did not respond within 1 seconds");
   await vi.advanceTimersByTimeAsync(25);
-  await expect(pending).rejects.toThrow("did not respond within 1 seconds");
+  await rejection;
  });
 
  test("honours caller cancellation without reporting a timeout",async()=>{
@@ -29,8 +30,9 @@ describe("GAP-002 API request timeout and cancellation",()=>{
   const {request}=await import("./api");
   const controller=new AbortController();
   const pending=request("/cancel",{signal:controller.signal,timeoutMs:5000,retries:0});
+  const rejection=expect(pending).rejects.toMatchObject({name:"AbortError"});
   controller.abort();
-  await expect(pending).rejects.toMatchObject({name:"AbortError"});
+  await rejection;
  });
 
  test("clears the timeout after a successful response",async()=>{
