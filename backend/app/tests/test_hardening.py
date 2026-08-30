@@ -479,3 +479,41 @@ def test_phase9_decision_analytics_is_viewable_by_read_only_member(client,bid_pa
     response=client.get(f"/api/v1/bids/{bid['id']}/decision-analytics",headers={"X-User-ID":"2"})
     assert response.status_code==200
     assert response.json()["note"].startswith("This module organizes evidence")
+
+
+def test_phase9_decision_snapshots_are_deduplicated_and_change_sensitive(client,bid_payload):
+    bid=client.post("/api/v1/bids",json={**bid_payload,"bid_id":"DECISION-SNAP","tender_reference_no":"DECISION-SNAP"}).json()
+    first=client.post(f"/api/v1/bids/{bid['id']}/decision-snapshots")
+    assert first.status_code==201,first.text
+    first_body=first.json()
+    same=client.post(f"/api/v1/bids/{bid['id']}/decision-snapshots")
+    assert same.status_code==201,same.text
+    assert same.json()["id"]==first_body["id"]
+    assert same.json()["checksum"]==first_body["checksum"]
+
+    requirement=client.post(
+        f"/api/v1/bids/{bid['id']}/requirements",
+        json={
+            "requirement_category":"Commercial",
+            "requirement_title":"New mandatory condition",
+            "requirement_text":"A newly recorded mandatory condition.",
+            "priority":"Critical","requirement_status":"Open","is_mandatory":True,
+            "compliance_status":"Non-Compliant","review_status":"Reviewed",
+        },
+    )
+    assert requirement.status_code==201
+    changed=client.post(f"/api/v1/bids/{bid['id']}/decision-snapshots")
+    assert changed.status_code==201,changed.text
+    assert changed.json()["id"]!=first_body["id"]
+    assert changed.json()["checksum"]!=first_body["checksum"]
+    listing=client.get(f"/api/v1/bids/{bid['id']}/decision-snapshots")
+    assert listing.status_code==200
+    assert listing.json()["total"]==2
+
+
+def test_phase9_read_only_member_cannot_freeze_decision_snapshot(client,bid_payload):
+    bid=client.post("/api/v1/bids",json={**bid_payload,"bid_id":"DECISION-SNAP-RBAC","tender_reference_no":"DECISION-SNAP-RBAC"}).json()
+    assert client.post(f"/api/v1/bids/{bid['id']}/members",json={"user_id":2,"role":"Read Only"}).status_code==200
+    headers={"X-User-ID":"2"}
+    assert client.get(f"/api/v1/bids/{bid['id']}/decision-snapshots",headers=headers).status_code==200
+    assert client.post(f"/api/v1/bids/{bid['id']}/decision-snapshots",headers=headers).status_code==403
