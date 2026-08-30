@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import {usePathname} from "next/navigation";
-import {BarChart3,FileCheck2,FileQuestion,FileSearch,Files,FolderKanban,History,LayoutDashboard,LockKeyhole,PlusSquare,Settings,ShieldCheck,TriangleAlert} from "lucide-react";
+import {BarChart3,FileCheck2,FileQuestion,FileSearch,Files,FolderKanban,History,LayoutDashboard,LockKeyhole,PlusSquare,Settings,ShieldCheck,Sparkles,TriangleAlert} from "lucide-react";
 
 const management=[{n:"Dashboard",h:"/",i:LayoutDashboard},{n:"My Bids",h:"/bids",i:FolderKanban},{n:"Create New Bid",h:"/bids/new",i:PlusSquare}];
 
@@ -18,6 +18,7 @@ export function Sidebar({mobileOpen=false,onClose}:{mobileOpen?:boolean;onClose?
   {n:"Work Queue",h:bidId?`/bids/${bidId}/work-queue`:undefined,i:FileCheck2},
   {n:"Bid Preparation",h:bidId?`/bids/${bidId}/bid-preparation`:undefined,i:FileCheck2},
   {n:"Schedules",h:bidId?`/bids/${bidId}/schedules`:undefined,i:FileCheck2},
+  {n:"Bid Intelligence Copilot",h:bidId?`/bids/${bidId}/copilot`:undefined,i:Sparkles},
   {n:"Submission",h:bidId?`/bids/${bidId}/submission`:undefined,i:FileCheck2},
   {n:"Review & Approval",h:bidId?`/bids/${bidId}/review-approval`:undefined,i:ShieldCheck},
  ];
