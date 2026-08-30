@@ -12,6 +12,7 @@ def audit(db,user_id,project_id,event,doc,metadata=None,details=None): db.add(Au
 def upload_document(db:Session,project_id:int,filename:str,content_type:str|None,content:bytes,user_id:int):
  cfg=get_settings(); safe=Path(filename).name; ext=Path(safe).suffix.lower().lstrip(".")
  if not safe or ext not in cfg.allowed_extensions: raise HTTPException(415,f"Unsupported file type: .{ext or 'none'}")
+ if content.startswith(b"MZ") or content.startswith(b"\x7fELF"): raise HTTPException(415,"Executable content is not permitted in tender document uploads")
  if len(content)>cfg.max_file_size_mb*1024*1024: raise HTTPException(413,"File exceeds configured size limit")
  checksum=hashlib.sha256(content).hexdigest(); duplicate=db.scalar(select(BidDocument).where(BidDocument.bid_project_id==project_id,BidDocument.checksum==checksum,BidDocument.document_status!="Archived"))
  doc=BidDocument(bid_project_id=project_id,original_filename=safe,file_extension=ext,mime_type=content_type or mimetypes.guess_type(safe)[0] or "application/octet-stream",file_size=len(content),checksum=checksum,uploaded_by=user_id,document_status="Duplicate" if duplicate else "Needs Review",classification_status="pending",is_latest_version=True,duplicate_of_document_id=duplicate.id if duplicate else None,information_tags=[])
