@@ -447,3 +447,35 @@ def test_phase8_read_only_member_cannot_create_or_review_learning_factor(client,
         headers=headers,
     )
     assert denied.status_code==403
+
+
+def test_phase9_noncompliant_requirement_forces_blocked_decision_posture(client,bid_payload):
+    bid=client.post("/api/v1/bids",json={**bid_payload,"bid_id":"DECISION-BLOCK","tender_reference_no":"DECISION-BLOCK"}).json()
+    requirement=client.post(
+        f"/api/v1/bids/{bid['id']}/requirements",
+        json={
+            "requirement_category":"Commercial",
+            "requirement_title":"Mandatory commercial condition",
+            "requirement_text":"Bidder shall comply with mandatory commercial condition.",
+            "priority":"Critical","requirement_status":"Open","is_mandatory":True,
+            "compliance_status":"Non-Compliant","review_status":"Reviewed",
+        },
+    )
+    assert requirement.status_code==201,requirement.text
+    analytics=client.get(f"/api/v1/bids/{bid['id']}/decision-analytics")
+    assert analytics.status_code==200,analytics.text
+    body=analytics.json()
+    assert body["decision_posture"]=="Blocked"
+    assert body["readiness_score"]<100
+    assert any("Non-Compliant" in x for x in body["hard_blockers"])
+    compliance=next(x for x in body["dimensions"] if x["name"]=="Compliance Readiness")
+    assert any(x["code"]=="NON_COMPLIANT_REQUIREMENTS" for x in compliance["penalties"])
+    assert body["methodology"]["type"].startswith("Deterministic")
+
+
+def test_phase9_decision_analytics_is_viewable_by_read_only_member(client,bid_payload):
+    bid=client.post("/api/v1/bids",json={**bid_payload,"bid_id":"DECISION-RBAC","tender_reference_no":"DECISION-RBAC"}).json()
+    assert client.post(f"/api/v1/bids/{bid['id']}/members",json={"user_id":2,"role":"Read Only"}).status_code==200
+    response=client.get(f"/api/v1/bids/{bid['id']}/decision-analytics",headers={"X-User-ID":"2"})
+    assert response.status_code==200
+    assert response.json()["note"].startswith("This module organizes evidence")
