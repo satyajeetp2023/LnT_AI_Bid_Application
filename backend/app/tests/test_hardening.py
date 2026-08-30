@@ -44,3 +44,13 @@ def test_sensitive_api_requires_explicit_identity_header():
     response=anonymous.get("/api/v1/auth/me")
     assert response.status_code==422
     assert "X-User-ID" in response.text
+
+
+def test_known_file_signature_mismatch_is_rejected(client,bid_payload):
+    bid=client.post("/api/v1/bids",json=bid_payload).json()
+    response=client.post(
+        f"/api/v1/bids/{bid['id']}/documents",
+        files=[("files",("misnamed.png",b"%PDF-1.7 fake pdf body","image/png"))],
+    )
+    assert response.status_code==415
+    assert "does not match" in response.text
