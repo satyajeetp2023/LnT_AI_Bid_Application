@@ -82,9 +82,51 @@ def get_bid_outcome(db:Session,bid_id:int):
  return outcome_dict(outcome,prices)
 
 
+def _normalized_payload(payload):
+ outcome=payload.model_dump(mode="json",exclude={"prices"})
+ rows=[{
+  "bidder_name":" ".join(x.bidder_name.split()),
+  "rank":x.rank,
+  "bid_value":str(x.bid_value.normalize()) if x.bid_value is not None else None,
+  "currency":x.currency.upper(),
+  "is_ours":x.is_ours,
+  "source_reference":x.source_reference,
+ } for x in payload.prices]
+ rows.sort(key=lambda x:x["rank"])
+ return outcome,rows
+
+
+def _normalized_persisted(outcome:BidOutcome,prices:list[BidPriceRecord]):
+ data={
+  "result_status":outcome.result_status,
+  "result_date":outcome.result_date.isoformat() if outcome.result_date else None,
+  "our_rank":outcome.our_rank,
+  "our_bid_value":str(outcome.our_bid_value.normalize()) if outcome.our_bid_value is not None else None,
+  "our_margin_percent":str(outcome.our_margin_percent.normalize()) if outcome.our_margin_percent is not None else None,
+  "awarded_bidder":outcome.awarded_bidder,
+  "win_reason":outcome.win_reason,
+  "loss_reason":outcome.loss_reason,
+  "source_reference":outcome.source_reference,
+  "notes":outcome.notes,
+ }
+ rows=[{
+  "bidder_name":" ".join(x.bidder_name.split()),
+  "rank":x.rank,
+  "bid_value":str(x.bid_value.normalize()),
+  "currency":x.currency.upper(),
+  "is_ours":x.is_ours,
+  "source_reference":x.source_reference,
+ } for x in prices]
+ rows.sort(key=lambda x:x["rank"])
+ return data,rows
+
+
 def upsert_bid_outcome(db:Session,bid:BidProject,payload,user_id:int,request_metadata:dict|None=None):
  try:
   outcome=db.scalar(select(BidOutcome).where(BidOutcome.bid_project_id==bid.id))
+  existing_prices=db.scalars(select(BidPriceRecord).where(BidPriceRecord.bid_project_id==bid.id).order_by(BidPriceRecord.rank)).all()
+  if outcome is not None and _normalized_payload(payload)==_normalized_persisted(outcome,existing_prices):
+   return outcome_dict(outcome,existing_prices)
   values=payload.model_dump(exclude={"prices"})
   if outcome is None:
    outcome=BidOutcome(bid_project_id=bid.id,created_by=user_id,updated_by=user_id,**values)
