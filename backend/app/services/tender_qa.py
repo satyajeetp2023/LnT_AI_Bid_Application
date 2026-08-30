@@ -54,6 +54,37 @@ def _score(question:str,text:str,source_kind:str):
  return min(.99,.58*overlap+.22*coverage+phrase_bonus+numeric_bonus+source_bonus)
 
 
+def _numeric_facts(text:str):
+ facts=[]
+ pattern=re.compile(r"(?P<value>\d+(?:\.\d+)?)\s*(?P<unit>%|percent|days?|months?|years?|crore|cr\b|lakh|inr|rs\.?|₹)",re.I)
+ for match in pattern.finditer(str(text or "")):
+  unit=match.group("unit").lower().replace("percent","%")
+  unit="crore" if unit=="cr" else unit
+  facts.append({"value":float(match.group("value")),"unit":unit,"display":match.group(0).strip()})
+ return facts
+
+
+def _conflicts(question:str,ranked:list):
+ if not _numeric_question(question):return []
+ candidates=[]
+ for evidence in ranked:
+  if evidence.score<.30:continue
+  for fact in _numeric_facts(evidence.text):
+   candidates.append({
+    **fact,"document_id":evidence.document_id,"document_name":evidence.document_name,
+    "page":evidence.page,"clause":evidence.clause,"score":evidence.score,
+   })
+ groups={}
+ for item in candidates:
+  groups.setdefault(item["unit"],[]).append(item)
+ conflicts=[]
+ for unit,items in groups.items():
+  values=sorted({round(x["value"],6) for x in items})
+  if len(values)<=1:continue
+  conflicts.append({"unit":unit,"values":items})
+ return conflicts
+
+
 def _best_sentence(question:str,text:str):
  candidates=_sentences(text)
  if not candidates:return text[:1200]
@@ -116,22 +147,44 @@ def tender_question_answer(
  ranked=sorted(unique.values(),key=lambda x:x.score,reverse=True)[:max(1,min(top_k,10))]
  top=ranked[0] if ranked else None
  reliable=bool(top and top.score>=.34)
- if reliable:
-  answer=_best_sentence(question,top.text)
+ conflicts=_conflicts(question,ranked)
+ if conflicts:
+  values=[]
+  for conflict in conflicts:
+   values.extend(x["display"] for x in conflict["values"])
+  answer="Conflicting tender values were found: "+", ".join(dict.fromkeys(values))+". Review the cited sources before relying on one value."
+  confidence="Conflict"
+  grounded=True
+  answer_mode="conflict"
+ elif reliable:
+  distinct=[]
+  seen=set()
+  for item in ranked:
+   key=(item.document_id,item.page,item.clause)
+   if item.score<.30 or key in seen:continue
+   seen.add(key);distinct.append(_best_sentence(question,item.text))
+   if len(distinct)>=2:break
+  answer=" ".join(distinct) if distinct else _best_sentence(question,top.text)
   confidence="High" if top.score>=.70 else "Medium" if top.score>=.50 else "Low"
+  grounded=True
+  answer_mode="grounded_extract"
  else:
   answer="I could not find a sufficiently reliable answer in the currently indexed tender evidence."
   confidence="Not Found"
+  grounded=False
+  answer_mode="not_found"
 
  return {
   "question":question,
   "answer":answer,
   "confidence":confidence,
-  "grounded":reliable,
+  "grounded":grounded,
+  "answer_mode":answer_mode,
+  "conflicts":conflicts,
   "evidence":[{
    "document_id":x.document_id,"document_name":x.document_name,"page":x.page,"clause":x.clause,"section":x.section,
    "excerpt":x.text,"score":round(x.score,3),"source_kind":x.source_kind,
   } for x in ranked],
-  "retrieval_version":"tender-qa-extractive-v1",
-  "note":"The answer is limited to bid-scoped source evidence. If evidence is weak or absent, the system returns Not Found rather than inferring an answer.",
+  "retrieval_version":"tender-qa-extractive-v2",
+  "note":"The answer is limited to bid-scoped source evidence. Weak evidence returns Not Found, and materially conflicting numeric values are surfaced rather than silently resolved.",
  }
