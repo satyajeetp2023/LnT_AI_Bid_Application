@@ -121,3 +121,17 @@ def test_result_import_preview_is_audited_without_saving_outcome(client,bid_payl
     assert event["details"]["filename"]=="result.csv"
     assert len(event["details"]["sha256"])==64
     assert event["details"]["price_rows"]==2
+
+
+def test_batch_preflight_prevents_partial_persistence(client,bid_payload):
+    bid=client.post("/api/v1/bids",json={**bid_payload,"bid_id":"BID-BATCH","tender_reference_no":"T-BATCH"}).json()
+    response=client.post(
+        f"/api/v1/bids/{bid['id']}/documents",
+        files=[
+            ("files",("good.txt",b"valid tender text","text/plain")),
+            ("files",("bad.png",b"%PDF-1.7 mismatched content","image/png")),
+        ],
+    )
+    assert response.status_code==415
+    docs=client.get(f"/api/v1/bids/{bid['id']}/documents").json()
+    assert docs["total"]==0
