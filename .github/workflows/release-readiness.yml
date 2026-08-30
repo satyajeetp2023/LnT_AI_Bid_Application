@@ -286,32 +286,44 @@ jobs:
           docker rm -f railway-bid-frontend-smoke >/dev/null
           trap - EXIT
 
-      - name: Runtime smoke backend container
-        env:
-          PGPASSWORD: release-test-password
+      - name: Full stack Docker Compose runtime smoke
         run: |
-          docker run -d --name railway-bid-backend-smoke --network host \
-            -e ENVIRONMENT=development \
-            -e DATABASE_URL=postgresql+psycopg://railway:release-test-password@localhost:5432/railway_bid \
-            -e STORAGE_ROOT=/tmp/release-smoke-storage \
-            railway-bid-backend:release-test
-          for i in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8000/api/v1/health/ready >/tmp/backend-ready.json; then break; fi
+          cat > .env <<'EOF'
+          ENVIRONMENT=production
+          SECRET_KEY=0123456789abcdef0123456789abcdef
+          POSTGRES_DB=railway_bid
+          POSTGRES_USER=railway
+          POSTGRES_PASSWORD=compose-release-password
+          STORAGE_ROOT=/data/documents
+          CORS_ORIGINS=https://bid-intelligence.example.internal
+          AUTH_MODE=oidc
+          OIDC_ISSUER=https://identity.example.internal/
+          OIDC_AUDIENCE=railway-bid-intelligence
+          OIDC_JWKS_URL=https://identity.example.internal/.well-known/jwks.json
+          NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
+          NEXT_PUBLIC_AUTH_MODE=oidc
+          NEXT_PUBLIC_OIDC_AUTHORITY=https://identity.example.internal
+          NEXT_PUBLIC_OIDC_CLIENT_ID=railway-bid-intelligence-spa
+          NEXT_PUBLIC_OIDC_REDIRECT_URI=https://bid-intelligence.example.internal/auth/callback
+          NEXT_PUBLIC_OIDC_SCOPE=openid profile email
+          EOF
+          docker compose config >/tmp/compose.rendered.yml
+          docker compose up -d --build
+          trap 'docker compose down -v >/dev/null 2>&1 || true; rm -f .env' EXIT
+          for i in {1..60}; do
+            BACKEND_OK=0
+            FRONTEND_OK=0
+            curl -fsS http://127.0.0.1:8000/api/v1/health/ready >/tmp/compose-backend.json 2>/dev/null && BACKEND_OK=1 || true
+            curl -fsS http://127.0.0.1:3000 >/tmp/compose-frontend.html 2>/dev/null && FRONTEND_OK=1 || true
+            if [ "$BACKEND_OK" = "1" ] && [ "$FRONTEND_OK" = "1" ]; then
+              break
+            fi
             sleep 2
           done
-          cat /tmp/backend-ready.json
-          grep -q '"status":"ready"' /tmp/backend-ready.json
-          docker rm -f railway-bid-backend-smoke
-
-      - name: Runtime smoke frontend container
-        run: |
-          docker run -d --name railway-bid-frontend-smoke --network host railway-bid-frontend:release-test
-          for i in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:3000/ >/tmp/frontend-home.html; then break; fi
-            sleep 2
-          done
-          test -s /tmp/frontend-home.html
-          docker rm -f railway-bid-frontend-smoke
-
-      - name: Validate compose model
-        run: docker compose config >/tmp/compose.rendered.yml
+          grep -q '"status":"ready"' /tmp/compose-backend.json
+          test -s /tmp/compose-frontend.html
+          docker compose ps
+          docker compose down -v
+          rm -f .env
+          trap - EXIT
+          echo "full stack Docker Compose runtime smoke passed"
