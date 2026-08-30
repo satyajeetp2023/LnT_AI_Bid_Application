@@ -12,6 +12,7 @@ HEADER_SYNONYMS={
     "quantity":("quantity","qty","boq qty","estimated quantity"),
     "rate":("rate","unit rate","price"),
     "amount":("amount","total amount","value"),
+    "work_front":("work front","workfront","location","section","zone","chainage","site","area"),
 }
 
 
@@ -60,6 +61,7 @@ def _rows_from_matrix(matrix:list[list],sheet_name:str):
         quantity=values[mapping["quantity"]] if "quantity" in mapping and mapping["quantity"]<len(values) else None
         rate=values[mapping["rate"]] if "rate" in mapping and mapping["rate"]<len(values) else None
         amount=values[mapping["amount"]] if "amount" in mapping and mapping["amount"]<len(values) else None
+        work_front=str(values[mapping["work_front"]] if "work_front" in mapping and mapping["work_front"]<len(values) else "").strip() or None
         # Avoid obvious subtotal/header rows without quantity/unit when possible.
         lower=description.lower()
         if lower in {"total","sub total","subtotal","grand total"}:continue
@@ -70,6 +72,7 @@ def _rows_from_matrix(matrix:list[list],sheet_name:str):
             "quantity":quantity,
             "rate":rate,
             "amount":amount,
+            "work_front":work_front,
             "source_sheet":sheet_name,
         })
     return rows,{"sheet":sheet_name,"header_row":header_row+1,"columns":mapping}
