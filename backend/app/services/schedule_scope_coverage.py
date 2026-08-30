@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.models import AuditEvent,BidProject,BidRequirement,ScheduleScopeItem
 from app.services.project_type_activity_library import project_type_activity_library
+from app.services.productivity_benchmarks import benchmark_summary,compare_implied_rate
 from app.services.p6_xer import parse_xer
 
 
@@ -557,13 +558,14 @@ def _boq_quantity_evidence(group:dict):
         unit=(match.group(2) or "").strip() or None
         result.append({
             "source_reference":evidence.get("source_reference"),
+            "activity_name":group.get("activity_name"),
             "quantity":quantity,
             "unit":unit,
         })
     return result
 
 
-def _schedule_precision_recommendations(groups:list[dict],tasks:list[dict]):
+def _schedule_precision_recommendations(db:Session,bid_id:int,groups:list[dict],tasks:list[dict]):
     task_by_code={str(x.get("task_code") or ""):x for x in tasks if x.get("task_code")}
     group_by_member={}
     for group in groups:
@@ -592,11 +594,26 @@ def _schedule_precision_recommendations(groups:list[dict],tasks:list[dict]):
         productivity_indicators=[]
         if duration_days:
             for evidence in boq_evidence:
+                implied_rate=round(evidence["quantity"]/duration_days,4)
+                project=db.get(BidProject,bid_id)
+                benchmark=benchmark_summary(
+                    db,
+                    evidence.get("activity_name") or task.get("task_name") or "",
+                    evidence.get("unit") or "unit",
+                    project.project_type if project else None,
+                    None,
+                )
+                comparison=compare_implied_rate(implied_rate,benchmark)
                 productivity_indicators.append({
                     **evidence,
                     "duration_working_days":round(duration_days,2),
-                    "implied_rate_per_working_day":round(evidence["quantity"]/duration_days,4),
-                    "interpretation":"Calculated from BOQ quantity and scheduled duration only; no benchmark judgement applied.",
+                    "implied_rate_per_working_day":implied_rate,
+                    "benchmark":benchmark,
+                    "benchmark_comparison":comparison,
+                    "interpretation":(
+                        "Calculated from BOQ quantity and scheduled duration. "
+                        + ("Compared with confirmed company observations." if benchmark.get("available") else "No company benchmark exists yet, so no judgement is applied.")
+                    ),
                 })
 
         reasons=[];score=0
@@ -651,7 +668,7 @@ def _schedule_precision_recommendations(groups:list[dict],tasks:list[dict]):
         "candidate_count":len(recommendations),
         "high_priority":sum(1 for x in recommendations if x["priority"]=="High"),
         "medium_priority":sum(1 for x in recommendations if x["priority"]=="Medium"),
-        "methodology":"phase6-scope-driven-schedule-precision-v2",
+        "methodology":"phase6-scope-driven-schedule-precision-v3",
         "note":"These recommendations use expected contract/BOQ/project scope to identify activities that may be too aggregated for precise control.",
     }
 
@@ -712,7 +729,7 @@ def evaluate_scope_coverage_from_tables(db:Session,bid_id:int,tables:dict[str,li
     def coverage_pct(group_rows):
         if not group_rows:return None
         return round(sum(1 for x in group_rows if x.get("group_coverage_status")=="Covered")*100/len(group_rows),1)
-    precision_advisor=_schedule_precision_recommendations(groups,tasks)
+    precision_advisor=_schedule_precision_recommendations(db,bid_id,groups,tasks)
     matched_codes={str(x.get("matched_task_code") or "") for x in groups if x.get("matched_task_code") and x.get("group_coverage_status") in {"Covered","Possible Match"}}
     search_by_code={str(x["task"].get("task_code") or ""):x for x in search_index if x["task"].get("task_code")}
     unmapped=[]
