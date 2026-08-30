@@ -31,3 +31,15 @@ def test_non_boq_excel_template_is_not_detected():
     result=extract_boq_rows("xlsx",stream.getvalue())
     assert result["detected"] is False
     assert result["rows"]==[]
+
+
+def test_boq_work_front_column_is_preserved():
+    wb=Workbook()
+    ws=wb.active
+    ws.title="BOQ"
+    ws.append(["Item No","Description of Work","Section","Unit","Qty"])
+    ws.append(["10","OHE mast erection","Section A","No.",50])
+    stream=io.BytesIO();wb.save(stream)
+    result=extract_boq_rows("xlsx",stream.getvalue())
+    assert result["detected"] is True
+    assert result["rows"][0]["work_front"]=="Section A"
