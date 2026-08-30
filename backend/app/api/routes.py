@@ -32,6 +32,7 @@ from app.services.boq_document_extraction import extract_boq_rows
 from app.services.schedule_skeleton import build_schedule_skeleton
 from app.services.productivity_benchmarks import activity_key,benchmark_summary
 from app.services.planning_package_ingestion import ingest_planning_resource_document,planning_resource_summary
+from app.services.planning_package_reconciliation import reconcile_planning_package
 from app.services.clause_risk_intelligence import bid_clause_risk_summary,firm_risk_library,promote_finding_to_firm_pattern,review_clause_risk,scan_document_clause_risks
 from app.services.contract_clause_variation import contract_clause_variations
 from app.services.drawing_boq_verification import drawing_boq_summary,record_drawing_observations,review_drawing_boq_finding,verify_drawing_boq
@@ -202,6 +203,19 @@ def prepared_artifact_ready(artifact_id:int,request:Request,db:Session=Depends(g
 def approve_prepared_artifact(artifact_id:int,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
  item=get_prepared_artifact(db,artifact_id);require_project_access(db,user,item.bid_project_id,Permission.PREPARED_ARTIFACT_APPROVE)
  return artifact_dict(approve_artifact(db,item,user.id,metadata(request)))
+
+@router.get("/documents/{document_id}/planning-package-analysis")
+def planning_package_analysis(document_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ doc=get_doc(db,document_id);require_project_access(db,user,doc.bid_project_id,Permission.REQUIREMENT_VIEW)
+ if not doc.storage_path or doc.file_extension.lower() not in SCHEDULE_EXTENSIONS:
+  raise HTTPException(422,"Supported schedule content is required")
+ ingestion=ingest_schedule(doc.file_extension,LocalSecureStorage(get_settings().storage_root).read(doc.storage_path))
+ if not ingestion["detected"]:
+  raise HTTPException(422,"No reliable structured schedule activity table could be extracted")
+ result=reconcile_planning_package(db,doc.bid_project_id,ingestion["tables"],ingestion["capabilities"])
+ result["schedule_document_id"]=doc.id
+ result["schedule_source"]={"source_kind":ingestion["source_kind"],"fidelity":ingestion["fidelity"],"capabilities":ingestion["capabilities"]}
+ return result
 
 @router.get("/documents/{document_id}/schedule-analysis")
 def schedule_analysis(document_id:int,request:Request,long_duration_hours:float=Query(160,gt=0,le=10000),near_critical_hours:float=Query(40,ge=0,le=10000),db:Session=Depends(get_db),user:User=Depends(user_dep)):
