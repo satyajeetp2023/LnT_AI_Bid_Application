@@ -46,7 +46,7 @@ def historical_comparison(db:Session,current:BidProject,visible_bid_ids:list[int
   matches.append({
    "bid_project_id":project.id,"bid_id":project.bid_id,"tender_name":project.tender_name,
    "client":project.client,"project_type":project.project_type,"contract_type":project.contract_type,
-   "location":project.location,"result_status":outcome.result_status,"our_rank":outcome.our_rank,
+   "location":project.location,"result_status":outcome.result_status,"result_date":outcome.result_date.isoformat() if outcome.result_date else None,"source_reference":outcome.source_reference,"our_rank":outcome.our_rank,
    "our_margin_percent":float(outcome.our_margin_percent) if outcome.our_margin_percent is not None else None,
    "our_gap_to_l1_percent":psummary["our_gap_to_l1_percent"],
    "similarity_score":score,"matched_fields":fields,
