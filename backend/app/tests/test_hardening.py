@@ -1,3 +1,4 @@
+import pytest
 import io
 import zipfile
 from fastapi.testclient import TestClient
@@ -135,3 +136,59 @@ def test_batch_preflight_prevents_partial_persistence(client,bid_payload):
     assert response.status_code==415
     docs=client.get(f"/api/v1/bids/{bid['id']}/documents").json()
     assert docs["total"]==0
+
+
+def test_historical_intelligence_filters_are_server_side(client,bid_payload):
+    a=client.post("/api/v1/bids",json={**bid_payload,"bid_id":"HIST-A","tender_reference_no":"H-A","client":"DFCCIL","project_type":"OHE"}).json()
+    b=client.post("/api/v1/bids",json={**bid_payload,"bid_id":"HIST-B","tender_reference_no":"H-B","client":"DMRC","project_type":"Metro"}).json()
+    for bid,competitor in [(a,"Rail Competitor"),(b,"Metro Competitor")]:
+        response=client.put(
+            f"/api/v1/bids/{bid['id']}/outcome",
+            json={
+                "result_status":"Lost","our_rank":2,"our_bid_value":110,
+                "prices":[
+                    {"bidder_name":competitor,"rank":1,"bid_value":100,"currency":"INR","is_ours":False},
+                    {"bidder_name":"L&T","rank":2,"bid_value":110,"currency":"INR","is_ours":True},
+                ],
+            },
+        )
+        assert response.status_code==200
+    filtered=client.get("/api/v1/historical-bids/intelligence",params={"client":"DFCCIL"})
+    assert filtered.status_code==200
+    body=filtered.json()
+    assert body["summary"]["completed"]==1
+    assert body["applied_filters"]["client"]=="DFCCIL"
+    names={x["name"] for x in body["competitors"]}
+    assert "Rail Competitor" in names
+    assert "Metro Competitor" not in names
+
+
+def test_failed_historical_result_save_rolls_back_previous_state(client,bid_payload,monkeypatch):
+    bid=client.post("/api/v1/bids",json={**bid_payload,"bid_id":"ROLLBACK-HIST","tender_reference_no":"ROLLBACK-HIST"}).json()
+    original={
+        "result_status":"Lost","our_rank":2,"our_bid_value":108,
+        "prices":[
+            {"bidder_name":"Competitor A","rank":1,"bid_value":100,"currency":"INR","is_ours":False},
+            {"bidder_name":"L&T","rank":2,"bid_value":108,"currency":"INR","is_ours":True},
+        ],
+    }
+    assert client.put(f"/api/v1/bids/{bid['id']}/outcome",json=original).status_code==200
+
+    class BrokenPriceRecord:
+        def __init__(self,*args,**kwargs):
+            raise RuntimeError("controlled persistence failure")
+
+    monkeypatch.setattr("app.services.historical_bid_intelligence.BidPriceRecord",BrokenPriceRecord)
+    with pytest.raises(RuntimeError,match="controlled persistence failure"):
+        client.put(
+            f"/api/v1/bids/{bid['id']}/outcome",
+            json={
+                "result_status":"Won","our_rank":1,"our_bid_value":95,
+                "prices":[{"bidder_name":"L&T","rank":1,"bid_value":95,"currency":"INR","is_ours":True}],
+            },
+        )
+
+    persisted=client.get(f"/api/v1/bids/{bid['id']}/outcome").json()
+    assert persisted["outcome"]["result_status"]=="Lost"
+    assert persisted["outcome"]["our_rank"]==2
+    assert len(persisted["prices"])==2
