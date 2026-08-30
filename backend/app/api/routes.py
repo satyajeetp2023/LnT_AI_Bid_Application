@@ -14,7 +14,7 @@ from app.schemas.requirements import RequirementCreate,RequirementExtractionSumm
 from app.schemas.bids import AutoClassifyRequest,BidCreate,BidRead,BidUpdate,ClassificationUpdate,DocumentMetadataUpdate,DocumentRead,NotesUpdate,RevisionCreate
 from app.schemas.historical_bids import BidOutcomeUpsert
 from app.schemas.execution_learning import ExecutionLearningFactorInput,ExecutionOutcomeUpsert
-from app.security.auth import Permission,current_user,is_admin,require_permission,require_project_access
+from app.security.auth import Permission,current_user,effective_permissions,is_admin,require_permission,require_project_access
 from app.services.bids import create_bid,list_bids,update_bid
 from app.services.requirements import create_requirement,list_requirements,update_requirement
 from app.services.requirement_extraction import extract_requirements_from_document
@@ -98,7 +98,7 @@ def health(db:Session=Depends(get_db)):
 def upload_config():
  c=get_settings(); return {"max_file_size_mb":c.max_file_size_mb,"max_batch_size_mb":c.max_batch_size_mb,"max_files_per_batch":c.max_files_per_batch,"allowed_extensions":sorted(c.allowed_extensions),"document_categories":DOCUMENT_CATEGORIES}
 @router.get("/auth/me")
-def me(user:User=Depends(user_dep)): return {"id":user.id,"name":user.full_name,"roles":[r.name.value for r in user.roles]}
+def me(user:User=Depends(user_dep)): return {"id":user.id,"name":user.full_name,"roles":[r.name.value for r in user.roles],"permissions":sorted(x.value for x in effective_permissions(user))}
 @router.get("/bids",response_model=list[BidRead])
 def bids(db:Session=Depends(get_db),user:User=Depends(user_dep)): return list_bids(db,user)
 @router.post("/bids",response_model=BidRead,status_code=201)
