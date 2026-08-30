@@ -12,7 +12,7 @@ from app.services.document_classification import extract_text
 from app.services.p6_xer import parse_xer
 
 
-SCHEDULE_EXTENSIONS={"xer","xml","xlsx","xls","csv","pdf","doc","docx","txt","mpp"}
+SCHEDULE_EXTENSIONS={"xer","xml","xlsx","xls","csv","pdf","doc","docx","txt","mpp","jpg","jpeg","png"}
 
 ALIASES={
     "task_code":("activity id","activity code","task id","id","activity no","activity number"),
@@ -265,6 +265,8 @@ def ingest_schedule(extension:str,content:bytes):
         tables=_report_text(ext,content);source_kind="Schedule Report";fidelity="Report / Limited"
     elif ext=="mpp":
         tables=None;source_kind="Microsoft Project MPP";fidelity="Native Binary / Parser Required"
+    elif ext in {"jpg","jpeg","png"}:
+        tables=None;source_kind="Schedule Image";fidelity="Image / OCR Required"
     elif ext in {"xls","doc"}:
         tables=None;source_kind=f"Legacy {ext.upper()} Schedule";fidelity="Legacy Binary / Conversion Required"
     else:
