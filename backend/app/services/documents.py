@@ -33,14 +33,18 @@ def _validate_zip_payload(ext:str,content:bytes):
  except zipfile.BadZipFile:
   raise HTTPException(415,"ZIP-based file content is invalid")
 def audit(db,user_id,project_id,event,doc,metadata=None,details=None): db.add(AuditEvent(user_id=user_id,bid_project_id=project_id,event_type=event,entity_type="BidDocument",entity_id=str(doc.id),request_metadata=metadata or {},details=details or {}))
-def upload_document(db:Session,project_id:int,filename:str,content_type:str|None,content:bytes,user_id:int):
- cfg=get_settings(); safe=Path(filename).name; ext=Path(safe).suffix.lower().lstrip(".")
+def preflight_document_upload(filename:str,content:bytes):
+ cfg=get_settings();safe=Path(filename).name;ext=Path(safe).suffix.lower().lstrip(".")
  if not safe or ext not in cfg.allowed_extensions: raise HTTPException(415,f"Unsupported file type: .{ext or 'none'}")
  if content.startswith(b"MZ") or content.startswith(b"\x7fELF"): raise HTTPException(415,"Executable content is not permitted in tender document uploads")
  known=_known_signature_extensions(content)
  if known and ext not in known: raise HTTPException(415,f"File content does not match .{ext} extension")
  if ext in {"zip","docx","xlsx"} and content.startswith(b"PK\x03\x04"):_validate_zip_payload(ext,content)
  if len(content)>cfg.max_file_size_mb*1024*1024: raise HTTPException(413,"File exceeds configured size limit")
+ return safe,ext
+
+def upload_document(db:Session,project_id:int,filename:str,content_type:str|None,content:bytes,user_id:int):
+ cfg=get_settings();safe,ext=preflight_document_upload(filename,content)
  checksum=hashlib.sha256(content).hexdigest(); duplicate=db.scalar(select(BidDocument).where(BidDocument.bid_project_id==project_id,BidDocument.checksum==checksum,BidDocument.document_status!="Archived"))
  doc=BidDocument(bid_project_id=project_id,original_filename=safe,file_extension=ext,mime_type=content_type or mimetypes.guess_type(safe)[0] or "application/octet-stream",file_size=len(content),checksum=checksum,uploaded_by=user_id,document_status="Duplicate" if duplicate else "Needs Review",classification_status="pending",is_latest_version=True,duplicate_of_document_id=duplicate.id if duplicate else None,information_tags=[])
  if not duplicate:
