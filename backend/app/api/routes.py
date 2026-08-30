@@ -9,11 +9,11 @@ from sqlalchemy import func,select
 from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.database.session import get_db
-from app.models import AuditEvent,BidClauseRiskFinding,BidDocument,BidMissingInput,BidPreBidQuery,BidPreparedArtifact,BidProject,BidRequirement,DrawingBoqFinding,PlanningPackageFinding,ProductivityBenchmark,ProjectMembership,ScheduleScopeItem,User
+from app.models import AuditEvent,BidClauseRiskFinding,BidDocument,BidMissingInput,BidPreBidQuery,BidPreparedArtifact,BidProject,BidRequirement,DrawingBoqFinding,ExecutionLearningFactor,PlanningPackageFinding,ProductivityBenchmark,ProjectMembership,ScheduleScopeItem,User
 from app.schemas.requirements import RequirementCreate,RequirementExtractionSummary,RequirementRead,RequirementUpdate
 from app.schemas.bids import AutoClassifyRequest,BidCreate,BidRead,BidUpdate,ClassificationUpdate,DocumentMetadataUpdate,DocumentRead,NotesUpdate,RevisionCreate
 from app.schemas.historical_bids import BidOutcomeUpsert
-from app.schemas.execution_learning import ExecutionOutcomeUpsert
+from app.schemas.execution_learning import ExecutionLearningFactorInput,ExecutionOutcomeUpsert
 from app.security.auth import Permission,current_user,is_admin,require_permission,require_project_access
 from app.services.bids import create_bid,list_bids,update_bid
 from app.services.requirements import create_requirement,list_requirements,update_requirement
@@ -51,7 +51,7 @@ from app.services.document_classification import auto_classify_document
 from app.services.historical_bid_intelligence import get_bid_outcome,historical_bid_intelligence,upsert_bid_outcome
 from app.services.historical_bid_comparison import historical_comparison
 from app.services.historical_result_import import preview_historical_result
-from app.services.execution_learning import execution_learning_intelligence,get_execution_outcome,review_execution_outcome,save_execution_outcome
+from app.services.execution_learning import create_execution_factor,execution_learning_intelligence,get_execution_outcome,list_execution_factors,review_execution_factor,review_execution_outcome,save_execution_outcome,update_execution_factor
 from app.storage.base import LocalSecureStorage
 router=APIRouter()
 def user_dep(db:Session=Depends(get_db),x_user_id:int=Header(alias="X-User-ID")): return current_user(db,x_user_id)
@@ -158,6 +158,30 @@ def mark_execution_outcome_reviewed(bid_id:int,request:Request,db:Session=Depend
 def portfolio_execution_learning(db:Session=Depends(get_db),user:User=Depends(user_dep)):
  visible=list_bids(db,user)
  return execution_learning_intelligence(db,[x.id for x in visible])
+
+@router.get("/bids/{bid_id}/execution-learning-factors")
+def bid_execution_learning_factors(bid_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.VIEW_DOCUMENT);get_bid(db,bid_id)
+ return list_execution_factors(db,bid_id)
+
+@router.post("/bids/{bid_id}/execution-learning-factors",status_code=201)
+def add_execution_learning_factor(bid_id:int,payload:ExecutionLearningFactorInput,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.EDIT_BID)
+ return create_execution_factor(db,get_bid(db,bid_id),payload,user.id,metadata(request))
+
+@router.put("/execution-learning-factors/{factor_id}")
+def edit_execution_learning_factor(factor_id:int,payload:ExecutionLearningFactorInput,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ factor=db.get(ExecutionLearningFactor,factor_id)
+ if not factor:raise HTTPException(404,"Execution learning factor not found")
+ require_project_access(db,user,factor.bid_project_id,Permission.EDIT_BID)
+ return update_execution_factor(db,factor,payload,user.id,metadata(request))
+
+@router.post("/execution-learning-factors/{factor_id}/review")
+def mark_execution_learning_factor_reviewed(factor_id:int,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ factor=db.get(ExecutionLearningFactor,factor_id)
+ if not factor:raise HTTPException(404,"Execution learning factor not found")
+ require_project_access(db,user,factor.bid_project_id,Permission.EDIT_BID)
+ return review_execution_factor(db,factor,user.id,metadata(request))
 
 @router.get("/dashboard/summary")
 def dashboard(db:Session=Depends(get_db),user:User=Depends(user_dep)):
