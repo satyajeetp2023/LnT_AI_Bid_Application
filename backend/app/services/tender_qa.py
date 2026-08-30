@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import BidDocument,BidRequirement
+from app.models import BidDocument,BidRequirement,TenderKnowledgeChunk
 from app.services.requirement_extraction import RuleBasedRequirementExtractionProvider
 
 
@@ -117,27 +117,47 @@ def tender_question_answer(
    source_kind="Extracted Requirement",score=score,
   ))
 
- documents=db.scalars(select(BidDocument).where(
-  BidDocument.bid_project_id==bid_id,
-  BidDocument.is_latest_revision.is_(True),
-  BidDocument.document_status!="Archived",
-  BidDocument.duplicate_of_document_id.is_(None),
+ chunks=db.scalars(select(TenderKnowledgeChunk).where(
+  TenderKnowledgeChunk.bid_project_id==bid_id,
+  TenderKnowledgeChunk.is_active.is_(True),
  )).all()
- provider=RuleBasedRequirementExtractionProvider()
- for doc in documents:
-  if not doc.storage_path or doc.file_extension.lower() not in {"pdf","docx","txt"}:continue
-  try:units=provider.source_units(doc.file_extension,storage.read(doc.storage_path))
-  except Exception:continue
-  for unit in units:
-   for sentence in _sentences(unit.text):
-    score=_score(question,sentence,"Tender Document")
-    if score<.18:continue
-    clause_match=re.match(r"\s*(?:(?:clause|section)\s+)?(\d+(?:\.\d+){1,6})\b",sentence,re.I)
-    evidence.append(Evidence(
-     text=sentence[:1800],document_id=doc.id,document_name=doc.original_filename,
-     page=str(unit.page) if unit.page else None,clause=clause_match.group(1) if clause_match else None,
-     section=unit.section,source_kind="Tender Document",score=score,
-    ))
+ indexed_used=bool(chunks)
+ indexed_documents={}
+ if indexed_used:
+  doc_ids={x.source_document_id for x in chunks}
+  indexed_documents={x.id:x for x in db.scalars(select(BidDocument).where(BidDocument.id.in_(doc_ids))).all()}
+  for chunk in chunks:
+   score=_score(question,chunk.text,"Tender Knowledge Index")
+   if score<.18:continue
+   doc=indexed_documents.get(chunk.source_document_id)
+   evidence.append(Evidence(
+    text=_best_sentence(question,chunk.text),document_id=chunk.source_document_id,
+    document_name=doc.original_filename if doc else None,
+    page=chunk.source_page,clause=chunk.source_clause,section=chunk.source_section,
+    source_kind="Tender Knowledge Index",score=score,
+   ))
+ else:
+  documents=db.scalars(select(BidDocument).where(
+   BidDocument.bid_project_id==bid_id,
+   BidDocument.is_latest_revision.is_(True),
+   BidDocument.document_status!="Archived",
+   BidDocument.duplicate_of_document_id.is_(None),
+  )).all()
+  provider=RuleBasedRequirementExtractionProvider()
+  for doc in documents:
+   if not doc.storage_path or doc.file_extension.lower() not in {"pdf","docx","txt"}:continue
+   try:units=provider.source_units(doc.file_extension,storage.read(doc.storage_path))
+   except Exception:continue
+   for unit in units:
+    for sentence in _sentences(unit.text):
+     score=_score(question,sentence,"Tender Document")
+     if score<.18:continue
+     clause_match=re.match(r"\s*(?:(?:clause|section)\s+)?(\d+(?:\.\d+){1,6})\b",sentence,re.I)
+     evidence.append(Evidence(
+      text=sentence[:1800],document_id=doc.id,document_name=doc.original_filename,
+      page=str(unit.page) if unit.page else None,clause=clause_match.group(1) if clause_match else None,
+      section=unit.section,source_kind="Tender Document",score=score,
+     ))
 
  # deduplicate same sentence/document/page
  unique={}
@@ -181,10 +201,12 @@ def tender_question_answer(
   "grounded":grounded,
   "answer_mode":answer_mode,
   "conflicts":conflicts,
+  "knowledge_index_used":indexed_used,
+  "indexed_chunk_count":len(chunks),
   "evidence":[{
    "document_id":x.document_id,"document_name":x.document_name,"page":x.page,"clause":x.clause,"section":x.section,
    "excerpt":x.text,"score":round(x.score,3),"source_kind":x.source_kind,
   } for x in ranked],
-  "retrieval_version":"tender-qa-extractive-v2",
-  "note":"The answer is limited to bid-scoped source evidence. Weak evidence returns Not Found, and materially conflicting numeric values are surfaced rather than silently resolved.",
+  "retrieval_version":"tender-qa-indexed-v3",
+  "note":"The answer is limited to bid-scoped source evidence. The persistent tender index is used when available; weak evidence returns Not Found, and materially conflicting numeric values are surfaced rather than silently resolved.",
  }
