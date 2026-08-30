@@ -1,4 +1,4 @@
-from app.services.p6_schedule_comparison import compare_xer
+from app.services.p6_schedule_comparison import compare_schedule_tables,compare_xer
 
 BASE="""ERMHDR\t8.4\t2026-01-01
 %T\tPROJECT
@@ -46,3 +46,35 @@ def test_xer_comparison_tracks_slippage_changes_and_relationships():
     assert result["summary"]["delayed_milestones"]==1
     assert result["risk_summary"]["risk_level"]=="High"
     assert result["finish_slippage"][0]["finish_variance_days"]>=5
+
+
+def test_cross_format_comparison_does_not_invent_float_or_logic_changes():
+    base={
+        "PROJECT":[],
+        "TASK":[
+            {"task_id":"A100","task_code":"A100","task_name":"Foundation","target_start_date":"2026-01-01","target_end_date":"2026-01-10","target_drtn_hr_cnt":80,"total_float_hr_cnt":24},
+            {"task_id":"A200","task_code":"A200","task_name":"Mast Erection","target_start_date":"2026-01-11","target_end_date":"2026-01-20","target_drtn_hr_cnt":80,"total_float_hr_cnt":8},
+        ],
+        "TASKPRED":[{"task_id":"A200","pred_task_id":"A100","pred_type":"PR_FS","lag_hr_cnt":0}],
+    }
+    current={
+        "PROJECT":[],
+        "TASK":[
+            {"task_id":"A100","task_code":"A100","task_name":"Foundation","target_start_date":"2026-01-02","target_end_date":"2026-01-12","target_drtn_hr_cnt":80},
+            {"task_id":"A200","task_code":"A200","task_name":"Mast Erection","target_start_date":"2026-01-13","target_end_date":"2026-01-22","target_drtn_hr_cnt":80},
+        ],
+        "TASKPRED":[],
+    }
+    result=compare_schedule_tables(
+        base,current,
+        {"float":True,"logic":True},
+        {"float":False,"logic":False},
+    )
+    assert result["summary"]["finish_slippages"]==2
+    assert result["summary"]["float_changes"]==0
+    assert result["summary"]["newly_negative_float"]==0
+    assert result["summary"]["added_relationships"]==0
+    assert result["summary"]["deleted_relationships"]==0
+    assert result["comparison_capabilities"]["float"] is False
+    assert result["comparison_capabilities"]["logic"] is False
+    assert all(x["float_change_hours"] is None for x in result["finish_slippage"])
