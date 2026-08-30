@@ -1,4 +1,4 @@
-from app.services.planning_package_reconciliation import _finding_candidates,_score
+from app.services.planning_package_reconciliation import _finding_candidates,_overlap,_productivity_capacity,_score
 
 
 def test_resource_activity_matching_is_scope_sensitive():
@@ -40,3 +40,29 @@ def test_resource_timing_misalignment_becomes_reviewable_finding():
     findings=_finding_candidates(analysis)
     assert findings[0]["finding_key"]=="resource-timing:7"
     assert findings[0]["severity"]=="Medium"
+
+
+def test_bidder_productivity_capacity_uses_resource_quantity_only_when_basis_is_per_resource():
+    class Entry:
+        productivity_rate=8
+        productivity_unit="Nos/Crew/Day"
+        quantity=3
+    result=_productivity_capacity(Entry())
+    assert result["capacity_per_day"]==24
+    assert result["basis"]=="Per Resource × Quantity"
+
+
+def test_total_bidder_productivity_rate_is_not_multiplied_by_resource_quantity():
+    class Entry:
+        productivity_rate=20
+        productivity_unit="Nos/Day"
+        quantity=3
+    result=_productivity_capacity(Entry())
+    assert result["capacity_per_day"]==20
+    assert result["basis"]=="Total Planned Rate"
+
+
+def test_overlap_only_when_activity_periods_intersect():
+    from datetime import date
+    assert _overlap(date(2026,1,1),date(2026,1,10),date(2026,1,8),date(2026,1,20)) is True
+    assert _overlap(date(2026,1,1),date(2026,1,5),date(2026,1,6),date(2026,1,20)) is False
