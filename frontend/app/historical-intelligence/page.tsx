@@ -56,6 +56,16 @@ export default function HistoricalIntelligencePage(){
 
   {data.summary.recorded===0?<EmptyState title="No historical results recorded yet" description="Bid Results will populate this page as tender outcomes are captured."/>:<>
    <section className="mb-3 rounded border border-slate-200 bg-white p-3">
+    <div className="mb-3"><h2 className="text-sm font-bold text-slate-900">Historical Data Quality</h2><p className="text-xs text-slate-500">Coverage of source references and ranked-price evidence behind the historical intelligence.</p></div>
+    <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+     <SummaryCard label="Completed Results" value={data.data_quality.completed_results}/>
+     <SummaryCard label="Outcome Source Coverage" value={data.data_quality.outcome_source_coverage_percent!==null?data.data_quality.outcome_source_coverage_percent+"%":"—"}/>
+     <SummaryCard label="Price Source Coverage" value={data.data_quality.price_source_coverage_percent!==null?data.data_quality.price_source_coverage_percent+"%":"—"}/>
+     <SummaryCard label="Complete L1-L4" value={data.data_quality.complete_l1_l4_coverage_percent!==null?data.data_quality.complete_l1_l4_coverage_percent+"%":"—"}/>
+     <SummaryCard label="Our Bid Identified" value={data.data_quality.results_with_our_bid_marked_percent!==null?data.data_quality.results_with_our_bid_marked_percent+"%":"—"}/>
+    </div>
+   </section>
+   <section className="mb-3 rounded border border-slate-200 bg-white p-3">
     <div className="mb-3"><h2 className="text-sm font-bold text-slate-900">Recorded Market Price Spread</h2><p className="text-xs text-slate-500">Average premium of L2, L3 and L4 over L1 from completed tenders with ranked price evidence.</p></div>
     <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
      <SummaryCard label="Spread Samples" value={data.market_spread.samples}/>
