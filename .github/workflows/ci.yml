@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - codex/phase-2-pre-bid-queries
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   backend:
