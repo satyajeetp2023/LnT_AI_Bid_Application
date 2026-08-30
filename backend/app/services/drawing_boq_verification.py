@@ -3,7 +3,7 @@ from datetime import datetime,timezone
 from decimal import Decimal
 from difflib import SequenceMatcher
 
-from sqlalchemy import delete,select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import AuditEvent,DrawingBoqFinding,DrawingQuantityObservation,ScheduleScopeItem
@@ -65,7 +65,17 @@ def record_drawing_observations(
  db:Session,bid_id:int,document_id:int,observations:list[dict],user_id:int,
  extraction_method:str="Vision Extraction",request_metadata:dict|None=None
 ):
- created=[]
+ existing=db.scalars(select(DrawingQuantityObservation).where(
+  DrawingQuantityObservation.bid_project_id==bid_id,
+  DrawingQuantityObservation.source_document_id==document_id,
+ )).all()
+ signatures={
+  (
+   str(x.source_page or ""),_norm(x.drawing_reference),_norm(x.item_name),
+   str(x.quantity.normalize()),_unit(x.unit),x.extraction_method,
+  ) for x in existing
+ }
+ created=[];skipped_duplicates=0
  for raw in observations:
   name=str(raw.get("item_name") or "").strip()
   unit=str(raw.get("unit") or "").strip()
@@ -74,6 +84,13 @@ def record_drawing_observations(
   if not name or not unit or quantity<0:raise ValueError("item_name, unit and non-negative quantity are required")
   confidence=Decimal(str(raw.get("confidence") if raw.get("confidence") is not None else ".50"))
   if confidence<0 or confidence>1:raise ValueError("confidence must be between 0 and 1")
+  signature=(
+   str(raw.get("source_page") or "").strip(),_norm(raw.get("drawing_reference")),_norm(name),
+   str(quantity.normalize()),_unit(unit),extraction_method,
+  )
+  if signature in signatures:
+   skipped_duplicates+=1
+   continue
   row=DrawingQuantityObservation(
    bid_project_id=bid_id,source_document_id=document_id,
    source_page=str(raw.get("source_page") or "").strip() or None,
@@ -85,14 +102,14 @@ def record_drawing_observations(
    extraction_method=extraction_method,extraction_confidence=confidence,
    review_status="Needs Review",created_by=user_id,
   )
-  db.add(row);db.flush();created.append(row)
+  db.add(row);db.flush();created.append(row);signatures.add(signature)
  db.add(AuditEvent(
   user_id=user_id,bid_project_id=bid_id,event_type="drawing.quantity_observations_recorded",
   entity_type="BidDocument",entity_id=str(document_id),request_metadata=request_metadata or {},
-  details={"created":len(created),"extraction_method":extraction_method},
+  details={"created":len(created),"skipped_duplicates":skipped_duplicates,"extraction_method":extraction_method},
  ))
  db.commit()
- return {"created":len(created),"observation_ids":[x.id for x in created]}
+ return {"created":len(created),"skipped_duplicates":skipped_duplicates,"observation_ids":[x.id for x in created]}
 
 
 def verify_drawing_boq(db:Session,bid_id:int,user_id:int|None=None,request_metadata:dict|None=None):
@@ -106,8 +123,12 @@ def verify_drawing_boq(db:Session,bid_id:int,user_id:int|None=None,request_metad
  )).all()
  boq=[_boq_data(x) for x in boq_items]
 
- db.execute(delete(DrawingBoqFinding).where(DrawingBoqFinding.bid_project_id==bid_id))
- created=[]
+ existing_findings={
+  x.observation_id:x for x in db.scalars(select(DrawingBoqFinding).where(
+   DrawingBoqFinding.bid_project_id==bid_id
+  )).all()
+ }
+ created=[];updated=0
  for observation in observations:
   ranked=sorted((( _match_score(observation,item),item) for item in boq),key=lambda x:-x[0])
   best_score,best=(ranked[0] if ranked else (0.0,None))
@@ -127,19 +148,34 @@ def verify_drawing_boq(db:Session,bid_id:int,user_id:int|None=None,request_metad
     variance=observation.quantity-boq_qty
     variance_pct=(variance*Decimal("100")/boq_qty) if boq_qty!=0 else None
     status="Match" if abs(variance)<=Decimal("0.000001") else "Quantity Variance"
-  finding=DrawingBoqFinding(
-   bid_project_id=bid_id,observation_id=observation.id,boq_scope_item_id=scope_id,
-   match_confidence=Decimal(str(best_score)),boq_reference=boq_ref,boq_description=boq_desc,
-   boq_quantity=boq_qty,boq_unit=boq_unit,drawing_quantity=observation.quantity,drawing_unit=observation.unit,
-   variance_quantity=variance,variance_percent=variance_pct,finding_status=status,
-   responsible_function="Engineering",review_status="Informational" if status=="Match" else "Open",
-  )
-  db.add(finding);db.flush();created.append(finding)
+  finding=existing_findings.get(observation.id)
+  if finding:
+   finding.boq_scope_item_id=scope_id
+   finding.match_confidence=Decimal(str(best_score))
+   finding.boq_reference=boq_ref;finding.boq_description=boq_desc
+   finding.boq_quantity=boq_qty;finding.boq_unit=boq_unit
+   finding.drawing_quantity=observation.quantity;finding.drawing_unit=observation.unit
+   finding.variance_quantity=variance;finding.variance_percent=variance_pct
+   finding.finding_status=status
+   if finding.review_status=="Informational" and status!="Match":
+    finding.review_status="Open"
+   elif finding.review_status=="Open" and status=="Match" and not finding.reviewer_disposition:
+    finding.review_status="Informational"
+   updated+=1
+  else:
+   finding=DrawingBoqFinding(
+    bid_project_id=bid_id,observation_id=observation.id,boq_scope_item_id=scope_id,
+    match_confidence=Decimal(str(best_score)),boq_reference=boq_ref,boq_description=boq_desc,
+    boq_quantity=boq_qty,boq_unit=boq_unit,drawing_quantity=observation.quantity,drawing_unit=observation.unit,
+    variance_quantity=variance,variance_percent=variance_pct,finding_status=status,
+    responsible_function="Engineering",review_status="Informational" if status=="Match" else "Open",
+   )
+   db.add(finding);db.flush();created.append(finding)
  if user_id is not None:
   db.add(AuditEvent(
    user_id=user_id,bid_project_id=bid_id,event_type="drawing_boq.verification_completed",
    entity_type="BidProject",entity_id=str(bid_id),request_metadata=request_metadata or {},
-   details={"observations":len(observations),"boq_items":len(boq),"findings":len(created)},
+   details={"observations":len(observations),"boq_items":len(boq),"created_findings":len(created),"updated_findings":updated},
   ))
  db.commit()
  return drawing_boq_summary(db,bid_id)
