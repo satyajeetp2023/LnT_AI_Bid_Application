@@ -121,7 +121,7 @@ def submission_readiness(db:Session,bid_id:int):
             "detected_formats":len(formats),
             "mandatory_formats":sum(1 for x in formats if x["mandatory"]),
             "approved_formats":sum(1 for x in formats if x["status"]=="Approved"),
-            "format_blockers":len(blockers),
+            "format_blockers":sum(1 for x in formats if x["status"]!="Approved"),
             "mandatory_blockers":sum(1 for x in formats if x["mandatory"] and x["status"]!="Approved"),
             "warnings":len(warnings),
             "approved_artifacts":len(approved_current),
@@ -130,6 +130,7 @@ def submission_readiness(db:Session,bid_id:int):
             "drawing_boq_blockers":len(drawing_blockers),
             "drawing_boq_warnings":len(drawing_warnings),
             "intelligence_blockers":len(critical_clause_risks)+len(drawing_blockers),
+            "total_blockers":len(blockers),
         },
         "estimation_readiness":{
             "overall_score":estimation["overall_score"],
