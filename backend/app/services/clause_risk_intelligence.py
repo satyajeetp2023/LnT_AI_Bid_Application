@@ -197,6 +197,7 @@ def promote_finding_to_firm_pattern(
 ):
  finding=db.get(BidClauseRiskFinding,finding_id)
  if not finding:raise ValueError("Clause-risk finding not found")
+ if finding.reviewer_disposition not in {"Accept Risk","Mitigated / Qualified"}:raise ValueError("Only a human-reviewed accepted or mitigated finding can be promoted to the firm library")
  terms=[_norm(x) for x in (payload.get("pattern_terms") or []) if _norm(x)]
  if not terms:raise ValueError("At least one reusable pattern term is required")
  code=str(payload.get("risk_code") or f"CUSTOM_{finding.id}_{finding.risk_code}").strip().upper().replace(" ","_")[:80]
