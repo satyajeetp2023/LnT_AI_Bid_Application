@@ -7,7 +7,7 @@ from sqlalchemy import func,select
 from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.database.session import get_db
-from app.models import AuditEvent,BidDocument,BidMissingInput,BidPreBidQuery,BidPreparedArtifact,BidProject,BidRequirement,ProjectMembership,ScheduleScopeItem,User
+from app.models import AuditEvent,BidDocument,BidMissingInput,BidPreBidQuery,BidPreparedArtifact,BidProject,BidRequirement,ProductivityBenchmark,ProjectMembership,ScheduleScopeItem,User
 from app.schemas.requirements import RequirementCreate,RequirementExtractionSummary,RequirementRead,RequirementUpdate
 from app.schemas.bids import AutoClassifyRequest,BidCreate,BidRead,BidUpdate,ClassificationUpdate,DocumentMetadataUpdate,DocumentRead,NotesUpdate,RevisionCreate
 from app.security.auth import Permission,current_user,is_admin,require_permission,require_project_access
@@ -30,6 +30,7 @@ from app.services.schedule_scope_coverage import add_scope_item,disposition_scop
 from app.services.boq_scope_adapter import ingest_boq_scope
 from app.services.boq_document_extraction import extract_boq_rows
 from app.services.schedule_skeleton import build_schedule_skeleton
+from app.services.productivity_benchmarks import activity_key,benchmark_summary
 from app.services.schedule_ingestion import SCHEDULE_EXTENSIONS,ingest_schedule
 from app.services.documents import DOCUMENT_CATEGORIES,archive,classify,mark_revision,update_document_metadata,update_notes,upload_document
 from app.services.document_classification import auto_classify_document
@@ -330,6 +331,43 @@ def ingest_schedule_boq_scope(bid_id:int,payload:dict,request:Request,db:Session
  rows=payload.get("rows") or []
  if not isinstance(rows,list):raise HTTPException(422,"rows must be a list of BOQ items")
  return ingest_boq_scope(db,bid_id,rows,user.id,metadata(request))
+
+@router.get("/bids/{bid_id}/productivity-benchmark")
+def get_productivity_benchmark(bid_id:int,activity_name:str=Query(...,min_length=1,max_length=300),unit:str=Query(...,min_length=1,max_length=50),discipline:str|None=Query(None,max_length=100),db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.REQUIREMENT_VIEW)
+ bid=get_bid(db,bid_id)
+ return benchmark_summary(db,activity_name,unit,bid.project_type,discipline)
+
+@router.post("/bids/{bid_id}/productivity-benchmarks")
+def add_productivity_benchmark(bid_id:int,payload:dict,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.REQUIREMENT_MANAGE)
+ bid=get_bid(db,bid_id)
+ activity_name=str(payload.get("activity_name") or "").strip()
+ unit=str(payload.get("unit") or "").strip()
+ try:rate=Decimal(str(payload.get("rate_per_working_day")))
+ except Exception:raise HTTPException(422,"A valid rate_per_working_day is required") from None
+ if not activity_name or not unit or rate<=0:raise HTTPException(422,"activity_name, unit and a positive rate are required")
+ confidence=Decimal(str(payload.get("confidence") or "0.60"))
+ if confidence<0 or confidence>1:raise HTTPException(422,"confidence must be between 0 and 1")
+ row=ProductivityBenchmark(
+  activity_name=activity_name,
+  activity_key=activity_key(activity_name),
+  project_type=str(payload.get("project_type") or bid.project_type or "").strip() or None,
+  discipline=str(payload.get("discipline") or "").strip() or None,
+  unit=unit,
+  rate_per_working_day=rate,
+  resource_context=str(payload.get("resource_context") or "").strip() or None,
+  source_type="User Confirmed",
+  source_reference=str(payload.get("source_reference") or "").strip() or None,
+  bid_project_id=bid_id,
+  confidence=confidence,
+  notes=str(payload.get("notes") or "").strip() or None,
+  created_by=user.id,
+ )
+ db.add(row)
+ db.add(AuditEvent(user_id=user.id,bid_project_id=bid_id,event_type="schedule.productivity_benchmark_added",entity_type="ProductivityBenchmark",entity_id="pending",request_metadata=metadata(request),details={"activity_name":activity_name,"unit":unit,"rate_per_working_day":str(rate),"source_type":"User Confirmed"}))
+ db.commit();db.refresh(row)
+ return {"id":row.id,"activity_name":row.activity_name,"unit":row.unit,"rate_per_working_day":float(row.rate_per_working_day),"confidence":float(row.confidence),"source_type":row.source_type}
 
 @router.get("/bids/{bid_id}/schedule-skeleton")
 def get_schedule_skeleton(bid_id:int,request:Request,sync_scope:bool=Query(True),db:Session=Depends(get_db),user:User=Depends(user_dep)):
