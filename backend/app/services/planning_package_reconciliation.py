@@ -1,3 +1,4 @@
+import math
 import re
 from collections import Counter,defaultdict
 from datetime import datetime,timezone
@@ -218,12 +219,34 @@ def reconcile_planning_package(db:Session,bid_id:int,tables:dict[str,list[dict]]
    else:
     variance=capacity["capacity_per_day"]-required_rate
     status="Meets / Exceeds Implied Requirement" if variance>=0 else "Below Implied Requirement"
+   resolution_options=[]
+   minimum_resource_quantity=None;additional_resource_quantity=None
+   required_duration_days=None;duration_extension_days=None;productivity_increase_percent=None
+   if capacity["capacity_per_day"] is not None and capacity["capacity_per_day"]>0:
+    required_duration_days=boq_qty/capacity["capacity_per_day"]
+    duration_extension_days=max(0.0,required_duration_days-duration_days)
+   if status=="Below Implied Requirement":
+    if capacity["basis"]=="Per Resource × Quantity" and capacity["rate"]>0 and capacity["resource_quantity"] is not None:
+     minimum_resource_quantity=math.ceil(required_rate/capacity["rate"])
+     additional_resource_quantity=max(0,minimum_resource_quantity-math.floor(capacity["resource_quantity"]))
+     resolution_options.append(f"Test increasing {entry.resource_name} quantity from {capacity['resource_quantity']:g} to at least {minimum_resource_quantity} at the bidder-stated per-resource rate.")
+    if required_duration_days is not None:
+     resolution_options.append(f"At the currently stated capacity, test a duration of about {required_duration_days:.2f} equivalent working days instead of {duration_days:.2f}.")
+    if capacity["capacity_per_day"]>0:
+     productivity_increase_percent=max(0.0,(required_rate-capacity["capacity_per_day"])*100/capacity["capacity_per_day"])
+     resolution_options.append(f"To retain the current duration, the stated total output would need to increase by about {productivity_increase_percent:.1f}%.")
    comparisons.append({
     "resource_entry_id":entry.id,"resource_name":entry.resource_name,
     "productivity_rate":capacity["rate"],"productivity_unit":entry.productivity_unit,
     "resource_quantity":capacity["resource_quantity"],"basis":capacity["basis"],
     "available_capacity_per_day":round(capacity["capacity_per_day"],4) if capacity["capacity_per_day"] is not None else None,
     "status":status,"capacity_variance_per_day":round(variance,4) if variance is not None else None,
+    "minimum_resource_quantity":minimum_resource_quantity,
+    "additional_resource_quantity":additional_resource_quantity,
+    "required_duration_days":round(required_duration_days,2) if required_duration_days is not None else None,
+    "duration_extension_days":round(duration_extension_days,2) if duration_extension_days is not None else None,
+    "productivity_increase_percent":round(productivity_increase_percent,1) if productivity_increase_percent is not None else None,
+    "resolution_options":resolution_options,
    })
   productivity_checks.append({
    "boq_scope_item_id":boq.id,"boq_reference":boq.source_reference,
@@ -245,6 +268,7 @@ def reconcile_planning_package(db:Session,bid_id:int,tables:dict[str,list[dict]]
   start=_date(row.get("activity_start"));finish=_date(row.get("activity_finish"))
   if not start or not finish:continue
   matched_with_dates.append((row,start,finish))
+ task_by_code={str(x.get("task_code") or ""):x for x in tasks if x.get("task_code")}
  concurrency_reviews=[]
  for i,(left,l_start,l_finish) in enumerate(matched_with_dates):
   for right,r_start,r_finish in matched_with_dates[i+1:]:
@@ -252,14 +276,36 @@ def reconcile_planning_package(db:Session,bid_id:int,tables:dict[str,list[dict]]
    if _norm(left.get("resource_name"))!=_norm(right.get("resource_name")):continue
    if not _overlap(l_start,l_finish,r_start,r_finish):continue
    exact_identifier=bool(re.search(r"\d",str(left.get("resource_name") or "")))
+   overlap_days=(min(l_finish,r_finish)-max(l_start,r_start)).days+1
+   left_task=task_by_code.get(str(left.get("matched_task_code") or ""))
+   right_task=task_by_code.get(str(right.get("matched_task_code") or ""))
+   def tf_days(task):
+    if not task or not capabilities.get("float"):return None
+    try:return max(0.0,float(task.get("total_float_hr_cnt"))/8.0)
+    except (TypeError,ValueError):return None
+   left_float=tf_days(left_task);right_float=tf_days(right_task)
+   candidates=[
+    (left.get("matched_task_code"),left.get("matched_task_name"),left_float),
+    (right.get("matched_task_code"),right.get("matched_task_name"),right_float),
+   ]
+   candidates=[x for x in candidates if x[2] is not None and x[2]>0]
+   candidates.sort(key=lambda x:-x[2])
+   resequence_suggestion=None
+   if candidates:
+    code,name,float_days=candidates[0]
+    resequence_suggestion=f"Test shifting {code} by up to {min(float_days,overlap_days):.2f} equivalent working days within its current total-float allowance, then recalculate the programme."
    concurrency_reviews.append({
     "resource_name":left.get("resource_name"),
     "left_task_code":left.get("matched_task_code"),"left_task_name":left.get("matched_task_name"),
     "right_task_code":right.get("matched_task_code"),"right_task_name":right.get("matched_task_name"),
     "overlap_start":max(l_start,r_start).isoformat(),"overlap_finish":min(l_finish,r_finish).isoformat(),
+    "overlap_days":overlap_days,
+    "left_total_float_days":round(left_float,2) if left_float is not None else None,
+    "right_total_float_days":round(right_float,2) if right_float is not None else None,
+    "resequence_suggestion":resequence_suggestion,
     "severity":"High" if exact_identifier else "Medium",
     "status":"Potential Double Booking" if exact_identifier else "Concurrent Resource Review",
-    "note":"Same resource label is deployed against overlapping activities. Confirm whether this represents one shared resource or separate available units.",
+    "note":"Same resource label is deployed against overlapping activities. Confirm whether this represents one shared resource or separate available units. Any float-based shift is a test suggestion only and must be recalculated in the scheduling tool.",
    })
 
  role_counts=Counter((x.role_or_trade or x.resource_name).strip() for x in staff if (x.role_or_trade or x.resource_name))
@@ -362,7 +408,7 @@ def reconcile_planning_package(db:Session,bid_id:int,tables:dict[str,list[dict]]
    "high_issues":sum(1 for x in issues if x["severity"]=="High"),
    "medium_issues":sum(1 for x in issues if x["severity"]=="Medium"),
   },
-  "version":"integrated-planning-package-v3",
+  "version":"integrated-planning-package-v4",
   "note":"This reconciles evidence supplied by the bidder. It does not invent crew sizes, equipment quantities, staff norms or productivity assumptions.",
  }
 
