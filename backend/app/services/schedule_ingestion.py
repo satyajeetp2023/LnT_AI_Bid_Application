@@ -23,11 +23,17 @@ ALIASES={
     "task_type":("activity type","task type","type"),
     "start_date":("start","start date","planned start","early start"),
     "finish_date":("finish","finish date","planned finish","early finish"),
-    "duration":("duration","original duration","planned duration","remaining duration"),
+    "actual_start":("actual start","actual start date","act start"),
+    "actual_finish":("actual finish","actual finish date","act finish"),
+    "duration":("duration","original duration","planned duration"),
+    "remaining_duration":("remaining duration","remain duration","remaining dur"),
+    "percent_complete":("% complete","percent complete","physical % complete","physical percent complete","progress %"),
     "total_float":("total float","float","total float hours"),
     "calendar":("calendar","calendar name"),
     "predecessors":("predecessors","predecessor","pred"),
     "resources":("resources","resource names","resource"),
+    "constraint_type":("constraint type","primary constraint","constraint"),
+    "constraint_date":("constraint date","primary constraint date"),
 }
 
 
@@ -123,19 +129,29 @@ def _table_matrix_to_schedule(matrix:list[list],sheet_name:str=""):
             for col in range(min(len(raw_headers),len(row)))
             if row[col] not in (None,"")
         }
+        percent=_number(get("percent_complete"))
+        status=str(get("status_code") or "").strip() or None
+        if not status and percent is not None:
+            status="Complete" if percent>=100 else "In Progress" if percent>0 else "Not Started"
+        duration_value=get("duration")
+        remaining_value=get("remaining_duration")
         task={
             "task_id":code,
             "task_code":code,
             "task_name":name,
             "wbs_id":wbs_names.get(wbs),
-            "status_code":str(get("status_code") or "").strip() or None,
-            "task_type":str(get("task_type") or "").strip() or ("TT_Mile" if (_number(get("duration"))==0 and get("duration") not in (None,"")) else "TT_Task"),
+            "status_code":status,
+            "task_type":str(get("task_type") or "").strip() or ("TT_Mile" if (_number(duration_value)==0 and duration_value not in (None,"")) else "TT_Task"),
             "target_start_date":_date_text(get("start_date")),
             "target_end_date":_date_text(get("finish_date")),
-            "target_drtn_hr_cnt":_duration_hours(get("duration")),
-            "remain_drtn_hr_cnt":_duration_hours(get("duration")),
+            "act_start_date":_date_text(get("actual_start")),
+            "act_end_date":_date_text(get("actual_finish")),
+            "target_drtn_hr_cnt":_duration_hours(duration_value),
+            "remain_drtn_hr_cnt":_duration_hours(remaining_value) if remaining_value not in (None,"") else _duration_hours(duration_value),
             "total_float_hr_cnt":_number(get("total_float")),
             "clndr_id":str(get("calendar") or "").strip() or None,
+            "cstr_type":str(get("constraint_type") or "").strip() or None,
+            "cstr_date":_date_text(get("constraint_date")),
             "_source_sheet":sheet_name,
             "_source_fields":source_fields,
         }
@@ -377,7 +393,7 @@ def ingest_schedule(extension:str,content:bytes):
             "fidelity":fidelity,
             "capabilities":{"activities":False,"logic":False,"float":False,"resources":False,"calendars":False,"wbs":False},
             "limitations":["No reliable structured activity table could be extracted from this source."],
-            "parser_version":"phase6-unified-schedule-ingestion-v4",
+            "parser_version":"phase6-unified-schedule-ingestion-v5",
         }
 
     task_fields={k for row in tables.get("TASK",[]) for k,v in row.items() if v not in (None,"")}
@@ -399,5 +415,5 @@ def ingest_schedule(extension:str,content:bytes):
         "fidelity":fidelity,
         "capabilities":capabilities,
         "limitations":limitations,
-        "parser_version":"phase6-unified-schedule-ingestion-v4",
+        "parser_version":"phase6-unified-schedule-ingestion-v5",
     }
