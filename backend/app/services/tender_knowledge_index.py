@@ -14,7 +14,7 @@ from app.services.requirement_extraction import RuleBasedRequirementExtractionPr
 
 
 INDEXABLE_EXTENSIONS={"pdf","docx","txt","xlsx","xls","csv"}
-INDEXER_VERSION="tender-knowledge-index-v2"
+INDEXER_VERSION="tender-knowledge-index-v3"
 
 
 def _clause(text:str):
@@ -25,6 +25,22 @@ def _clause(text:str):
 def _sentences(text:str):
  parts=re.split(r"(?<=[.!?;])\s+|\n+",str(text or ""))
  return [re.sub(r"\s+"," ",x).strip() for x in parts if len(re.sub(r"\s+"," ",x).strip())>=15]
+
+
+CLAUSE_LINE_RE=re.compile(r"^\s*(?:(?:clause|section)\s+)?\d+(?:\.\d+){1,6}\b",re.I)
+
+
+def _clause_blocks(text:str):
+ lines=[re.sub(r"\s+"," ",x).strip() for x in str(text or "").splitlines() if x.strip()]
+ if not lines:return []
+ blocks=[];current=[]
+ for line in lines:
+  if CLAUSE_LINE_RE.match(line) and current:
+   blocks.append(" ".join(current));current=[line]
+  else:
+   current.append(line)
+ if current:blocks.append(" ".join(current))
+ return blocks
 
 
 def _chunks(text:str,target_chars:int=1300,overlap_sentences:int=1):
@@ -81,15 +97,18 @@ def index_tender_document(db:Session,document:BidDocument,storage,user_id:int,re
  db.execute(delete(TenderKnowledgeChunk).where(TenderKnowledgeChunk.source_document_id==document.id))
  created=0
  for unit in units:
-  for text in _chunks(unit.text):
-   digest=hashlib.sha256(text.encode("utf-8")).hexdigest()
-   db.add(TenderKnowledgeChunk(
-    bid_project_id=document.bid_project_id,source_document_id=document.id,chunk_index=created+1,
-    source_page=str(unit.page) if unit.page else None,source_clause=_clause(text),source_section=unit.section,
-    text=text,text_hash=digest,word_count=len(text.split()),
-    source_kind=document.document_category or document.document_type or "Tender Document",is_active=True,
-   ))
-   created+=1
+  blocks=_clause_blocks(unit.text)
+  if not blocks:blocks=[unit.text]
+  for block in blocks:
+   for text in _chunks(block):
+    digest=hashlib.sha256(text.encode("utf-8")).hexdigest()
+    db.add(TenderKnowledgeChunk(
+     bid_project_id=document.bid_project_id,source_document_id=document.id,chunk_index=created+1,
+     source_page=str(unit.page) if unit.page else None,source_clause=_clause(text),source_section=unit.section,
+     text=text,text_hash=digest,word_count=len(text.split()),
+     source_kind=document.document_category or document.document_type or "Tender Document",is_active=True,
+    ))
+    created+=1
  db.add(AuditEvent(
   user_id=user_id,bid_project_id=document.bid_project_id,event_type="tender_knowledge.indexed",
   entity_type="BidDocument",entity_id=str(document.id),request_metadata=request_metadata or {},
