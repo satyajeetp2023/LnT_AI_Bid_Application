@@ -1,7 +1,8 @@
+import calendar
 import math
 import re
 from collections import Counter,defaultdict
-from datetime import datetime,timezone
+from datetime import date,datetime,timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -308,6 +309,44 @@ def reconcile_planning_package(db:Session,bid_id:int,tables:dict[str,list[dict]]
     "note":"Same resource label is deployed against overlapping activities. Confirm whether this represents one shared resource or separate available units. Any float-based shift is a test suggestion only and must be recalculated in the scheduling tool.",
    })
 
+ def month_start(value:date):
+  return date(value.year,value.month,1)
+ def next_month(value:date):
+  return date(value.year+1,1,1) if value.month==12 else date(value.year,value.month+1,1)
+ dated_entries=[x for x in entries if x.start_date or x.finish_date]
+ profile_rows=[]
+ if task_dates:
+  horizon_start=month_start(min(task_dates))
+  horizon_finish=month_start(max(task_dates))
+ elif dated_entries:
+  starts=[x.start_date or x.finish_date for x in dated_entries if x.start_date or x.finish_date]
+  finishes=[x.finish_date or x.start_date for x in dated_entries if x.start_date or x.finish_date]
+  horizon_start=month_start(min(starts));horizon_finish=month_start(max(finishes))
+ else:
+  horizon_start=horizon_finish=None
+ cursor=horizon_start
+ months=0
+ while cursor and horizon_finish and cursor<=horizon_finish and months<120:
+  month_end=date(cursor.year,cursor.month,calendar.monthrange(cursor.year,cursor.month)[1])
+  active=[x for x in entries if (x.start_date is None or x.start_date<=month_end) and (x.finish_date is None or x.finish_date>=cursor) and (x.start_date or x.finish_date)]
+  totals={}
+  for category in ("Staff","Labour","Equipment","Other"):
+   rows=[x for x in active if x.resource_category==category]
+   totals[category]=round(sum(float(x.quantity) for x in rows if x.quantity is not None),2)
+  profile_rows.append({
+   "month":cursor.strftime("%Y-%m"),
+   "staff":totals["Staff"],"labour":totals["Labour"],"equipment":totals["Equipment"],"other":totals["Other"],
+   "active_entries":len(active),
+  })
+  cursor=next_month(cursor);months+=1
+ peaks={}
+ for category,key in (("Staff","staff"),("Labour","labour"),("Equipment","equipment"),("Other","other")):
+  if not profile_rows:
+   peaks[category]={"quantity":0,"month":None}
+  else:
+   best=max(profile_rows,key=lambda x:x[key])
+   peaks[category]={"quantity":best[key],"month":best["month"] if best[key]>0 else None}
+
  role_counts=Counter((x.role_or_trade or x.resource_name).strip() for x in staff if (x.role_or_trade or x.resource_name))
  staff_without_dates=[x for x in staff if not x.start_date and not x.finish_date]
  staff_timeline=[{
@@ -387,6 +426,14 @@ def reconcile_planning_package(db:Session,bid_id:int,tables:dict[str,list[dict]]
    "missing_contract_required_roles":[x["role"] for x in required_staff if not x["present_in_staff_plan"]],
    "note":"Staff timing is compared with the programme timeline. Staff-role checks are raised only where the tender evidence explicitly requires that role; otherwise no staffing norm is invented.",
   },
+  "time_phased_resource_profile":{
+   "months":profile_rows,
+   "peaks":peaks,
+   "undated_entries":sum(1 for x in entries if not x.start_date and not x.finish_date),
+   "horizon_start":horizon_start.isoformat() if horizon_start else None,
+   "horizon_finish":horizon_finish.isoformat() if horizon_finish else None,
+   "note":"Monthly totals sum only bidder entries with stated quantities and deployment dates. Missing quantities are not guessed.",
+  },
   "resource_feasibility":{
    "productivity_checks":productivity_checks,
    "productivity_shortfalls":len(productivity_shortfalls),
@@ -405,10 +452,11 @@ def reconcile_planning_package(db:Session,bid_id:int,tables:dict[str,list[dict]]
    "missing_contract_staff_roles":len(missing_contract_staff),
    "productivity_shortfalls":len(productivity_shortfalls),
    "concurrent_resource_reviews":len(concurrency_reviews),
+   "undated_resource_entries":sum(1 for x in entries if not x.start_date and not x.finish_date),
    "high_issues":sum(1 for x in issues if x["severity"]=="High"),
    "medium_issues":sum(1 for x in issues if x["severity"]=="Medium"),
   },
-  "version":"integrated-planning-package-v4",
+  "version":"integrated-planning-package-v5",
   "note":"This reconciles evidence supplied by the bidder. It does not invent crew sizes, equipment quantities, staff norms or productivity assumptions.",
  }
 
