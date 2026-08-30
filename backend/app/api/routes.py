@@ -56,7 +56,7 @@ from app.services.bid_decision_analytics import bid_decision_analytics,create_de
 from app.storage.base import LocalSecureStorage
 router=APIRouter()
 def user_dep(db:Session=Depends(get_db),x_user_id:int|None=Header(default=None,alias="X-User-ID"),authorization:str|None=Header(default=None,alias="Authorization")): return current_user(db,x_user_id,authorization)
-def metadata(request:Request): return {"ip":request.client.host if request.client else None,"user_agent":request.headers.get("user-agent")}
+def metadata(request:Request): return {"ip":request.client.host if request.client else None,"user_agent":request.headers.get("user-agent"),"request_id":getattr(request.state,"request_id",None)}
 def get_bid(db,id):
  bid=db.get(BidProject,id)
  if not bid: raise HTTPException(404,"Bid project not found")
