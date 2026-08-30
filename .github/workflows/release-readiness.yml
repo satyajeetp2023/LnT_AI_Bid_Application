@@ -108,6 +108,22 @@ jobs:
           PYTHONPATH=. python -m app.seed
           PYTHONPATH=. pytest -q uat
 
+      - name: PostgreSQL backup and restore smoke
+        env:
+          PGPASSWORD: release-test-password
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client
+          pg_dump -h localhost -U railway -d railway_bid --no-owner --no-privileges > /tmp/railway_bid.sql
+          test -s /tmp/railway_bid.sql
+          createdb -h localhost -U railway railway_bid_restore
+          psql -h localhost -U railway -d railway_bid_restore -v ON_ERROR_STOP=1 -f /tmp/railway_bid.sql >/tmp/restore.log
+          COUNT=$(psql -h localhost -U railway -d railway_bid_restore -Atc "select count(*) from alembic_version")
+          test "$COUNT" = "1"
+          TABLE_COUNT=$(psql -h localhost -U railway -d railway_bid_restore -Atc "select count(*) from information_schema.tables where table_schema='public'")
+          test "$TABLE_COUNT" -ge 13
+          echo "backup/restore verified with $TABLE_COUNT public tables"
+
       - uses: actions/setup-node@v7.0.0
         with:
           node-version: "22"
