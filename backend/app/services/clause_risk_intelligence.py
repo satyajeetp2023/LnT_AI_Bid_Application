@@ -136,7 +136,7 @@ def scan_document_clause_risks(
      risk_code=pattern.risk_code,risk_title=pattern.title,risk_category=pattern.category,severity=pattern.severity,
      source_page=str(unit.page) if unit.page else None,source_clause=_clause_from_text(line),source_section=section,
      source_excerpt=line[:4000],confidence=Decimal(str(confidence)),detection_method="Firm Risk Pattern",
-     review_status="Open",
+     responsible_function="Contracts",review_status="Open",
     ));signatures.add(sig);created+=1
  db.add(AuditEvent(
   user_id=user_id,bid_project_id=document.bid_project_id,event_type="clause_risk.scan_completed",
@@ -162,6 +162,7 @@ def bid_clause_risk_summary(db:Session,bid_id:int):
    "source_section":x.source_section,"source_excerpt":x.source_excerpt,"confidence":float(x.confidence),
    "explanation":patterns.get(x.risk_pattern_id).explanation if patterns.get(x.risk_pattern_id) else None,
    "reviewer_guidance":patterns.get(x.risk_pattern_id).reviewer_guidance if patterns.get(x.risk_pattern_id) else None,
+   "responsible_function":x.responsible_function,"responsible_person":x.responsible_person,
    "review_status":x.review_status,"reviewer_disposition":x.reviewer_disposition,"reviewer_comment":x.reviewer_comment,
   } for x in rows],
   "summary":{
