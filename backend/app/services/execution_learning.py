@@ -199,8 +199,9 @@ def execution_learning_intelligence(db:Session,bid_ids:list[int]):
  if not bid_ids:
   return {"summary":{"reviewed_projects":0},"records":[],"version":"phase8-execution-learning-portfolio-v1","note":"Reviewed execution actuals only."}
  executions=db.scalars(select(ExecutionOutcome).where(ExecutionOutcome.bid_project_id.in_(bid_ids),ExecutionOutcome.review_status=="Reviewed")).all()
+ reviewed_factors=db.scalars(select(ExecutionLearningFactor).where(ExecutionLearningFactor.bid_project_id.in_(bid_ids),ExecutionLearningFactor.review_status=="Reviewed")).all()
  if not executions:
-  return {"summary":{"reviewed_projects":0},"records":[],"version":"phase8-execution-learning-portfolio-v1","note":"Reviewed execution actuals only."}
+  return {"summary":{"reviewed_projects":0,"reviewed_factors":len(reviewed_factors)},"records":[],"factor_summary":{"by_category":[],"by_impact_area":[],"adverse":0,"favorable":0,"neutral":0},"version":"phase8-execution-learning-portfolio-v2","note":"Reviewed execution actuals and reviewed source-backed variance factors only."}
  outcomes={x.bid_project_id:x for x in db.scalars(select(BidOutcome).where(BidOutcome.bid_project_id.in_([e.bid_project_id for e in executions]))).all()}
  projects={x.id:x for x in db.scalars(select(BidProject).where(BidProject.id.in_([e.bid_project_id for e in executions]))).all()}
  records=[];revenue_changes=[];margin_changes=[];durations=[];eots=[]
@@ -227,6 +228,13 @@ def execution_learning_intelligence(db:Session,bid_ids:list[int]):
    "average_eot_days":_round(sum(eots)/len(eots)) if eots else None,
   },
   "records":records,
-  "version":"phase8-execution-learning-portfolio-v1",
-  "note":"Deterministic comparison of reviewed actuals against recorded winning bid values. No missing execution value is inferred.",
+  "factor_summary":{
+   "by_category":[{"name":k,"count":v} for k,v in category_counts.most_common()],
+   "by_impact_area":[{"name":k,"count":v} for k,v in area_counts.most_common()],
+   "adverse":sum(x.direction=="Adverse" for x in reviewed_factors),
+   "favorable":sum(x.direction=="Favorable" for x in reviewed_factors),
+   "neutral":sum(x.direction=="Neutral" for x in reviewed_factors),
+  },
+  "version":"phase8-execution-learning-portfolio-v2",
+  "note":"Deterministic comparison of reviewed actuals against recorded winning bid values, plus reviewed source-backed variance factors. No missing execution value is inferred.",
  }
