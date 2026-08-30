@@ -5,18 +5,30 @@ import {EmptyState,ErrorState,LoadingState,PageHeader,SummaryCard} from "@/compo
 import {request} from "@/services/api";
 import type {HistoricalBidIntelligence} from "@/types";
 
-type HistoricalBidIntelligenceWithSpread=HistoricalBidIntelligence&{market_spread:{samples:number;average_l2_to_l1_percent:number|null;average_l3_to_l1_percent:number|null;average_l4_to_l1_percent:number|null}};
-
 export default function HistoricalIntelligencePage(){
- const [data,setData]=useState<HistoricalBidIntelligenceWithSpread|null>(null);
+ const [data,setData]=useState<HistoricalBidIntelligence|null>(null);
  const [loading,setLoading]=useState(true);
  const [error,setError]=useState("");
+ const [projectType,setProjectType]=useState("");
+ const [client,setClient]=useState("");
+ const [projectTypes,setProjectTypes]=useState<string[]>([]);
+ const [clients,setClients]=useState<string[]>([]);
 
  useEffect(()=>{
-  request<HistoricalBidIntelligenceWithSpread>("/historical-bids/intelligence")
-   .then(setData).catch(()=>setError("Unable to load historical bid intelligence."))
+  setLoading(true);setError("");
+  const params=new URLSearchParams();
+  if(projectType)params.set("project_type",projectType);
+  if(client)params.set("client",client);
+  request<HistoricalBidIntelligence>("/historical-bids/intelligence"+(params.size?"?"+params.toString():""))
+   .then(x=>{
+    setData(x);
+    if(!projectType&&!client){
+     setProjectTypes(x.by_project_type.map(v=>v.name).filter(v=>v!=="Unspecified"));
+     setClients(x.by_client.map(v=>v.name).filter(v=>v!=="Unspecified"));
+    }
+   }).catch(()=>setError("Unable to load historical bid intelligence."))
    .finally(()=>setLoading(false));
- },[]);
+ },[projectType,client]);
 
  if(loading)return <LoadingState label="Loading historical intelligence"/>;
  if(error)return <ErrorState message={error}/>;
@@ -24,6 +36,14 @@ export default function HistoricalIntelligencePage(){
 
  return <div className="mx-auto max-w-[1500px]">
   <PageHeader items={[{label:"Review & Insights"},{label:"Historical Intelligence"}]} title="Historical Bid Intelligence" description="Descriptive win/loss, competitor and market-spread intelligence from recorded tender results."/>
+  <section className="mb-3 rounded border border-slate-200 bg-white p-3">
+   <div className="flex flex-wrap items-end gap-3">
+    <label className="min-w-52 text-xs font-semibold text-slate-600">Project Type<select value={projectType} onChange={e=>setProjectType(e.target.value)} className="mt-1 w-full rounded border border-slate-300 bg-white px-2.5 py-2 text-xs font-normal text-slate-800"><option value="">All project types</option>{projectTypes.map(x=><option key={x}>{x}</option>)}</select></label>
+    <label className="min-w-52 text-xs font-semibold text-slate-600">Client<select value={client} onChange={e=>setClient(e.target.value)} className="mt-1 w-full rounded border border-slate-300 bg-white px-2.5 py-2 text-xs font-normal text-slate-800"><option value="">All clients</option>{clients.map(x=><option key={x}>{x}</option>)}</select></label>
+    {(projectType||client)&&<button onClick={()=>{setProjectType("");setClient("")}} className="rounded border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700">Clear Filters</button>}
+    <div className="text-[10px] text-slate-500">Filters apply server-side to historical bids you are authorized to view.</div>
+   </div>
+  </section>
   <div className="mb-3 grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-7">
    <SummaryCard label="Recorded" value={data.summary.recorded}/>
    <SummaryCard label="Completed" value={data.summary.completed??0}/>
