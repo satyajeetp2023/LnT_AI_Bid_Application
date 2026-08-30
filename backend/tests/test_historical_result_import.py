@@ -3,7 +3,7 @@ import io
 
 from openpyxl import Workbook
 
-from app.services.historical_result_import import preview_historical_result
+from app.services.historical_result_import import _preview_pdf_text,preview_historical_result
 
 
 def test_csv_historical_result_preview_detects_ranked_prices_and_our_bid():
@@ -33,3 +33,26 @@ def test_xlsx_historical_result_preview_is_review_first_and_handles_duplicates()
     assert len(result["prices"])==1
     assert any("Duplicate rank" in x for x in result["warnings"])
     assert "No bid outcome" in result["note"]
+
+
+def test_pdf_text_result_preview_extracts_ranked_bidders_for_review():
+    text="""
+    Tender Result Notice
+    Rank Bidder Bid Value
+    1 Competitor A 1000 INR
+    2 Larsen & Toubro 1080 INR
+    3 Competitor C 1125 INR
+    """
+    result=_preview_pdf_text(text,"result.pdf")
+    assert result["detected"] is True
+    assert result["requires_review"] is True
+    assert len(result["prices"])==3
+    assert result["outcome_candidate"]["our_rank"]==2
+    assert result["outcome_candidate"]["result_status"]=="Lost"
+
+
+def test_pdf_text_result_preview_falls_back_when_text_is_insufficient():
+    result=_preview_pdf_text("scan","scan.pdf")
+    assert result["detected"] is False
+    assert result["requires_review"] is True
+    assert any("vision/OCR" in x for x in result["warnings"])
