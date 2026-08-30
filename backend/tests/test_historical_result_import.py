@@ -1,8 +1,10 @@
 import csv
 import io
 
+import pytest
 from openpyxl import Workbook
 
+from app.services import historical_result_import
 from app.services.historical_result_import import _preview_pdf_text,preview_historical_result
 
 
@@ -56,3 +58,19 @@ def test_pdf_text_result_preview_falls_back_when_text_is_insufficient():
     assert result["detected"] is False
     assert result["requires_review"] is True
     assert any("vision/OCR" in x for x in result["warnings"])
+
+
+def test_csv_preview_rejects_excessive_row_count(monkeypatch):
+    monkeypatch.setattr(historical_result_import,"MAX_PREVIEW_ROWS",2)
+    content=b"Rank,Bidder Name,Bid Value\n1,A,100\n2,B,110\n"
+    with pytest.raises(ValueError,match="at most 2 rows"):
+        preview_historical_result("csv",content,"too-many.csv")
+
+
+def test_xlsx_preview_rejects_excessive_uncompressed_archive(monkeypatch):
+    wb=Workbook();ws=wb.active
+    ws.append(["Rank","Bidder Name","Bid Value"]);ws.append([1,"A",100])
+    out=io.BytesIO();wb.save(out)
+    monkeypatch.setattr(historical_result_import,"MAX_XLSX_UNCOMPRESSED_BYTES",1)
+    with pytest.raises(ValueError,match="uncompressed workbook content"):
+        preview_historical_result("xlsx",out.getvalue(),"large.xlsx")
