@@ -129,3 +129,44 @@ def test_excel_predecessor_lag_resources_and_milestone_are_normalized():
     assert {"Civil Crew","OHE Crew","Crane"}<=names
     assert len(ing["tables"]["TASKRSRC"])==3
     assert ing["capabilities"]["resources"] is True
+
+
+def test_microsoft_project_xml_semantics_are_normalized():
+    xml=b"""<?xml version="1.0"?>
+<Project xmlns="http://schemas.microsoft.com/project">
+  <Name>MSP Railway Test</Name>
+  <Tasks>
+    <Task>
+      <UID>10</UID><ID>1</ID><Name>Foundation</Name><WBS>1.1</WBS>
+      <Start>2026-01-01T08:00:00</Start><Finish>2026-01-10T17:00:00</Finish>
+      <Duration>PT80H</Duration><TotalSlack>PT24H</TotalSlack>
+      <PercentComplete>100</PercentComplete><CalendarUID>1</CalendarUID>
+    </Task>
+    <Task>
+      <UID>20</UID><ID>2</ID><Name>Section Complete</Name><WBS>1.2</WBS>
+      <Start>2026-01-11T08:00:00</Start><Finish>2026-01-11T08:00:00</Finish>
+      <Duration>PT0H</Duration><Milestone>1</Milestone><PercentComplete>0</PercentComplete>
+      <PredecessorLink>
+        <PredecessorUID>10</PredecessorUID><Type>1</Type><LinkLag>600</LinkLag>
+      </PredecessorLink>
+    </Task>
+  </Tasks>
+  <Calendars><Calendar><UID>1</UID><Name>Standard</Name></Calendar></Calendars>
+  <Resources><Resource><UID>5</UID><Name>OHE Crew</Name><Type>1</Type></Resource></Resources>
+  <Assignments><Assignment><TaskUID>20</TaskUID><ResourceUID>5</ResourceUID></Assignment></Assignments>
+</Project>"""
+    ing=ingest_schedule("xml",xml)
+    assert ing["detected"] is True
+    assert ing["source_kind"]=="Microsoft Project XML"
+    tasks={x["task_id"]:x for x in ing["tables"]["TASK"]}
+    assert tasks["10"]["target_drtn_hr_cnt"]==80
+    assert tasks["10"]["total_float_hr_cnt"]==24
+    assert tasks["10"]["status_code"]=="Complete"
+    assert tasks["20"]["task_type"]=="TT_Mile"
+    rel=ing["tables"]["TASKPRED"][0]
+    assert rel["task_id"]=="20"
+    assert rel["pred_task_id"]=="10"
+    assert rel["pred_type"]=="PR_FS"
+    assert rel["lag_hr_cnt"]==1
+    assert ing["capabilities"]["resources"] is True
+    assert ing["capabilities"]["calendars"] is True
