@@ -214,6 +214,12 @@ def test_phase_1_to_7_acceptance_journey():
     assert summary["recorded"]>=1
     assert summary["lost"]>=1
 
+    comparison=client.get(f"/api/v1/bids/{bid_id}/historical-comparison",headers=admin)
+    assert comparison.status_code==200,comparison.text
+    comparison_body=comparison.json()
+    assert comparison_body["current_bid_id"]==bid_id
+    assert "methodology" in comparison_body
+
     dashboard=client.get("/api/v1/dashboard/summary",headers=admin)
     assert dashboard.status_code==200
     assert dashboard.json()["documents_uploaded"]>=1
