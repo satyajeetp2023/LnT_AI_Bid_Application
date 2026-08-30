@@ -79,7 +79,11 @@ def _relation_key(rel,task_map):
     )
 
 
-def compare_schedule_tables(base:dict[str,list[dict]],cur:dict[str,list[dict]])->dict:
+def compare_schedule_tables(base:dict[str,list[dict]],cur:dict[str,list[dict]],base_capabilities:dict|None=None,cur_capabilities:dict|None=None)->dict:
+    base_capabilities=base_capabilities or {}
+    cur_capabilities=cur_capabilities or {}
+    float_comparable=bool(base_capabilities.get("float",True) and cur_capabilities.get("float",True))
+    logic_comparable=bool(base_capabilities.get("logic",True) and cur_capabilities.get("logic",True))
     base_tasks=base.get("TASK",[])
     cur_tasks=cur.get("TASK",[])
     base_by_key={_key(x):x for x in base_tasks if _key(x)}
@@ -89,26 +93,31 @@ def compare_schedule_tables(base:dict[str,list[dict]],cur:dict[str,list[dict]])-
     added=[cur_by_key[k] for k in sorted(set(cur_by_key)-set(base_by_key))]
     deleted=[base_by_key[k] for k in sorted(set(base_by_key)-set(cur_by_key))]
     changes=[_task_row(base_by_key[k],cur_by_key[k]) for k in common]
+    if not float_comparable:
+        for row in changes:
+            row["baseline_total_float_hours"]=None
+            row["current_total_float_hours"]=None
+            row["float_change_hours"]=None
 
     finish_slippage=[x for x in changes if x["finish_variance_days"] is not None and x["finish_variance_days"]>0]
     start_slippage=[x for x in changes if x["start_variance_days"] is not None and x["start_variance_days"]>0]
     duration_changes=[x for x in changes if abs(x["duration_change_hours"])>.01]
-    float_changes=[x for x in changes if abs(x["float_change_hours"])>.01]
+    float_changes=[x for x in changes if x["float_change_hours"] is not None and abs(x["float_change_hours"])>.01] if float_comparable else []
     status_changes=[x for x in changes if x["status_changed"]]
 
     milestone_types={"TT_Mile","TT_FinMile","TT_StartMile","TT_FinishMile"}
     milestone_changes=[x for x in changes if x.get("task_type") in milestone_types and x["finish_variance_days"] is not None and abs(x["finish_variance_days"])>.01]
 
-    newly_negative_float=[x for x in changes if x["baseline_total_float_hours"]>=0 and x["current_total_float_hours"]<0]
-    float_erosion=[x for x in changes if x["float_change_hours"]<0]
+    newly_negative_float=[x for x in changes if x["baseline_total_float_hours"] is not None and x["current_total_float_hours"] is not None and x["baseline_total_float_hours"]>=0 and x["current_total_float_hours"]<0] if float_comparable else []
+    float_erosion=[x for x in changes if x["float_change_hours"] is not None and x["float_change_hours"]<0] if float_comparable else []
     delayed_milestones=[x for x in milestone_changes if (x["finish_variance_days"] or 0)>0]
 
     base_task_id_map={x.get("task_id"):x for x in base_tasks}
     cur_task_id_map={x.get("task_id"):x for x in cur_tasks}
-    base_rel={_relation_key(x,base_task_id_map) for x in base.get("TASKPRED",[])}
-    cur_rel={_relation_key(x,cur_task_id_map) for x in cur.get("TASKPRED",[])}
-    added_rel=sorted(cur_rel-base_rel)
-    deleted_rel=sorted(base_rel-cur_rel)
+    base_rel={_relation_key(x,base_task_id_map) for x in base.get("TASKPRED",[])} if logic_comparable else set()
+    cur_rel={_relation_key(x,cur_task_id_map) for x in cur.get("TASKPRED",[])} if logic_comparable else set()
+    added_rel=sorted(cur_rel-base_rel) if logic_comparable else []
+    deleted_rel=sorted(base_rel-cur_rel) if logic_comparable else []
 
     base_project=(base.get("PROJECT") or [{}])[0]
     cur_project=(cur.get("PROJECT") or [{}])[0]
@@ -173,6 +182,15 @@ def compare_schedule_tables(base:dict[str,list[dict]],cur:dict[str,list[dict]])-
         "deleted_relationships":[{
             "predecessor":x[0],"successor":x[1],"type":x[2],"lag_hours":x[3]
         } for x in deleted_rel],
+        "comparison_capabilities":{
+            "activity_identity":True,
+            "dates":True,
+            "duration":True,
+            "status":True,
+            "float":float_comparable,
+            "logic":logic_comparable,
+            "note":"A comparison dimension is enabled only when both schedule versions expose that parameter.",
+        },
         "risk_summary":{
             "newly_negative_float":newly_negative_float[:50],
             "largest_float_erosion":float_erosion[:50],
@@ -181,7 +199,7 @@ def compare_schedule_tables(base:dict[str,list[dict]],cur:dict[str,list[dict]])-
             "risk_level":"High" if delayed_milestones or newly_negative_float else "Medium" if finish_slippage or float_erosion else "Low",
             "note":"Risk level highlights schedule deterioration signals only; it is not a delay entitlement conclusion.",
         },
-        "comparison_version":"phase6-schedule-comparison-v3",
+        "comparison_version":"phase6-schedule-comparison-v4",
         "note":"This is a deterministic schedule-version comparison. It does not by itself establish contractual delay responsibility or entitlement.",
     }
 
