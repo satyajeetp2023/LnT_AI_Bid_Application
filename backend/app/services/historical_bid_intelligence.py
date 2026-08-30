@@ -83,28 +83,33 @@ def get_bid_outcome(db:Session,bid_id:int):
 
 
 def upsert_bid_outcome(db:Session,bid:BidProject,payload,user_id:int,request_metadata:dict|None=None):
- outcome=db.scalar(select(BidOutcome).where(BidOutcome.bid_project_id==bid.id))
- values=payload.model_dump(exclude={"prices"})
- if outcome is None:
-  outcome=BidOutcome(bid_project_id=bid.id,created_by=user_id,updated_by=user_id,**values)
-  db.add(outcome)
- else:
-  for key,value in values.items():setattr(outcome,key,value)
-  outcome.updated_by=user_id
- db.execute(delete(BidPriceRecord).where(BidPriceRecord.bid_project_id==bid.id))
- db.flush()
- for row in payload.prices:
-  db.add(BidPriceRecord(
-   bid_project_id=bid.id,bidder_name=" ".join(row.bidder_name.split()),rank=row.rank,
-   bid_value=row.bid_value,currency=row.currency.upper(),is_ours=row.is_ours,
-   source_reference=row.source_reference,created_by=user_id,
+ try:
+  outcome=db.scalar(select(BidOutcome).where(BidOutcome.bid_project_id==bid.id))
+  values=payload.model_dump(exclude={"prices"})
+  if outcome is None:
+   outcome=BidOutcome(bid_project_id=bid.id,created_by=user_id,updated_by=user_id,**values)
+   db.add(outcome)
+  else:
+   for key,value in values.items():setattr(outcome,key,value)
+   outcome.updated_by=user_id
+  db.execute(delete(BidPriceRecord).where(BidPriceRecord.bid_project_id==bid.id))
+  db.flush()
+  for row in payload.prices:
+   db.add(BidPriceRecord(
+    bid_project_id=bid.id,bidder_name=" ".join(row.bidder_name.split()),rank=row.rank,
+    bid_value=row.bid_value,currency=row.currency.upper(),is_ours=row.is_ours,
+    source_reference=row.source_reference,created_by=user_id,
+   ))
+  db.flush()
+  db.add(AuditEvent(
+   user_id=user_id,bid_project_id=bid.id,event_type="historical_bid.outcome_saved",
+   entity_type="BidProject",entity_id=str(bid.id),request_metadata=request_metadata or {},
+   details={"result_status":payload.result_status,"our_rank":payload.our_rank,"price_rows":len(payload.prices)},
   ))
- db.add(AuditEvent(
-  user_id=user_id,bid_project_id=bid.id,event_type="historical_bid.outcome_saved",
-  entity_type="BidProject",entity_id=str(bid.id),request_metadata=request_metadata or {},
-  details={"result_status":payload.result_status,"our_rank":payload.our_rank,"price_rows":len(payload.prices)},
- ))
- db.commit()
+  db.commit()
+ except Exception:
+  db.rollback()
+  raise
  return get_bid_outcome(db,bid.id)
 
 
