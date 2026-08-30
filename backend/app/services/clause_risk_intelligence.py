@@ -183,8 +183,11 @@ def review_clause_risk(db:Session,finding_id:int,disposition:str,comment:str|Non
  if disposition not in allowed:raise ValueError("Unsupported clause-risk disposition")
  finding=db.get(BidClauseRiskFinding,finding_id)
  if not finding:raise ValueError("Clause-risk finding not found")
+ reviewer_comment=(comment or "").strip() or None
+ if disposition in {"Accept Risk","Mitigated / Qualified","Not Applicable","False Positive"} and not reviewer_comment:
+  raise ValueError("A reviewer comment is required to close a clause-risk finding")
  finding.reviewer_disposition=disposition
- finding.reviewer_comment=(comment or "").strip() or None
+ finding.reviewer_comment=reviewer_comment
  finding.review_status="Closed" if disposition in {"Accept Risk","Mitigated / Qualified","Not Applicable","False Positive"} else "Open"
  finding.reviewed_by=user_id
  finding.reviewed_at=datetime.now(timezone.utc)
@@ -229,6 +232,7 @@ def promote_finding_to_firm_pattern(
 
 
 def firm_risk_library(db:Session):
+ ensure_default_risk_library(db)
  rows=db.scalars(select(ClauseRiskPattern).where(
   ClauseRiskPattern.is_active.is_(True)
  ).order_by(ClauseRiskPattern.severity,ClauseRiskPattern.category,ClauseRiskPattern.title)).all()
