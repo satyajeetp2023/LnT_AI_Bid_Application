@@ -19,6 +19,8 @@ MAX_PREVIEW_ROWS=10000
 MAX_PREVIEW_COLUMNS=100
 MAX_XLSX_UNCOMPRESSED_BYTES=50*1024*1024
 MAX_XLSX_MEMBER_BYTES=20*1024*1024
+MAX_PREVIEW_CELL_CHARS=20000
+MAX_PDF_PAGES=250
 
 
 def _norm(value):
@@ -98,6 +100,7 @@ def _preview_pdf_text(text:str,filename:str):
 def _preview_pdf(content:bytes,filename:str):
  try:
   reader=PdfReader(io.BytesIO(content))
+  if len(reader.pages)>MAX_PDF_PAGES:raise ValueError(f"PDF result preview supports at most {MAX_PDF_PAGES} pages.")
   text="\n".join(page.extract_text() or "" for page in reader.pages)
  except Exception:
   return {"detected":False,"source_filename":filename,"prices":[],"warnings":["PDF could not be safely parsed; manual review is required."],"requires_review":True,"parser_version":"phase7-historical-result-pdf-v1"}
@@ -124,6 +127,8 @@ def _bounded_rows(rows):
   if index>MAX_PREVIEW_ROWS:
    raise ValueError(f"Historical result preview supports at most {MAX_PREVIEW_ROWS} rows.")
   values=list(row)
+  if any(len(str(value))>MAX_PREVIEW_CELL_CHARS for value in values if value is not None):
+   raise ValueError(f"Historical result preview rejects cells larger than {MAX_PREVIEW_CELL_CHARS} characters.")
   if len(values)>MAX_PREVIEW_COLUMNS:
    raise ValueError(f"Historical result preview supports at most {MAX_PREVIEW_COLUMNS} columns.")
   matrix.append(values)
