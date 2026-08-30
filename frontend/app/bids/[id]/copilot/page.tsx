@@ -4,26 +4,36 @@ import {use,useEffect,useState} from "react";
 import {BidWorkspaceHeader} from "@/components/BidWorkspaceHeader";
 import {ErrorState,LoadingState,PageHeader,StatusBadge,SummaryCard} from "@/components/design-system";
 import {request} from "@/services/api";
-import type {Bid,ClauseRiskFinding,ClauseRiskSummary,TenderQAResponse} from "@/types";
+import type {Bid,ClauseRiskFinding,ClauseRiskSummary,DrawingBoqFinding,DrawingBoqSummary,FirmRiskLibrary,TenderQAResponse} from "@/types";
 
 const dispositions=["Open","Escalate","Mitigated / Qualified","Accept Risk","Not Applicable","False Positive"];
+const drawingDispositions=["Confirmed Variance","BOQ Correct","Drawing Correct","Different Scope","Unit Conversion Required","False Match","Escalate"];
 
 export default function CopilotPage({params}:{params:Promise<{id:string}>}){
  const {id}=use(params);
  const [bid,setBid]=useState<Bid|null>(null);
  const [risks,setRisks]=useState<ClauseRiskSummary|null>(null);
+ const [drawing,setDrawing]=useState<DrawingBoqSummary|null>(null);
+ const [library,setLibrary]=useState<FirmRiskLibrary|null>(null);
  const [loading,setLoading]=useState(true);
  const [error,setError]=useState("");
  const [question,setQuestion]=useState("");
  const [asking,setAsking]=useState(false);
  const [answer,setAnswer]=useState<TenderQAResponse|null>(null);
  const [riskState,setRiskState]=useState<Record<number,{disposition:string;comment:string}>>({});
+ const [drawingState,setDrawingState]=useState<Record<number,{disposition:string;comment:string}>>({});
 
  const loadRisks=()=>request<ClauseRiskSummary>("/bids/"+id+"/clause-risks").then(setRisks);
+ const loadDrawing=()=>request<DrawingBoqSummary>("/bids/"+id+"/drawing-boq").then(setDrawing);
  useEffect(()=>{
   setLoading(true);
-  Promise.all([request<Bid>("/bids/"+id),request<ClauseRiskSummary>("/bids/"+id+"/clause-risks")])
-   .then(([b,r])=>{setBid(b);setRisks(r)})
+  Promise.all([
+   request<Bid>("/bids/"+id),
+   request<ClauseRiskSummary>("/bids/"+id+"/clause-risks"),
+   request<DrawingBoqSummary>("/bids/"+id+"/drawing-boq"),
+   request<FirmRiskLibrary>("/firm-risk-library")
+  ])
+   .then(([b,r,d,l])=>{setBid(b);setRisks(r);setDrawing(d);setLibrary(l)})
    .catch(()=>setError("Unable to load Bid Intelligence Copilot."))
    .finally(()=>setLoading(false));
  },[id]);
@@ -44,12 +54,26 @@ export default function CopilotPage({params}:{params:Promise<{id:string}>}){
   }catch{setError("Unable to save clause-risk review.")}
  };
 
+ const saveDrawing=async(item:DrawingBoqFinding)=>{
+  const state=drawingState[item.id]||{disposition:item.reviewer_disposition||"Escalate",comment:item.reviewer_comment||""};
+  try{
+   await request("/drawing-boq/"+item.id+"/review",{method:"POST",body:JSON.stringify(state)});
+   await loadDrawing();
+  }catch{setError("Unable to save drawing/BOQ review.")}
+ };
+
  if(loading)return <div className="mx-auto max-w-[1500px]"><LoadingState label="Loading Bid Intelligence Copilot…"/></div>;
 
  return <div className="mx-auto max-w-[1500px]">
   <BidWorkspaceHeader bid={bid} active="Copilot"/>
-  <PageHeader items={[{label:"Bid Workspace",href:"/bids"},{label:"Bid Intelligence Copilot"}]} title="Bid Intelligence Copilot" description="Ask grounded questions across this tender and review source-linked contractual risk flags. AI assists; the bid team decides."/>
+  <PageHeader items={[{label:"Bid Workspace",href:"/bids"},{label:"Bid Intelligence Copilot"}]} title="Bid Intelligence Copilot" description="Ask grounded questions across this tender, review firm-learned contractual risks and sanity-check drawing quantities against the BOQ. AI assists; the bid team decides."/>
   {error&&<div className="mb-3"><ErrorState message={error}/></div>}
+
+  <div className="mb-3 grid gap-3 sm:grid-cols-3">
+   <div className="rounded border border-slate-200 bg-white p-3"><div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Tender Q&A</div><div className="mt-1 text-sm font-semibold text-slate-900">Bid-scoped · Source linked</div><div className="mt-1 text-[10px] text-slate-500">Conflicting numeric values are surfaced instead of silently resolved.</div></div>
+   <div className="rounded border border-slate-200 bg-white p-3"><div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Firm Risk Library</div><div className="mt-1 text-sm font-semibold text-slate-900">{library?library.summary.patterns:"—"} active patterns</div><div className="mt-1 text-[10px] text-slate-500">{library?library.summary.firm_reviewed:0} human-promoted precedent pattern{library?.summary.firm_reviewed===1?"":"s"}.</div></div>
+   <div className="rounded border border-slate-200 bg-white p-3"><div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Drawing ↔ BOQ</div><div className="mt-1 text-sm font-semibold text-slate-900">{drawing?drawing.summary.open_reviews:"—"} review item{drawing?.summary.open_reviews===1?"":"s"}</div><div className="mt-1 text-[10px] text-slate-500">Quantity evidence never overwrites the BOQ automatically.</div></div>
+  </div>
 
   <section className="mb-3 overflow-hidden rounded border border-slate-200 bg-white">
    <div className="border-b bg-slate-50 px-4 py-3">
@@ -127,5 +151,33 @@ export default function CopilotPage({params}:{params:Promise<{id:string}>}){
     </div>}
    </section>
   </>}
+
+  {library&&<section className="mb-3 overflow-hidden rounded border border-slate-200 bg-white">
+   <div className="flex flex-col gap-2 border-b bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+    <div><h2 className="text-sm font-bold text-slate-900">Firm Clause Risk Library</h2><p className="text-xs text-slate-500">Reusable default and human-promoted precedent patterns applied across future bids.</p></div>
+    <div className="flex gap-2 text-[10px] font-bold"><span className="rounded bg-red-50 px-2 py-1 text-red-700">{library.summary.critical} CRITICAL</span><span className="rounded bg-amber-50 px-2 py-1 text-amber-700">{library.summary.high} HIGH</span></div>
+   </div>
+   <div className="grid gap-2 p-3 md:grid-cols-2 xl:grid-cols-3">{library.items.slice(0,12).map(item=><div key={item.id} className="rounded border border-slate-200 bg-white p-3">
+    <div className="flex items-start justify-between gap-2"><div><div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{item.category} · {item.risk_code}</div><div className="mt-1 text-sm font-semibold text-slate-900">{item.title}</div></div><StatusBadge tone={item.severity==="Critical"?"red":item.severity==="High"?"amber":"grey"}>{item.severity}</StatusBadge></div>
+    <div className="mt-2 text-[10px] leading-4 text-slate-500">{item.source_type} · {item.finding_count} bid finding{item.finding_count===1?"":"s"}</div>
+    <div className="mt-2 flex flex-wrap gap-1">{item.pattern_terms.slice(0,4).map(term=><span key={term} className="rounded bg-slate-100 px-2 py-1 text-[10px] text-slate-600">{term}</span>)}</div>
+   </div>)}</div>
+  </section>}
+
+  {drawing&&<section className="mb-3 overflow-hidden rounded border border-slate-200 bg-white">
+   <div className="border-b bg-slate-50 px-4 py-3"><h2 className="text-sm font-bold text-slate-900">Drawing ↔ BOQ Verification</h2><p className="text-xs text-slate-500">{drawing.note}</p></div>
+   <div className="grid grid-cols-2 gap-3 p-3 sm:grid-cols-3 lg:grid-cols-6">
+    <SummaryCard label="Observations" value={drawing.summary.observations}/><SummaryCard label="Exact Matches" value={drawing.summary.matched} tone="green"/><SummaryCard label="Quantity Variance" value={drawing.summary.quantity_variances} tone="red"/><SummaryCard label="Unit Review" value={drawing.summary.unit_reviews} tone="amber"/><SummaryCard label="No BOQ Match" value={drawing.summary.unmatched} tone="amber"/><SummaryCard label="Open Review" value={drawing.summary.open_reviews} tone="red"/>
+   </div>
+   {drawing.items.length===0?<div className="border-t p-6 text-sm text-slate-500">No drawing quantity observations have been extracted yet. The verification workflow is ready; vision-derived observations will appear here with drawing/page evidence and BOQ comparison.</div>:<div className="space-y-2 border-t p-3">{drawing.items.map(item=>{
+    const state=drawingState[item.id]||{disposition:item.reviewer_disposition||"Escalate",comment:item.reviewer_comment||""};
+    return <article key={item.id} className={item.finding_status==="Quantity Variance"?"rounded border border-red-200 bg-red-50/30 p-3":"rounded border border-slate-200 bg-white p-3"}>
+     <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between"><div><div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{item.drawing_reference||"Drawing"}{item.source_page&&" · p."+item.source_page}</div><div className="mt-1 text-sm font-semibold text-slate-900">{item.drawing_item||"Quantity observation"}</div><div className="mt-1 text-[11px] text-slate-500">Drawing: {item.drawing_quantity} {item.drawing_unit} · BOQ: {item.boq_quantity??"—"} {item.boq_unit||""}{item.boq_reference&&" · "+item.boq_reference}</div></div><StatusBadge tone={item.finding_status==="Match"?"green":item.finding_status==="Quantity Variance"?"red":"amber"}>{item.finding_status}</StatusBadge></div>
+     {item.variance_quantity!==null&&<div className="mt-2 rounded bg-slate-50 p-2 text-xs text-slate-700">Variance: <span className="font-semibold">{item.variance_quantity} {item.drawing_unit}</span>{item.variance_percent!==null&&<> · {item.variance_percent.toFixed(2)}%</>}</div>}
+     <div className="mt-2 text-[10px] text-slate-500">Drawing extraction confidence: {item.extraction_confidence===null?"—":Math.round(item.extraction_confidence*100)+"%"} · BOQ match confidence: {Math.round(item.match_confidence*100)}%</div>
+     {item.review_status==="Open"&&<div className="mt-3 grid gap-2 lg:grid-cols-[220px_1fr_auto] lg:items-end"><div><label className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Disposition</label><select value={state.disposition} onChange={e=>setDrawingState({...drawingState,[item.id]:{...state,disposition:e.target.value}})} className="mt-1 w-full rounded border border-slate-300 bg-white px-2 py-2 text-xs">{drawingDispositions.map(x=><option key={x}>{x}</option>)}</select></div><div><label className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Reviewer Comment</label><input value={state.comment} onChange={e=>setDrawingState({...drawingState,[item.id]:{...state,comment:e.target.value}})} className="mt-1 w-full rounded border border-slate-300 bg-white px-2 py-2 text-xs" placeholder="Explain quantity basis, scope difference or required correction"/></div><button onClick={()=>saveDrawing(item)} className="rounded bg-[#304354] px-3 py-2 text-xs font-semibold text-white">Save Review</button></div>}
+    </article>
+   })}</div>}
+  </section>}
  </div>
 }
