@@ -50,7 +50,7 @@ from app.services.historical_bid_intelligence import get_bid_outcome,historical_
 from app.services.historical_result_import import preview_historical_result
 from app.storage.base import LocalSecureStorage
 router=APIRouter()
-def user_dep(db:Session=Depends(get_db),x_user_id:int=Header(default=1,alias="X-User-ID")): return current_user(db,x_user_id)
+def user_dep(db:Session=Depends(get_db),x_user_id:int=Header(alias="X-User-ID")): return current_user(db,x_user_id)
 def metadata(request:Request): return {"ip":request.client.host if request.client else None,"user_agent":request.headers.get("user-agent")}
 def get_bid(db,id):
  bid=db.get(BidProject,id)
