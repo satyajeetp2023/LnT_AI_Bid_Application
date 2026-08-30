@@ -6,11 +6,15 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-railway}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-railway}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-railway} -d ${POSTGRES_DB:-railway_bid}"]
       interval: 5s
       timeout: 3s
       retries: 10
     volumes: [postgres_data:/var/lib/postgresql/data]
+  storage-init:
+    image: alpine:3.20
+    command: ["sh", "-c", "mkdir -p /data/documents && chown -R 10001:10001 /data/documents"]
+    volumes: [document_data:/data/documents]
   backend:
     build: ./backend
     env_file: .env
@@ -25,6 +29,7 @@ services:
       retries: 12
     depends_on:
       db: {condition: service_healthy}
+      storage-init: {condition: service_completed_successfully}
   frontend:
     build:
       context: ./frontend
