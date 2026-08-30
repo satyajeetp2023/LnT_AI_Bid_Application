@@ -71,8 +71,8 @@ def _table_type(headers:list[str])->tuple[str,float]:
 def _semantic_field(header:str)->tuple[str,str]:
     lower=header.lower()
     if "clause" in lower and "reference" in lower:return "clause_reference","reference"
-    if "yes" in lower and ("compliant" in lower or "compliance" in lower):return "compliant_yes","bidder_input"
-    if "no" in lower and ("compliant" in lower or "compliance" in lower):return "compliant_no","bidder_input"
+    if re.search(r"\\byes\\b",lower) and ("compliant" in lower or "compliance" in lower):return "compliant_yes","bidder_input"
+    if re.search(r"\\bno\\b",lower) and ("compliant" in lower or "compliance" in lower):return "compliant_no","bidder_input"
     if ("comment" in lower or "proposal" in lower) and "tender" in lower:return "tenderer_comments","bidder_input"
     if "evaluator" in lower and ("remark" in lower or "comment" in lower):return "evaluator_remarks","employer_only"
     if "remark" in lower or "comment" in lower:return "comments","bidder_input"
