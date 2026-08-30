@@ -44,9 +44,13 @@ def _norm(value):
 def _semantic(value):
     text=_norm(value)
     compact=re.sub(r"\([^)]*\)|\[[^]]*\]","",text).strip(" :*-")
+    # Exact aliases must win before fuzzy prefix matching. This prevents
+    # "Constraint Date" from being consumed by the broader "constraint" alias.
     for semantic,names in ALIASES.items():
         if text in names or compact in names:return semantic
-        if any(compact.startswith(name+" ") for name in names if len(name)>=5):return semantic
+    for semantic,names in ALIASES.items():
+        if any(compact.startswith(name+" ") for name in names if len(name)>=5 and name not in {"constraint"}):
+            return semantic
     return None
 
 
@@ -74,9 +78,9 @@ def _duration_hours(value):
     lower=text.lower()
     number=_number(lower)
     if number is None:return None
-    if "hour" in lower:return number
-    if "minute" in lower:return number/60
-    if "week" in lower:return number*40
+    if re.search(r"(?:^|\s)(?:h|hr|hrs|hour|hours)\b",lower) or re.fullmatch(r"-?\d+(?:\.\d+)?h",lower):return number
+    if re.search(r"(?:^|\s)(?:m|min|mins|minute|minutes)\b",lower):return number/60
+    if re.search(r"(?:^|\s)(?:w|wk|wks|week|weeks)\b",lower):return number*40
     return number*8
 
 
