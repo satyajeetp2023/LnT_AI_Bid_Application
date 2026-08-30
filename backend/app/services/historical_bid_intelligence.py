@@ -205,8 +205,8 @@ def historical_bid_intelligence(db:Session,bid_ids:list[int]):
  complete_l1_l4=0;with_ours=0
  for outcome in completed:
   rows=[x for x in price_rows_completed if x.bid_project_id==outcome.bid_project_id]
-  ranks={x.rank for x in rows}
-  if {1,2,3,4}<=ranks:complete_l1_l4+=1
+  recorded_ranks={x.rank for x in rows}
+  if {1,2,3,4}<=recorded_ranks:complete_l1_l4+=1
   if any(x.is_ours for x in rows):with_ours+=1
  return {
   "summary":{
@@ -224,6 +224,13 @@ def historical_bid_intelligence(db:Session,bid_ids:list[int]):
    "average_l3_to_l1_percent":spread_average("l3_to_l1_percent"),
    "average_l4_to_l1_percent":spread_average("l4_to_l1_percent"),
   },
-  "version":"phase7-historical-bid-intelligence-v2",
+  "data_quality":{
+   "completed_results":len(completed),
+   "outcome_source_coverage_percent":round(outcome_source_count*100/len(completed),1) if completed else None,
+   "price_source_coverage_percent":round(price_source_count*100/len(price_rows_completed),1) if price_rows_completed else None,
+   "complete_l1_l4_coverage_percent":round(complete_l1_l4*100/len(completed),1) if completed else None,
+   "results_with_our_bid_marked_percent":round(with_ours*100/len(completed),1) if completed else None,
+  },
+  "version":"phase7-historical-bid-intelligence-v3",
   "note":"This is descriptive historical intelligence from recorded bid outcomes and ranked prices. Market spread and data-quality coverage are evidence-based only. It does not predict future results.",
  }
