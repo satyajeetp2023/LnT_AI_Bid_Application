@@ -150,7 +150,15 @@ jobs:
         run: docker build -t railway-bid-backend:release-test ./backend
 
       - name: Build frontend container
-        run: docker build -t railway-bid-frontend:release-test ./frontend
+        run: |
+          docker build \
+            --build-arg NEXT_PUBLIC_API_URL=https://bid-api.example.internal/api/v1 \
+            --build-arg NEXT_PUBLIC_AUTH_MODE=oidc \
+            --build-arg NEXT_PUBLIC_OIDC_AUTHORITY=https://identity.example.internal \
+            --build-arg NEXT_PUBLIC_OIDC_CLIENT_ID=railway-bid-intelligence-spa \
+            --build-arg NEXT_PUBLIC_OIDC_REDIRECT_URI=https://bid-intelligence.example.internal/auth/callback \
+            --build-arg NEXT_PUBLIC_OIDC_SCOPE="openid profile email" \
+            -t railway-bid-frontend:release-test ./frontend
 
       - name: Validate compose model
         run: docker compose config >/tmp/compose.rendered.yml
