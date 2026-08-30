@@ -71,7 +71,6 @@ export function Sidebar({mobileOpen=false,onClose}:{mobileOpen?:boolean;onClose?
    {n:"Decision Analytics",h:bidId?`/bids/${bidId}/decision-analytics`:undefined,i:BarChart3,keywords:"management bid decision readiness blockers historical execution lessons",permissions:["view_document"]},
    {n:"Historical Intelligence",h:"/historical-intelligence",i:History,keywords:"history previous bids benchmark win loss competitor"},
    {n:"Execution Learning Portfolio",h:"/execution-learning",i:History,keywords:"actual execution portfolio learning margin cost eot"},
-   {n:"Reports & Analytics",i:BarChart3,keywords:"dashboard reports analytics"},
   ]},
  ],[bidId]);
 
