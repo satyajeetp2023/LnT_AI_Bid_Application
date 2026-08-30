@@ -115,7 +115,7 @@ def upsert_bid_outcome(db:Session,bid:BidProject,payload,user_id:int,request_met
 
 def historical_bid_intelligence(db:Session,bid_ids:list[int]):
  if not bid_ids:
-  return {"summary":{"recorded":0,"won":0,"lost":0,"win_rate_percent":None},"by_project_type":[],"by_client":[],"competitors":[],"market_spread":{"samples":0,"average_l2_to_l1_percent":None,"average_l3_to_l1_percent":None,"average_l4_to_l1_percent":None},"version":"phase7-historical-bid-intelligence-v2","note":"Descriptive only. No predictive judgement is produced."}
+  return {"summary":{"recorded":0,"won":0,"lost":0,"win_rate_percent":None},"by_project_type":[],"by_client":[],"competitors":[],"market_spread":{"samples":0,"average_l2_to_l1_percent":None,"average_l3_to_l1_percent":None,"average_l4_to_l1_percent":None},"data_quality":{"completed_results":0,"outcome_source_coverage_percent":None,"price_source_coverage_percent":None,"complete_l1_l4_coverage_percent":None,"results_with_our_bid_marked_percent":None},"version":"phase7-historical-bid-intelligence-v3","note":"Descriptive only. No predictive judgement is produced."}
  outcomes=db.scalars(select(BidOutcome).where(BidOutcome.bid_project_id.in_(bid_ids))).all()
  projects={x.id:x for x in db.scalars(select(BidProject).where(BidProject.id.in_(bid_ids))).all()}
  prices=db.scalars(select(BidPriceRecord).where(BidPriceRecord.bid_project_id.in_(bid_ids))).all()
@@ -144,6 +144,15 @@ def historical_bid_intelligence(db:Session,bid_ids:list[int]):
  def spread_average(key):
   values=[x[key] for x in market_spreads if x[key] is not None]
   return round(sum(values)/len(values),2) if values else None
+ outcome_source_count=sum(bool((x.source_reference or "").strip()) for x in completed)
+ price_rows_completed=[x for x in prices if x.bid_project_id in {o.bid_project_id for o in completed}]
+ price_source_count=sum(bool((x.source_reference or "").strip()) for x in price_rows_completed)
+ complete_l1_l4=0;with_ours=0
+ for outcome in completed:
+  rows=[x for x in price_rows_completed if x.bid_project_id==outcome.bid_project_id]
+  ranks={x.rank for x in rows}
+  if {1,2,3,4}<=ranks:complete_l1_l4+=1
+  if any(x.is_ours for x in rows):with_ours+=1
  return {
   "summary":{
    "recorded":len(outcomes),"completed":len(completed),"won":len(won),"lost":len(completed)-len(won),
@@ -161,5 +170,5 @@ def historical_bid_intelligence(db:Session,bid_ids:list[int]):
    "average_l4_to_l1_percent":spread_average("l4_to_l1_percent"),
   },
   "version":"phase7-historical-bid-intelligence-v2",
-  "note":"This is descriptive historical intelligence from recorded bid outcomes and ranked prices. Market spread is calculated only from recorded ranked prices. It does not predict future results.",
+  "note":"This is descriptive historical intelligence from recorded bid outcomes and ranked prices. Market spread and data-quality coverage are evidence-based only. It does not predict future results.",
  }
