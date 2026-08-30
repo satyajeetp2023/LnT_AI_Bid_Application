@@ -1,4 +1,4 @@
-from app.services.planning_package_reconciliation import _finding_candidates,_overlap,_productivity_capacity,_score
+from app.services.planning_package_reconciliation import _boq_work_front,_finding_candidates,_overlap,_productivity_capacity,_score,_work_front_score
 
 
 def test_resource_activity_matching_is_scope_sensitive():
@@ -91,3 +91,31 @@ def test_contract_staff_phase_timing_gap_becomes_reviewable_finding():
     assert findings[0]["finding_key"]=="issue:staff-phase-timing"
     assert findings[0]["severity"]=="High"
     assert findings[0]["finding_type"]=="Staff Phase Timing"
+
+
+def test_boq_work_front_is_read_from_scope_evidence():
+    class Item:
+        source_excerpt="BOQ 10: OHE mast erection | Qty: 50 No. | Work Front: Section A"
+    assert _boq_work_front(Item())=="Section A"
+
+
+def test_work_front_score_distinguishes_sections():
+    assert _work_front_score("Section A","Section A")==1.0
+    assert _work_front_score("Section A","Section B")==0.0
+
+
+def test_work_front_mismatch_becomes_reviewable_finding():
+    analysis={
+        "issues":[],
+        "activity_resource_coverage":[],
+        "separate_plan_matching":[],
+        "staff_plan":{"missing_contract_required_roles":[]},
+        "work_front_reconciliation":{"checks":[{
+            "boq_scope_item_id":10,"boq_reference":"BOQ:10","boq_work_front":"Section A",
+            "resource_entry_id":20,"resource_name":"Mast Gang 1","resource_work_front":"Section B",
+            "status":"Mismatch","task_code":"A100","task_name":"Mast Erection",
+        }]},
+    }
+    findings=_finding_candidates(analysis)
+    assert findings[0]["finding_key"]=="work-front:10:20"
+    assert findings[0]["finding_type"]=="Work Front Alignment"
