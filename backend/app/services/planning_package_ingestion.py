@@ -5,14 +5,16 @@ from datetime import date,datetime
 from decimal import Decimal,InvalidOperation
 
 import xlrd
+from docx import Document as DocxDocument
 from openpyxl import load_workbook
 from sqlalchemy import delete,select
 from sqlalchemy.orm import Session
 
 from app.models import AuditEvent,BidDocument,PlanningResourceEntry
+from app.services.document_classification import extract_text
 
 
-PLAN_EXTENSIONS={"xlsx","xls","csv"}
+PLAN_EXTENSIONS={"xlsx","xls","csv","docx","pdf","txt"}
 
 ALIASES={
  "resource_name":("resource","resource name","equipment","equipment name","plant","p&m","machinery","staff","staff name","designation","position","role","trade","manpower"),
@@ -95,6 +97,23 @@ def _resource_category(plan_type:str,name:str,role:str|None):
  return "Other"
 
 
+def _text_matrices(text:str):
+ matrices=[]
+ delimited=[]
+ for line in str(text or "").splitlines():
+  if "\t" in line:delimited.append([x.strip() for x in line.split("\t")])
+  elif "|" in line:delimited.append([x.strip() for x in line.split("|")])
+ if delimited:matrices.append(("Delimited Table",delimited))
+ fixed=[]
+ for raw in str(text or "").splitlines():
+  line=raw.strip()
+  if not line:continue
+  cells=[x.strip() for x in re.split(r"\s{2,}",line) if x.strip()]
+  if len(cells)>=2:fixed.append(cells)
+ if fixed:matrices.append(("Fixed Column Report",fixed))
+ return matrices
+
+
 def _sheet_matrices(extension:str,content:bytes):
  if extension=="xlsx":
   wb=load_workbook(io.BytesIO(content),data_only=True,read_only=True)
@@ -107,6 +126,15 @@ def _sheet_matrices(extension:str,content:bytes):
  elif extension=="csv":
   rows=list(csv.reader(io.StringIO(content.decode("utf-8-sig",errors="replace"))))
   yield "CSV",rows
+ elif extension=="docx":
+  document=DocxDocument(io.BytesIO(content))
+  for index,table in enumerate(document.tables,1):
+   yield f"Word Table {index}",[[cell.text.strip() for cell in row.cells] for row in table.rows]
+  for name,matrix in _text_matrices("\n".join(p.text for p in document.paragraphs)):
+   yield name,matrix
+ elif extension in {"pdf","txt"}:
+  for name,matrix in _text_matrices(extract_text(extension,content)):
+   yield name,matrix
 
 
 def _find_header(matrix:list[list]):
@@ -138,7 +166,7 @@ def detect_planning_resource_document(filename:str,extension:str,content:bytes):
   })
  if not candidates:return {"detected":False,"reason":"No resource/staff planning table detected","sheets":[]}
  kinds=sorted({x["plan_type"] for x in candidates})
- return {"detected":True,"plan_types":kinds,"sheets":candidates,"parser_version":"planning-package-ingestion-v1"}
+ return {"detected":True,"plan_types":kinds,"sheets":candidates,"parser_version":"planning-package-ingestion-v2"}
 
 
 def ingest_planning_resource_document(
@@ -198,12 +226,12 @@ def ingest_planning_resource_document(
  db.add(AuditEvent(
   user_id=user_id,bid_project_id=document.bid_project_id,event_type="planning_package.resource_plan_ingested",
   entity_type="BidDocument",entity_id=str(document.id),request_metadata=request_metadata or {},
-  details={"created":created,"plan_types":sorted(plan_types),"parser_version":"planning-package-ingestion-v1"},
+  details={"created":created,"plan_types":sorted(plan_types),"parser_version":"planning-package-ingestion-v2"},
  ))
  db.commit()
  return {
   "detected":True,"created":created,"plan_types":sorted(plan_types),
-  "document_type":document.document_type,"parser_version":"planning-package-ingestion-v1",
+  "document_type":document.document_type,"parser_version":"planning-package-ingestion-v2",
  }
 
 
@@ -232,5 +260,5 @@ def planning_resource_summary(db:Session,bid_id:int):
    "work_front_entries":sum(1 for x in rows if x.work_front),
    "plan_types":sorted({x.plan_type for x in rows}),
   },
-  "version":"planning-package-ingestion-v1",
+  "version":"planning-package-ingestion-v2",
  }
