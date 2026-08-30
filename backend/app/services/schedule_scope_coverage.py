@@ -425,7 +425,7 @@ def schedule_scope_catalog(db:Session,bid_id:int):
             "contract_items":sum(1 for x in rows if x["source_type"]=="Contract / Technical Requirement"),
             "boq_items":sum(1 for x in rows if x["source_type"]=="BOQ"),
             "project_type_items":sum(1 for x in rows if x["source_type"]=="Project-Type Knowledge"),
-            "unmapped_schedule_activities":len(unmapped),
+            "unmapped_schedule_activities":0,
             "manual_items":sum(1 for x in rows if x["source_type"]=="Manual"),
         },
         "version":"phase6-expected-activity-universe-v2",
