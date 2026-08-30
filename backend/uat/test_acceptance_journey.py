@@ -27,7 +27,7 @@ def test_phase_1_to_7_acceptance_journey():
     assert health.status_code==200
     assert health.json()=={"status":"ok","database":"connected"}
     assert client.get("/api/v1/auth/me",headers=admin).status_code==200
-    assert client.get("/api/v1/auth/me").status_code==422
+    assert client.get("/api/v1/auth/me").status_code==401
 
     # RBAC: read-only user cannot create a bid.
     bid_payload={
