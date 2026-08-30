@@ -27,3 +27,26 @@ class ExecutionOutcomeUpsert(BaseModel):
   if self.actual_start_date and self.actual_completion_date and self.actual_completion_date<self.actual_start_date:
    raise ValueError("Actual completion date cannot be before actual start date")
   return self
+
+
+FACTOR_AREAS={"Cost","Time","Margin","Revenue","Productivity","Scope","Mixed"}
+FACTOR_DIRECTIONS={"Adverse","Favorable","Neutral"}
+
+
+class ExecutionLearningFactorInput(BaseModel):
+ factor_category:str=Field(min_length=2,max_length=80)
+ impact_area:str
+ direction:str
+ title:str=Field(min_length=3,max_length=300)
+ description:str=Field(min_length=3,max_length=5000)
+ quantified_impact:Decimal|None=Field(None,ge=0)
+ impact_unit:str|None=Field(None,max_length=40)
+ source_reference:str|None=Field(None,max_length=500)
+ source_excerpt:str|None=Field(None,max_length=5000)
+ lesson_for_future_bids:str|None=Field(None,max_length=5000)
+
+ @model_validator(mode="after")
+ def validate_factor(self):
+  if self.impact_area not in FACTOR_AREAS:raise ValueError("Unsupported impact area")
+  if self.direction not in FACTOR_DIRECTIONS:raise ValueError("Unsupported factor direction")
+  return self
