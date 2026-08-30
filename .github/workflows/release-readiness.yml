@@ -123,6 +123,10 @@ jobs:
           done
           PERF_REQUESTS=120 PERF_CONCURRENCY=12 PERF_P95_MS=750 PYTHONPATH=. python release/performance_smoke.py
 
+      - name: Storage durability and traversal smoke
+        working-directory: backend
+        run: PYTHONPATH=. python release/storage_durability_smoke.py
+
       - name: PostgreSQL backup and restore smoke
         env:
           PGPASSWORD: release-test-password
