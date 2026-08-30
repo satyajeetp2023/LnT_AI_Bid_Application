@@ -355,3 +355,29 @@ def test_phase8_read_only_member_cannot_edit_or_review_execution_actuals(client,
     assert client.get(f"/api/v1/bids/{bid['id']}/execution-outcome",headers=headers).status_code==200
     assert client.put(f"/api/v1/bids/{bid['id']}/execution-outcome",json={"execution_status":"In Progress"},headers=headers).status_code==403
     assert client.post(f"/api/v1/bids/{bid['id']}/execution-outcome/review",headers=headers).status_code==403
+
+
+def test_phase8_unchanged_save_preserves_review_and_real_change_resets_it(client,bid_payload):
+    bid=client.post("/api/v1/bids",json={**bid_payload,"bid_id":"EXEC-IDEMP","tender_reference_no":"EXEC-IDEMP"}).json()
+    assert client.put(
+        f"/api/v1/bids/{bid['id']}/outcome",
+        json={"result_status":"Won","our_rank":1,"our_bid_value":1000,"prices":[{"bidder_name":"L&T","rank":1,"bid_value":1000,"currency":"INR","is_ours":True}]},
+    ).status_code==200
+    payload={
+        "execution_status":"In Progress","data_date":"2026-08-30","actual_start_date":"2026-01-01",
+        "actual_cost":500,"source_reference":"Certified monthly cost report",
+    }
+    assert client.put(f"/api/v1/bids/{bid['id']}/execution-outcome",json=payload).status_code==200
+    reviewed=client.post(f"/api/v1/bids/{bid['id']}/execution-outcome/review")
+    assert reviewed.status_code==200
+    reviewed_at=reviewed.json()["execution"]["reviewed_at"]
+
+    unchanged=client.put(f"/api/v1/bids/{bid['id']}/execution-outcome",json=payload)
+    assert unchanged.status_code==200
+    assert unchanged.json()["execution"]["review_status"]=="Reviewed"
+    assert unchanged.json()["execution"]["reviewed_at"]==reviewed_at
+
+    changed=client.put(f"/api/v1/bids/{bid['id']}/execution-outcome",json={**payload,"actual_cost":510})
+    assert changed.status_code==200
+    assert changed.json()["execution"]["review_status"]=="Draft"
+    assert changed.json()["learning_eligible"] is False
