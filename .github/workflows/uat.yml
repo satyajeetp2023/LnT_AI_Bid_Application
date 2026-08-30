@@ -48,7 +48,7 @@ jobs:
               db=conn.execute(text("select current_database()")).scalar_one()
               tables=set(inspect(conn).get_table_names())
               print(f"database={db}; tables={len(tables)}")
-              required={"roles","users","bid_projects","bid_documents","bid_requirements","bid_missing_inputs","bid_pre_bid_queries","planning_resource_entries","planning_package_findings","bid_outcomes","bid_price_records"}
+              required={"roles","users","bid_projects","bid_documents","bid_requirements","bid_missing_inputs","bid_pre_bid_queries","planning_resource_entries","planning_package_findings","bid_outcomes","bid_price_records","execution_outcomes","execution_learning_factors","bid_decision_snapshots"}
               missing=required-tables
               assert not missing,f"Missing migrated tables: {sorted(missing)}"
           PY
