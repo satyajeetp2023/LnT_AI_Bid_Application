@@ -3,7 +3,10 @@ name: Internal CI
 on:
   push:
     branches:
-      - codex/phase-2-pre-bid-queries
+      - main
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
