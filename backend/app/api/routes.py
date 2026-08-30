@@ -364,8 +364,8 @@ def add_productivity_benchmark(bid_id:int,payload:dict,request:Request,db:Sessio
   notes=str(payload.get("notes") or "").strip() or None,
   created_by=user.id,
  )
- db.add(row)
- db.add(AuditEvent(user_id=user.id,bid_project_id=bid_id,event_type="schedule.productivity_benchmark_added",entity_type="ProductivityBenchmark",entity_id="pending",request_metadata=metadata(request),details={"activity_name":activity_name,"unit":unit,"rate_per_working_day":str(rate),"source_type":"User Confirmed"}))
+ db.add(row);db.flush()
+ db.add(AuditEvent(user_id=user.id,bid_project_id=bid_id,event_type="schedule.productivity_benchmark_added",entity_type="ProductivityBenchmark",entity_id=str(row.id),request_metadata=metadata(request),details={"activity_name":activity_name,"unit":unit,"rate_per_working_day":str(rate),"source_type":"User Confirmed"}))
  db.commit();db.refresh(row)
  return {"id":row.id,"activity_name":row.activity_name,"unit":row.unit,"rate_per_working_day":float(row.rate_per_working_day),"confidence":float(row.confidence),"source_type":row.source_type}
 
