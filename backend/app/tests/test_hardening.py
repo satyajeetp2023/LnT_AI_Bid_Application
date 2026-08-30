@@ -140,7 +140,7 @@ def test_batch_preflight_prevents_partial_persistence(client,bid_payload):
 
 def test_historical_intelligence_filters_are_server_side(client,bid_payload):
     a=client.post("/api/v1/bids",json={**bid_payload,"bid_id":"HIST-A","tender_reference_no":"H-A","client":"DFCCIL","project_type":"OHE"}).json()
-    b=client.post("/api/v1/bids",json={**bid_payload,"bid_id":"HIST-B","tender_reference_no":"H-B","client":"DMRC","project_type":"Metro"}).json()
+    b=client.post("/api/v1/bids",json={**bid_payload,"bid_id":"HIST-B","tender_reference_no":"H-B","client":"DMRC","project_type":"Civil"}).json()
     for bid,competitor in [(a,"Rail Competitor"),(b,"Metro Competitor")]:
         response=client.put(
             f"/api/v1/bids/{bid['id']}/outcome",
@@ -176,11 +176,11 @@ def test_failed_historical_result_save_rolls_back_previous_state(client,bid_payl
     }
     assert client.put(f"/api/v1/bids/{bid['id']}/outcome",json=original).status_code==200
 
-    class BrokenPriceRecord:
+    class BrokenAuditEvent:
         def __init__(self,*args,**kwargs):
             raise RuntimeError("controlled persistence failure")
 
-    monkeypatch.setattr("app.services.historical_bid_intelligence.BidPriceRecord",BrokenPriceRecord)
+    monkeypatch.setattr("app.services.historical_bid_intelligence.AuditEvent",BrokenAuditEvent)
     with pytest.raises(RuntimeError,match="controlled persistence failure"):
         client.put(
             f"/api/v1/bids/{bid['id']}/outcome",
