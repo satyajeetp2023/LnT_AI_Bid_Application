@@ -33,7 +33,7 @@ class BidOutcomeUpsert(BaseModel):
  def validate_result(self):
   if self.result_status not in RESULT_STATUSES:raise ValueError("Unsupported result status")
   ranks=[x.rank for x in self.prices]
-  bidders=[x.bidder_name.strip().lower() for x in self.prices]
+  bidders=[" ".join(x.bidder_name.split()).casefold() for x in self.prices]
   if len(ranks)!=len(set(ranks)):raise ValueError("Bidder price ranks must be unique")
   if len(bidders)!=len(set(bidders)):raise ValueError("Bidder names must be unique within one result")
   if sum(1 for x in self.prices if x.is_ours)>1:raise ValueError("Only one bidder price row can be marked as ours")
