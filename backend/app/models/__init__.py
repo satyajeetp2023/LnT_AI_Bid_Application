@@ -7,3 +7,4 @@ from .clause_risk import *
 from .drawing_boq import *
 from .tender_knowledge import *
 from .planning_resources import *
+from .planning_package import *
