@@ -69,3 +69,31 @@ def test_invalid_office_zip_package_is_rejected(client,bid_payload):
     )
     assert response.status_code==415
     assert "XLSX package structure is invalid" in response.text
+
+
+def test_historical_comparison_uses_completed_visible_bid(client,bid_payload):
+    current_payload={**bid_payload,"bid_id":"BID-CURRENT","tender_reference_no":"T-CURRENT","location":"Gujarat"}
+    prior_payload={**bid_payload,"bid_id":"BID-PRIOR","tender_reference_no":"T-PRIOR","location":"Gujarat"}
+    current=client.post("/api/v1/bids",json=current_payload).json()
+    prior=client.post("/api/v1/bids",json=prior_payload).json()
+    saved=client.put(
+        f"/api/v1/bids/{prior['id']}/outcome",
+        json={
+            "result_status":"Lost",
+            "our_rank":2,
+            "our_bid_value":108,
+            "prices":[
+                {"bidder_name":"A","rank":1,"bid_value":100,"currency":"INR","is_ours":False},
+                {"bidder_name":"L&T","rank":2,"bid_value":108,"currency":"INR","is_ours":True},
+            ],
+        },
+    )
+    assert saved.status_code==200
+    response=client.get(f"/api/v1/bids/{current['id']}/historical-comparison")
+    assert response.status_code==200
+    body=response.json()
+    assert body["summary"]["comparable_bids"]==1
+    assert body["matches"][0]["bid_project_id"]==prior["id"]
+    assert body["matches"][0]["similarity_score"]==100
+    assert set(body["matches"][0]["matched_fields"])=={"project_type","client","contract_type","location"}
+    assert "no win prediction" in body["methodology"].lower()
