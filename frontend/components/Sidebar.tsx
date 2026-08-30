@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import {usePathname} from "next/navigation";
-import {useEffect,useMemo,useState} from "react";
+import {useEffect,useMemo,useRef,useState} from "react";
 import {
  BarChart3,ChevronRight,FileCheck2,FileQuestion,FileSearch,Files,FolderKanban,
  History,LayoutDashboard,LockKeyhole,PlusSquare,Search,Settings,ShieldCheck,
@@ -18,6 +18,30 @@ export function Sidebar({mobileOpen=false,onClose}:{mobileOpen?:boolean;onClose?
  const bidId=bidMatch?.[1];
  const [activeGroup,setActiveGroup]=useState<string|null>(null);
  const [query,setQuery]=useState("");
+ const closeTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
+ const flyoutRef=useRef<HTMLElement|null>(null);
+
+ const cancelClose=()=>{
+  if(closeTimer.current){
+   clearTimeout(closeTimer.current);
+   closeTimer.current=null;
+  }
+ };
+ const openGroup=(groupId:string)=>{
+  cancelClose();
+  setQuery("");
+  setActiveGroup(groupId);
+ };
+ const scheduleClose=()=>{
+  cancelClose();
+  closeTimer.current=setTimeout(()=>setActiveGroup(null),180);
+ };
+ const focusFirstFlyoutLink=()=>{
+  setTimeout(()=>{
+   const link=flyoutRef.current?.querySelector("a[href]") as HTMLElement|null;
+   link?.focus();
+  },0);
+ };
 
  const groups:NavGroup[]=useMemo(()=>[
   {id:"overview",n:"Overview",i:LayoutDashboard,description:"Bid portfolio and setup",items:[
@@ -67,6 +91,8 @@ export function Sidebar({mobileOpen=false,onClose}:{mobileOpen?:boolean;onClose?
  useEffect(()=>{
   setQuery("");
   setActiveGroup(null);
+  cancelClose();
+  return cancelClose;
  },[p]);
 
  const renderItem=(x:NavItem,theme:"dark"|"light"="dark")=>{
@@ -107,8 +133,8 @@ export function Sidebar({mobileOpen=false,onClose}:{mobileOpen?:boolean;onClose?
      {groups.map(group=>{
       const isOpen=activeGroup===group.id;
       const containsRoute=routeGroup===group.id;
-      return <div key={group.id}>
-       <button onClick={()=>{setQuery("");setActiveGroup(isOpen?null:group.id)}} className={`flex w-full items-center gap-3 rounded px-3 py-2.5 text-left transition ${isOpen?"bg-white/12 text-white":containsRoute?"bg-white/8 text-[#f3cc58]":"text-slate-200 hover:bg-white/8 hover:text-white"}`}>
+      return <div key={group.id} onPointerEnter={e=>{if(e.pointerType==="mouse")openGroup(group.id)}} onPointerLeave={e=>{if(e.pointerType==="mouse")scheduleClose()}}>
+       <button onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();openGroup(group.id);focusFirstFlyoutLink()}}} onClick={()=>{setQuery("");setActiveGroup(isOpen?null:group.id)}} className={`flex w-full items-center gap-3 rounded px-3 py-2.5 text-left transition ${isOpen?"bg-white/12 text-white":containsRoute?"bg-white/8 text-[#f3cc58]":"text-slate-200 hover:bg-white/8 hover:text-white"}`}>
         <group.i size={15}/><span className="min-w-0 flex-1"><span className="block truncate text-[11.8px] font-semibold">{group.n}</span><span className="mt-0.5 hidden truncate text-[8.5px] font-normal text-slate-400 md:block">{group.description}</span></span><ChevronRight size={13} className={`transition-transform md:rotate-0 ${isOpen?"rotate-90":""}`}/>
        </button>
        {isOpen&&<div className="mt-1 space-y-0.5 rounded bg-[#293b49] p-1.5 md:hidden">{group.items.map(x=>renderItem(x,"dark"))}</div>}
@@ -124,12 +150,15 @@ export function Sidebar({mobileOpen=false,onClose}:{mobileOpen?:boolean;onClose?
   </aside>
 
   {showFlyout&&<section
+   ref={flyoutRef}
+   onPointerEnter={e=>{if(e.pointerType==="mouse")cancelClose()}}
+   onPointerLeave={e=>{if(e.pointerType==="mouse"&&!normalized)scheduleClose()}}
    className="fixed left-[216px] z-50 hidden w-[292px] overflow-hidden rounded-lg border border-slate-200 bg-white text-slate-800 shadow-[0_12px_34px_rgba(15,23,42,.20)] md:block"
    style={{top:normalized?72:Math.min(430,132+Math.max(0,groups.findIndex(g=>g.id===activeGroup))*52)}}
   >
    <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
-    <div className="text-[9px] font-bold uppercase tracking-[.15em] text-slate-400">{normalized?"Search Navigation":"Navigation Group"}</div>
-    <div className="mt-1 text-sm font-semibold text-[#243241]">{normalized?`Results for “${query.trim()}”`:active?.n}</div>
+    {normalized&&<div className="text-[9px] font-bold uppercase tracking-[.15em] text-slate-400">Search Navigation</div>}
+    <div className={`${normalized?"mt-1 ":""}text-sm font-semibold text-[#243241]`}>{normalized?`Results for “${query.trim()}”`:active?.n}</div>
     {!normalized&&active&&<div className="mt-1 text-[10px] leading-4 text-slate-500">{active.description}</div>}
    </div>
    <div className="max-h-[420px] overflow-y-auto p-2">
