@@ -22,3 +22,6 @@ app.dependency_overrides[get_db]=override_db
 def client(): return TestClient(app)
 @pytest.fixture
 def bid_payload(): return {"bid_id":"BID-001","tender_reference_no":"T-100","client":"Railways","tender_name":"OHE Package","contract_type":"EPC","project_type":"OHE","tender_due_date":"2026-12-20","bid_manager":"Admin","currency":"INR","current_stage":"Opportunity","bid_status":"Draft"}
+
+@pytest.fixture
+def testing_session(): return TestingSession
