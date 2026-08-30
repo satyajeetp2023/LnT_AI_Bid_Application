@@ -212,6 +212,8 @@ def refresh_planning_package_findings(document_id:int,request:Request,db:Session
  ingestion=ingest_schedule(doc.file_extension,LocalSecureStorage(get_settings().storage_root).read(doc.storage_path))
  if not ingestion["detected"]:raise HTTPException(422,"No reliable structured schedule activity table could be extracted")
  analysis=reconcile_planning_package(db,doc.bid_project_id,ingestion["tables"],ingestion["capabilities"])
+ analysis["schedule_document_id"]=doc.id
+ analysis["schedule_source"]={"source_kind":ingestion["source_kind"],"fidelity":ingestion["fidelity"],"capabilities":ingestion["capabilities"]}
  sync=sync_planning_package_findings(db,doc.bid_project_id,doc.id,analysis)
  db.add(AuditEvent(user_id=user.id,bid_project_id=doc.bid_project_id,event_type="planning_package.findings_refreshed",entity_type="BidDocument",entity_id=str(doc.id),request_metadata=metadata(request),details=sync))
  db.commit()
