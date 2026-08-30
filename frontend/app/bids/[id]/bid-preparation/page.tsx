@@ -4,7 +4,7 @@ import Link from "next/link";
 import {use,useEffect,useState} from "react";
 import {BidWorkspaceHeader} from "@/components/BidWorkspaceHeader";
 import {EmptyState,ErrorState,LoadingState,PageHeader,PriorityBadge,SourceEvidenceCard,SummaryCard} from "@/components/design-system";
-import {API,request} from "@/services/api";
+import {downloadFile,request} from "@/services/api";
 import type {Bid,PreparedArtifact,SubmissionFormatCandidateResponse,TemplatePopulationPlan} from "@/types";
 
 const empty:SubmissionFormatCandidateResponse={items:[],summary:{detected:0,mandatory:0,high_priority:0,with_source:0,template_located:0,template_missing:0},version:""};
@@ -53,14 +53,7 @@ export default function BidPreparationPage({params}:{params:Promise<{id:string}>
   setGenerating(true);setPlanError("");
   try{
    const q=new URLSearchParams({choice_mark:choiceMark});
-   const r=await fetch(`${API}/documents/${selectedTemplateId}/generate-controlled-draft?${q.toString()}`,{method:"POST",headers:{"X-User-ID":"1","Content-Type":"application/json"},body:JSON.stringify({header_values:headerValues,field_overrides:fieldOverrides})});
-   if(!r.ok){const e=await r.json().catch(()=>({detail:"Draft generation failed"}));throw new Error(e.detail||"Draft generation failed")}
-   const blob=await r.blob();
-   const disposition=r.headers.get("content-disposition")||"";
-   const match=disposition.match(/filename="?([^";]+)"?/i);
-   const filename=match?.[1]||"controlled_draft.xlsx";
-   const url=URL.createObjectURL(blob);
-   const a=document.createElement("a");a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+   await downloadFile(`/documents/${selectedTemplateId}/generate-controlled-draft?${q.toString()}`,"controlled_draft.xlsx",{method:"POST",body:JSON.stringify({header_values:headerValues,field_overrides:fieldOverrides}),timeoutMs:120000});
   }catch{setPlanError("Unable to generate the controlled draft.")}
   finally{setGenerating(false)}
  };
@@ -120,6 +113,6 @@ export default function BidPreparationPage({params}:{params:Promise<{id:string}>
     </table>
    </div>
   </section>}
- {artifacts.length>0&&<section className="mt-3 overflow-hidden rounded border border-slate-200 bg-white"><div className="border-b bg-slate-50 px-4 py-3"><h2 className="text-sm font-bold text-slate-900">Prepared Artifact Versions</h2><p className="text-xs text-slate-500">Controlled working copies saved inside this bid workspace.</p></div><div className="divide-y">{artifacts.map(x=><div key={x.id} className="flex flex-col gap-3 px-4 py-3 lg:flex-row lg:items-center lg:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><div className="truncate text-sm font-semibold text-slate-900">{x.artifact_name}</div><span className={x.status==="Approved"?"rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700":x.status==="Ready for Review"?"rounded bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700":x.status==="Superseded"?"rounded bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500":"rounded bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-700"}>{x.status}</span></div><div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500"><span>Version {x.version_no}</span><span>{Math.round(x.file_size/1024)} KB</span><span>{x.generation_summary?.written_fields||0} populated fields</span><span>{x.generation_summary?.unresolved_fields||0} unresolved</span><span>Created {new Date(x.created_at).toLocaleString()}</span></div></div><div className="flex flex-wrap gap-2"><a href={`${API}/prepared-artifacts/${x.id}/download`} className="rounded border border-slate-300 px-3 py-2 text-xs font-semibold text-blue-700">Download</a>{x.status==="Draft"&&<button onClick={()=>sendForReview(x)} className="rounded bg-[#e2b635] px-3 py-2 text-xs font-semibold text-[#243241]">Send for Review</button>}</div></div>)}</div></section>}
+ {artifacts.length>0&&<section className="mt-3 overflow-hidden rounded border border-slate-200 bg-white"><div className="border-b bg-slate-50 px-4 py-3"><h2 className="text-sm font-bold text-slate-900">Prepared Artifact Versions</h2><p className="text-xs text-slate-500">Controlled working copies saved inside this bid workspace.</p></div><div className="divide-y">{artifacts.map(x=><div key={x.id} className="flex flex-col gap-3 px-4 py-3 lg:flex-row lg:items-center lg:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><div className="truncate text-sm font-semibold text-slate-900">{x.artifact_name}</div><span className={x.status==="Approved"?"rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700":x.status==="Ready for Review"?"rounded bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700":x.status==="Superseded"?"rounded bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500":"rounded bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-700"}>{x.status}</span></div><div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500"><span>Version {x.version_no}</span><span>{Math.round(x.file_size/1024)} KB</span><span>{x.generation_summary?.written_fields||0} populated fields</span><span>{x.generation_summary?.unresolved_fields||0} unresolved</span><span>Created {new Date(x.created_at).toLocaleString()}</span></div></div><div className="flex flex-wrap gap-2"><button onClick={()=>downloadFile(`/prepared-artifacts/${x.id}/download`,x.artifact_name).catch(e=>setPlanError(e instanceof Error?e.message:"Download failed"))} className="rounded border border-slate-300 px-3 py-2 text-xs font-semibold text-blue-700">Download</button>{x.status==="Draft"&&<button onClick={()=>sendForReview(x)} className="rounded bg-[#e2b635] px-3 py-2 text-xs font-semibold text-[#243241]">Send for Review</button>}</div></div>)}</div></section>}
  </div>;
 }
