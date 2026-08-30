@@ -1,4 +1,31 @@
-import {act,fireEvent,render,screen} from "@testing-library/react";import {expect,test,vi} from "vitest";import PreBidQueriesPage from "./page";
+import {act,fireEvent,render,screen} from "@testing-library/react";
+import {expect,test,vi} from "vitest";
+import PreBidQueriesPage from "./page";
+
 vi.mock("next/navigation",()=>({useSearchParams:()=>new URLSearchParams()}));
-vi.mock("@/services/api",()=>({API:"http://test/api/v1",request:vi.fn((path:string)=>Promise.resolve(path.includes("/pre-bid-query-suggestions")?{provider:"test",knowledge_provider:"test",items:[],answered:[],suppressed:[],summary:{suggested:0,answered_in_tender:0,automatic_discoveries:0,suppressed:0}}:path==="/bids/1"?{id:1,bid_id:"RLY-01",tender_name:"Railway Package",client:"DFCCIL",location:"Gujarat",tender_due_date:"2026-10-15",bid_status:"Active"}:path.includes("/documents")?{items:[],total:0,page:1,page_size:100}:path.includes("/requirements")?{items:[],total:0,page:1,page_size:100,summary:{total:0,critical:0,open:0,needs_review:0,non_compliant:0}}:path.includes("/missing-inputs")?{items:[],total:0,page:1,page_size:100,summary:{total:0,critical:0,open:0,overdue:0,requested:0,resolved:0}}:{items:[],total:0,page:1,page_size:20,summary:{total:0,draft:0,submitted:0,responded:0,open:0,overdue:0}})))}));
-test("renders empty pre-bid register and validates add drawer",async()=>{await act(async()=>{render(<PreBidQueriesPage params={Promise.resolve({id:"1"})}/>)});expect(await screen.findByText("No pre-bid queries yet")).toBeInTheDocument();expect(screen.getByText("Railway Package")).toBeInTheDocument();fireEvent.click(screen.getByText("+ Add Pre-Bid Query"));expect(screen.getByRole("dialog",{name:"Add Pre-Bid Query"})).toBeInTheDocument();fireEvent.click(screen.getByText("Save Pre-Bid Query"));expect(screen.getByText("Query title and query text are required.")).toBeInTheDocument()});
+vi.mock("@/services/api",()=>({
+ API:"http://test/api/v1",
+ request:vi.fn((path:string)=>Promise.resolve(
+  path.includes("/pre-bid-query-suggestions")
+   ?{provider:"test",knowledge_provider:"test",items:[],answered:[],suppressed:[],summary:{suggested:0,answered_in_tender:0,automatic_discoveries:0,suppressed:0}}
+   :path==="/bids/1"
+    ?{id:1,bid_id:"RLY-01",tender_name:"Railway Package",client:"DFCCIL",location:"Gujarat",tender_due_date:"2026-10-15",bid_status:"Active"}
+    :path.includes("/documents")
+     ?{items:[],total:0,page:1,page_size:100}
+     :path.includes("/requirements")
+      ?{items:[],total:0,page:1,page_size:100,summary:{total:0,critical:0,open:0,needs_review:0,non_compliant:0}}
+      :path.includes("/missing-inputs")
+       ?{items:[],total:0,page:1,page_size:100,summary:{total:0,critical:0,open:0,overdue:0,requested:0,resolved:0}}
+       :{items:[],total:0,page:1,page_size:20,summary:{total:0,draft:0,submitted:0,responded:0,open:0,overdue:0}}
+ ))
+}));
+
+test("renders empty pre-bid register and validates add drawer",async()=>{
+ await act(async()=>{render(<PreBidQueriesPage params={Promise.resolve({id:"1"})}/>)});
+ expect(await screen.findByText("No pre-bid queries yet")).toBeInTheDocument();
+ expect(screen.getByText("Railway Package")).toBeInTheDocument();
+ fireEvent.click(screen.getByText("+ Add Pre-Bid Query"));
+ expect(screen.getByRole("dialog",{name:"Add Pre-Bid Query"})).toBeInTheDocument();
+ fireEvent.click(screen.getByText("Save Pre-Bid Query"));
+ expect(screen.getByText("Query title and query text are required.")).toBeInTheDocument();
+});
