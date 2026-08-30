@@ -17,7 +17,7 @@ def _user_ids():
         return admin.id,viewer.id
 
 
-def test_phase_1_to_7_acceptance_journey():
+def test_phase_1_to_9_acceptance_journey():
     admin_id,viewer_id=_user_ids()
     admin={"X-User-ID":str(admin_id)}
     viewer={"X-User-ID":str(viewer_id)}
@@ -223,3 +223,79 @@ def test_phase_1_to_7_acceptance_journey():
     dashboard=client.get("/api/v1/dashboard/summary",headers=admin)
     assert dashboard.status_code==200
     assert dashboard.json()["documents_uploaded"]>=1
+
+
+    # Phase 8: reviewed bid-versus-actual execution learning for a won bid.
+    won_payload={**bid_payload,"bid_id":"UAT-RLY-WON","tender_reference_no":"UAT/DFCC/WON","tender_name":"UAT Won Railway Package"}
+    won_bid=client.post("/api/v1/bids",json=won_payload,headers=admin)
+    assert won_bid.status_code==201,won_bid.text
+    won_id=won_bid.json()["id"]
+    won_outcome=client.put(
+        f"/api/v1/bids/{won_id}/outcome",
+        json={
+            "result_status":"Won","result_date":"2026-12-21","our_rank":1,"our_bid_value":1000,"our_margin_percent":8.0,
+            "awarded_bidder":"L&T","source_reference":"UAT Award Notice",
+            "prices":[{"bidder_name":"L&T","rank":1,"bid_value":1000,"currency":"INR","is_ours":True,"source_reference":"UAT Award Notice"}],
+        },
+        headers=admin,
+    )
+    assert won_outcome.status_code==200,won_outcome.text
+
+    actuals=client.put(
+        f"/api/v1/bids/{won_id}/execution-outcome",
+        json={
+            "execution_status":"Completed","data_date":"2027-02-01",
+            "actual_start_date":"2026-01-01","actual_completion_date":"2027-01-15",
+            "final_contract_value":1150,"actual_cost":1035,"final_margin_percent":10.0,
+            "approved_variations":100,"claims_recovered":25,"eot_days":45,
+            "source_reference":"UAT Certified Final Account",
+        },
+        headers=admin,
+    )
+    assert actuals.status_code==200,actuals.text
+    reviewed=client.post(f"/api/v1/bids/{won_id}/execution-outcome/review",headers=admin)
+    assert reviewed.status_code==200,reviewed.text
+    assert reviewed.json()["learning_eligible"] is True
+    assert reviewed.json()["comparison"]["revenue_change_vs_bid_percent"]==15.0
+
+    factor=client.post(
+        f"/api/v1/bids/{won_id}/execution-learning-factors",
+        json={
+            "factor_category":"Planning","impact_area":"Time","direction":"Adverse",
+            "title":"Late work-front access","description":"Execution access was later than the original bid assumption.",
+            "quantified_impact":45,"impact_unit":"days","source_reference":"UAT Approved EOT",
+            "source_excerpt":"Forty-five days of access delay were recognized.",
+            "lesson_for_future_bids":"Model access-release milestones explicitly and preserve float against delayed handover.",
+        },
+        headers=admin,
+    )
+    assert factor.status_code==201,factor.text
+    factor_review=client.post(f"/api/v1/execution-learning-factors/{factor.json()['id']}/review",headers=admin)
+    assert factor_review.status_code==200,factor_review.text
+    assert factor_review.json()["review_status"]=="Reviewed"
+
+    portfolio=client.get("/api/v1/execution-learning/intelligence",headers=admin)
+    assert portfolio.status_code==200,portfolio.text
+    assert portfolio.json()["summary"]["reviewed_projects"]>=1
+    assert portfolio.json()["summary"]["reviewed_factors"]>=1
+
+    # Phase 9: deterministic management decision analytics and immutable decision snapshot.
+    analytics=client.get(f"/api/v1/bids/{won_id}/decision-analytics",headers=admin)
+    assert analytics.status_code==200,analytics.text
+    analytics_body=analytics.json()
+    assert analytics_body["methodology"]["type"].startswith("Deterministic")
+    assert "decision_posture" in analytics_body
+    assert "readiness_score" in analytics_body
+    assert "historical_context" in analytics_body
+
+    snapshot=client.post(f"/api/v1/bids/{won_id}/decision-snapshots",headers=admin)
+    assert snapshot.status_code==201,snapshot.text
+    snap=snapshot.json()
+    assert len(snap["checksum"])==64
+    same_snapshot=client.post(f"/api/v1/bids/{won_id}/decision-snapshots",headers=admin)
+    assert same_snapshot.status_code==201,same_snapshot.text
+    assert same_snapshot.json()["id"]==snap["id"]
+
+    snapshots=client.get(f"/api/v1/bids/{won_id}/decision-snapshots",headers=admin)
+    assert snapshots.status_code==200
+    assert snapshots.json()["total"]==1
