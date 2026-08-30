@@ -112,7 +112,7 @@ jobs:
         working-directory: backend
         env:
           ENVIRONMENT: development
-          AUTH_MODE: development
+          AUTH_MODE: development_header
         run: |
           PYTHONPATH=. uvicorn app.main:app --host 127.0.0.1 --port 8000 >/tmp/perf-api.log 2>&1 &
           API_PID=$!
@@ -127,7 +127,7 @@ jobs:
         working-directory: backend
         env:
           ENVIRONMENT: development
-          AUTH_MODE: development
+          AUTH_MODE: development_header
         run: |
           PYTHONPATH=. uvicorn app.main:app --host 127.0.0.1 --port 8001 >/tmp/recovery-api.log 2>&1 &
           API_PID=$!
