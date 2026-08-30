@@ -1,4 +1,4 @@
-from app.services.schedule_scope_coverage import _terms,_is_blocking,_lifecycle_stages,_activity_search_index,_match,_consolidate_rows
+from app.services.schedule_scope_coverage import _terms,_is_blocking,_lifecycle_stages,_activity_search_index,_match,_consolidate_rows,schedule_scope_catalog
 
 class Dummy:
     mandatory=True
