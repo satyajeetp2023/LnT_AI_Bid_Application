@@ -7,6 +7,7 @@ from datetime import datetime
 
 from docx import Document as DocxDocument
 from openpyxl import load_workbook
+import xlrd
 
 from app.services.document_classification import extract_text
 from app.services.p6_xer import parse_xer
@@ -164,6 +165,12 @@ def _spreadsheet(extension:str,content:bytes):
         for ws in wb.worksheets:
             matrix=[list(x) for x in ws.iter_rows(values_only=True)]
             parsed=_table_matrix_to_schedule(matrix,ws.title)
+            if parsed and parsed["TASK"]:candidates.append(parsed)
+    elif extension=="xls":
+        wb=xlrd.open_workbook(file_contents=content)
+        for ws in wb.sheets():
+            matrix=[ws.row_values(r) for r in range(ws.nrows)]
+            parsed=_table_matrix_to_schedule(matrix,ws.name)
             if parsed and parsed["TASK"]:candidates.append(parsed)
     elif extension=="csv":
         matrix=list(csv.reader(io.StringIO(content.decode("utf-8-sig",errors="replace"))))
@@ -349,7 +356,7 @@ def ingest_schedule(extension:str,content:bytes):
         tables=parse_xer(content);source_kind="Primavera P6 XER";fidelity="Full Native"
     elif ext=="xml":
         tables=_p6_xml(content);source_kind=_xml_source_kind(content);fidelity="Structured"
-    elif ext in {"xlsx","csv"}:
+    elif ext in {"xlsx","xls","csv"}:
         tables=_spreadsheet(ext,content);source_kind="Schedule Spreadsheet";fidelity="Structured Table"
     elif ext in {"pdf","docx","txt"}:
         tables=_report_text(ext,content);source_kind="Schedule Report";fidelity="Report / Limited"
@@ -357,8 +364,8 @@ def ingest_schedule(extension:str,content:bytes):
         tables=None;source_kind="Microsoft Project MPP";fidelity="Native Binary / Parser Required"
     elif ext in {"jpg","jpeg","png"}:
         tables=None;source_kind="Schedule Image";fidelity="Image / OCR Required"
-    elif ext in {"xls","doc"}:
-        tables=None;source_kind=f"Legacy {ext.upper()} Schedule";fidelity="Legacy Binary / Conversion Required"
+    elif ext=="doc":
+        tables=None;source_kind="Legacy DOC Schedule";fidelity="Legacy Binary / Conversion Required"
     else:
         tables=None;source_kind=f"{ext.upper()} Schedule";fidelity="Unsupported Structure"
 
@@ -370,7 +377,7 @@ def ingest_schedule(extension:str,content:bytes):
             "fidelity":fidelity,
             "capabilities":{"activities":False,"logic":False,"float":False,"resources":False,"calendars":False,"wbs":False},
             "limitations":["No reliable structured activity table could be extracted from this source."],
-            "parser_version":"phase6-unified-schedule-ingestion-v3",
+            "parser_version":"phase6-unified-schedule-ingestion-v4",
         }
 
     task_fields={k for row in tables.get("TASK",[]) for k,v in row.items() if v not in (None,"")}
@@ -392,5 +399,5 @@ def ingest_schedule(extension:str,content:bytes):
         "fidelity":fidelity,
         "capabilities":capabilities,
         "limitations":limitations,
-        "parser_version":"phase6-unified-schedule-ingestion-v3",
+        "parser_version":"phase6-unified-schedule-ingestion-v4",
     }
