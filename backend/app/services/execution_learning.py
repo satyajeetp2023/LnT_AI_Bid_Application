@@ -1,3 +1,4 @@
+from collections import Counter
 from datetime import datetime,timezone
 
 from fastapi import HTTPException
@@ -219,9 +220,12 @@ def execution_learning_intelligence(db:Session,bid_ids:list[int]):
    "tender_name":project.tender_name if project else None,"client":project.client if project else None,
    "project_type":project.project_type if project else None,"execution":_record(execution),"comparison":metrics,
   })
+ category_counts=Counter(x.factor_category for x in reviewed_factors)
+ area_counts=Counter(x.impact_area for x in reviewed_factors)
  return {
   "summary":{
    "reviewed_projects":len(records),
+   "reviewed_factors":len(reviewed_factors),
    "average_revenue_change_vs_bid_percent":_round(sum(revenue_changes)/len(revenue_changes)) if revenue_changes else None,
    "average_margin_change_percentage_points":_round(sum(margin_changes)/len(margin_changes)) if margin_changes else None,
    "average_actual_duration_days":_round(sum(durations)/len(durations)) if durations else None,
