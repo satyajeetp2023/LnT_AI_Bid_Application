@@ -33,6 +33,7 @@ from app.services.schedule_skeleton import build_schedule_skeleton
 from app.services.productivity_benchmarks import activity_key,benchmark_summary
 from app.services.planning_package_ingestion import ingest_planning_resource_document,planning_resource_summary
 from app.services.planning_package_reconciliation import planning_package_findings,reconcile_planning_package,review_planning_package_finding,sync_planning_package_findings
+from app.services.planning_readiness import build_planning_readiness
 from app.services.clause_risk_intelligence import bid_clause_risk_summary,firm_risk_library,promote_finding_to_firm_pattern,review_clause_risk,scan_document_clause_risks
 from app.services.contract_clause_variation import contract_clause_variations
 from app.services.drawing_boq_verification import drawing_boq_summary,record_drawing_observations,review_drawing_boq_finding,verify_drawing_boq
@@ -203,6 +204,42 @@ def prepared_artifact_ready(artifact_id:int,request:Request,db:Session=Depends(g
 def approve_prepared_artifact(artifact_id:int,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
  item=get_prepared_artifact(db,artifact_id);require_project_access(db,user,item.bid_project_id,Permission.PREPARED_ARTIFACT_APPROVE)
  return artifact_dict(approve_artifact(db,item,user.id,metadata(request)))
+
+@router.get("/documents/{document_id}/planning-intelligence")
+def planning_intelligence(document_id:int,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ doc=get_doc(db,document_id);require_project_access(db,user,doc.bid_project_id,Permission.REQUIREMENT_VIEW)
+ if not doc.storage_path or doc.file_extension.lower() not in SCHEDULE_EXTENSIONS:
+  raise HTTPException(422,"Supported schedule content is required")
+ ingestion=ingest_schedule(doc.file_extension,LocalSecureStorage(get_settings().storage_root).read(doc.storage_path))
+ source_profile={
+  "recognized":True,"structured":bool(ingestion["detected"]),
+  "source_kind":ingestion["source_kind"],"fidelity":ingestion["fidelity"],
+  "capabilities":ingestion["capabilities"],"limitations":ingestion["limitations"],
+  "parser_version":ingestion["parser_version"],
+ }
+ if not ingestion["detected"]:
+  return {"structured":False,"source_profile":source_profile}
+ sync_scope_from_requirements(db,doc.bid_project_id,user.id,metadata(request))
+ schedule=analyze_schedule_tables(ingestion["tables"],160,40,ingestion["capabilities"])
+ schedule["optimization_advisor"]=build_schedule_optimization_from_tables(ingestion["tables"],40,160,ingestion["capabilities"])
+ schedule["tender_alignment"]=align_schedule_to_requirements(db,doc.bid_project_id,schedule)
+ schedule["source_ingestion"]={k:ingestion[k] for k in ("source_kind","fidelity","capabilities","limitations","parser_version")}
+ scope=evaluate_scope_coverage_from_tables(db,doc.bid_project_id,ingestion["tables"],user.id,metadata(request),ingestion["capabilities"])
+ scope["source_ingestion"]={k:ingestion[k] for k in ("source_kind","fidelity","capabilities","limitations")}
+ package=reconcile_planning_package(db,doc.bid_project_id,ingestion["tables"],ingestion["capabilities"])
+ package["schedule_document_id"]=doc.id
+ package["schedule_source"]={"source_kind":ingestion["source_kind"],"fidelity":ingestion["fidelity"],"capabilities":ingestion["capabilities"]}
+ findings=planning_package_findings(db,doc.bid_project_id)
+ readiness=build_planning_readiness(schedule,scope,package,findings)
+ db.add(AuditEvent(user_id=user.id,bid_project_id=doc.bid_project_id,event_type="planning_intelligence.analyzed",entity_type="BidDocument",entity_id=str(doc.id),request_metadata=metadata(request),details={"readiness":readiness["grade"],"scope_blockers":readiness["summary"]["scope_blockers"],"planning_blockers":readiness["summary"]["blockers"]}))
+ db.commit()
+ return {
+  "structured":True,"source_profile":source_profile,
+  "schedule_analysis":schedule,"scope_coverage":scope,
+  "planning_package":package,"planning_findings":findings,
+  "planning_readiness":readiness,
+  "version":"unified-planning-intelligence-v1",
+ }
 
 @router.post("/documents/{document_id}/refresh-planning-package-findings")
 def refresh_planning_package_findings(document_id:int,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
