@@ -98,19 +98,22 @@ def save_bid_outcome(bid_id:int,payload:BidOutcomeUpsert,request:Request,db:Sess
  return upsert_bid_outcome(db,get_bid(db,bid_id),payload,user.id,metadata(request))
 
 @router.post("/bids/{bid_id}/outcome/import-preview")
-async def preview_bid_outcome_import(bid_id:int,file:UploadFile=File(...),db:Session=Depends(get_db),user:User=Depends(user_dep)):
+async def preview_bid_outcome_import(bid_id:int,request:Request,file:UploadFile=File(...),db:Session=Depends(get_db),user:User=Depends(user_dep)):
  require_project_access(db,user,bid_id,Permission.EDIT_BID);get_bid(db,bid_id)
  filename=Path(file.filename or "").name
  ext=Path(filename).suffix.lower().lstrip(".")
  if ext not in {"csv","xlsx","pdf"}:raise HTTPException(415,"Historical result preview supports CSV, XLSX and text-based PDF files")
- content=await file.read()
+ content,_=await read_limited_upload(file,10*1024*1024,10*1024*1024)
  if not content:raise HTTPException(422,"Uploaded result file is empty")
- if len(content)>10*1024*1024:raise HTTPException(413,"Historical result preview file exceeds 10 MB")
+ digest=hashlib.sha256(content).hexdigest()
  try:
   preview=preview_historical_result(ext,content,filename)
-  db.add(AuditEvent(user_id=user.id,bid_project_id=bid_id,event_type="historical_bid.import_previewed",entity_type="BidProject",entity_id=str(bid_id),details={"filename":filename,"sha256":hashlib.sha256(content).hexdigest(),"detected":preview.get("detected",False),"price_rows":len(preview.get("prices",[]))}))
+  db.add(AuditEvent(user_id=user.id,bid_project_id=bid_id,event_type="historical_bid.import_previewed",entity_type="BidProject",entity_id=str(bid_id),request_metadata=metadata(request),details={"filename":filename,"sha256":digest,"detected":preview.get("detected",False),"price_rows":len(preview.get("prices",[]))}))
   db.commit();return preview
- except ValueError as exc:raise HTTPException(422,str(exc))
+ except ValueError as exc:
+  db.add(AuditEvent(user_id=user.id,bid_project_id=bid_id,event_type="historical_bid.import_rejected",entity_type="BidProject",entity_id=str(bid_id),request_metadata=metadata(request),details={"filename":filename,"sha256":digest,"reason":str(exc)[:500]}))
+  db.commit()
+  raise HTTPException(422,str(exc))
 
 @router.get("/historical-bids/intelligence")
 def portfolio_historical_bid_intelligence(
