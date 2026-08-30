@@ -1,10 +1,12 @@
+import hashlib
+import json
 from collections import Counter
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import (
- BidClauseRiskFinding,BidMissingInput,BidProject,BidRequirement,
+ BidClauseRiskFinding,BidDecisionSnapshot,BidMissingInput,BidProject,BidRequirement,
  ExecutionLearningFactor,PlanningPackageFinding,
 )
 from app.services.historical_bid_comparison import historical_comparison
@@ -129,4 +131,46 @@ def bid_decision_analytics(db:Session,current:BidProject,visible_bid_ids:list[in
   },
   "version":"phase9-bid-decision-analytics-v1",
   "note":"This module organizes evidence for management decision-making. It does not autonomously decide whether L&T should bid and does not predict win probability.",
+ }
+
+
+def create_decision_snapshot(db:Session,current:BidProject,visible_bid_ids:list[int],user_id:int,request_metadata:dict|None=None):
+ analytics=bid_decision_analytics(db,current,visible_bid_ids)
+ canonical=json.dumps(analytics,sort_keys=True,separators=(",",":"),default=str)
+ checksum=hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+ existing=db.scalar(select(BidDecisionSnapshot).where(
+  BidDecisionSnapshot.bid_project_id==current.id,
+  BidDecisionSnapshot.checksum==checksum,
+ ))
+ if existing:
+  return snapshot_dict(existing)
+ snapshot=BidDecisionSnapshot(
+  bid_project_id=current.id,snapshot_version=analytics["version"],decision_posture=analytics["decision_posture"],
+  readiness_score=analytics["readiness_score"],confidence_level=analytics["confidence"]["level"],
+  payload=analytics,checksum=checksum,created_by=user_id,
+ )
+ db.add(snapshot);db.flush()
+ from app.models import AuditEvent
+ db.add(AuditEvent(
+  user_id=user_id,bid_project_id=current.id,event_type="bid_decision.snapshot_created",
+  entity_type="BidDecisionSnapshot",entity_id=str(snapshot.id),request_metadata=request_metadata or {},
+  details={"decision_posture":snapshot.decision_posture,"readiness_score":float(snapshot.readiness_score),"checksum":checksum},
+ ))
+ db.commit()
+ return snapshot_dict(snapshot)
+
+
+def list_decision_snapshots(db:Session,bid_id:int):
+ rows=db.scalars(select(BidDecisionSnapshot).where(
+  BidDecisionSnapshot.bid_project_id==bid_id
+ ).order_by(BidDecisionSnapshot.created_at.desc())).all()
+ return {"items":[snapshot_dict(x) for x in rows],"total":len(rows),"version":"phase9-decision-snapshots-v1"}
+
+
+def snapshot_dict(snapshot:BidDecisionSnapshot):
+ return {
+  "id":snapshot.id,"bid_project_id":snapshot.bid_project_id,"snapshot_version":snapshot.snapshot_version,
+  "decision_posture":snapshot.decision_posture,"readiness_score":float(snapshot.readiness_score),
+  "confidence_level":snapshot.confidence_level,"payload":snapshot.payload,"checksum":snapshot.checksum,
+  "created_by":snapshot.created_by,"created_at":snapshot.created_at.isoformat() if snapshot.created_at else None,
  }
