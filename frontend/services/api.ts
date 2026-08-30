@@ -3,7 +3,7 @@ import {authMode,beginLogin,getAccessToken} from "@/services/auth";
 export const API=process.env.NEXT_PUBLIC_API_URL||"http://127.0.0.1:8000/api/v1";
 export const DEFAULT_REQUEST_TIMEOUT_MS=30000;
 
-export type ApiRequestInit=RequestInit&{timeoutMs?:number};
+export type ApiRequestInit=RequestInit&{timeoutMs?:number;retries?:number};
 
 export class ApiError extends Error{
  status:number;
@@ -47,7 +47,7 @@ export async function authenticatedFetch(path:string,init:ApiRequestInit={}):Pro
   if(externalSignal.aborted)controller.abort();
   else externalSignal.addEventListener("abort",abortFromCaller,{once:true});
  }
- const {timeoutMs:_timeoutMs,signal:_signal,...fetchInit}=init;
+ const {timeoutMs:_timeoutMs,retries:_retries,signal:_signal,...fetchInit}=init;
  try{
   const r=await fetch(API+path,{...fetchInit,headers,signal:controller.signal});
   if(r.status===401&&mode==="oidc"&&typeof window!=="undefined"){
@@ -74,16 +74,28 @@ async function responseError(r:Response,fallback="Request failed"){
 }
 
 export async function request<T>(path:string,init:ApiRequestInit={}):Promise<T>{
- const r=await authenticatedFetch(path,init);
- if(!r.ok){
-  const error=await responseError(r);
-  if(r.status===403&&typeof window!=="undefined"&&!window.location.pathname.startsWith("/access-denied")){
-   const from=window.location.pathname+window.location.search;
-   window.location.assign("/access-denied?from="+encodeURIComponent(from)+(error.requestId?"&requestId="+encodeURIComponent(error.requestId):""));
+ const method=(init.method||"GET").toUpperCase();
+ const retries=Math.max(0,init.retries??(method==="GET"?1:0));
+ let attempt=0;
+ while(true){
+  try{
+   const r=await authenticatedFetch(path,init);
+   if(r.ok)return r.json();
+   const error=await responseError(r);
+   if(r.status===403&&typeof window!=="undefined"&&!window.location.pathname.startsWith("/access-denied")){
+    const from=window.location.pathname+window.location.search;
+    window.location.assign("/access-denied?from="+encodeURIComponent(from)+(error.requestId?"&requestId="+encodeURIComponent(error.requestId):""));
+   }
+   const retryable=[429,502,503,504].includes(r.status);
+   if(retryable&&attempt<retries){attempt+=1;continue}
+   throw error;
+  }catch(error){
+   if(error instanceof ApiError)throw error;
+   if(error instanceof Error&&error.name==="AbortError")throw error;
+   if(attempt<retries){attempt+=1;continue}
+   throw error;
   }
-  throw error;
  }
- return r.json();
 }
 
 export async function downloadFile(path:string,fallbackFilename:string,init:ApiRequestInit={}):Promise<string>{
