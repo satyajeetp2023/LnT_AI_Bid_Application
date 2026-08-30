@@ -102,3 +102,30 @@ def test_mpp_is_recognized_as_native_binary_but_not_falsely_parsed():
     assert ing["detected"] is False
     assert ing["source_kind"]=="Microsoft Project MPP"
     assert ing["fidelity"]=="Native Binary / Parser Required"
+
+
+def test_excel_predecessor_lag_resources_and_milestone_are_normalized():
+    wb=Workbook()
+    ws=wb.active
+    ws.title="Programme"
+    ws.append(["Activity ID","Activity Name","Duration","Predecessors","Resources"])
+    ws.append(["A100","Foundation","10 days","","Civil Crew"])
+    ws.append(["A200","Mast Erection","5 days","A100FS+2d","OHE Crew; Crane"])
+    ws.append(["M100","Section Complete","0 days","A200FF-4h",""])
+    stream=io.BytesIO();wb.save(stream)
+
+    ing=ingest_schedule("xlsx",stream.getvalue())
+    assert ing["detected"] is True
+    tasks={x["task_code"]:x for x in ing["tables"]["TASK"]}
+    assert tasks["M100"]["task_type"]=="TT_Mile"
+
+    rels={(x["task_id"],x["pred_task_id"]):x for x in ing["tables"]["TASKPRED"]}
+    assert rels[("A200","A100")]["pred_type"]=="PR_FS"
+    assert rels[("A200","A100")]["lag_hr_cnt"]==16
+    assert rels[("M100","A200")]["pred_type"]=="PR_FF"
+    assert rels[("M100","A200")]["lag_hr_cnt"]==-4
+
+    names={x["rsrc_name"] for x in ing["tables"]["RSRC"]}
+    assert {"Civil Crew","OHE Crew","Crane"}<=names
+    assert len(ing["tables"]["TASKRSRC"])==3
+    assert ing["capabilities"]["resources"] is True
