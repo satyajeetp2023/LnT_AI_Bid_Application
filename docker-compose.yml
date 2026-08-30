@@ -18,6 +18,11 @@ services:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-railway}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-railway_bid}
     ports: ["8000:8000"]
     volumes: [document_data:/data/documents]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health/ready',timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
     depends_on:
       db: {condition: service_healthy}
   frontend:
@@ -25,7 +30,13 @@ services:
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api/v1}
     ports: ["3000:3000"]
-    depends_on: [backend]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    depends_on:
+      backend: {condition: service_healthy}
 volumes:
   postgres_data:
   document_data:
