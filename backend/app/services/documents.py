@@ -8,11 +8,21 @@ from app.models import AuditEvent,BidDocument
 from app.services.document_classification import auto_classify_document
 from app.services.document_taxonomy import DOCUMENT_CATEGORIES
 from app.storage.base import LocalSecureStorage
+
+def _known_signature_extensions(content:bytes):
+ if content.startswith(b"%PDF-"):return {"pdf"}
+ if content.startswith(b"\x89PNG\r\n\x1a\n"):return {"png"}
+ if content.startswith(b"\xff\xd8\xff"):return {"jpg","jpeg"}
+ if content.startswith(b"PK\x03\x04"):return {"zip","docx","xlsx"}
+ if content.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):return {"doc","xls"}
+ return None
 def audit(db,user_id,project_id,event,doc,metadata=None,details=None): db.add(AuditEvent(user_id=user_id,bid_project_id=project_id,event_type=event,entity_type="BidDocument",entity_id=str(doc.id),request_metadata=metadata or {},details=details or {}))
 def upload_document(db:Session,project_id:int,filename:str,content_type:str|None,content:bytes,user_id:int):
  cfg=get_settings(); safe=Path(filename).name; ext=Path(safe).suffix.lower().lstrip(".")
  if not safe or ext not in cfg.allowed_extensions: raise HTTPException(415,f"Unsupported file type: .{ext or 'none'}")
  if content.startswith(b"MZ") or content.startswith(b"\x7fELF"): raise HTTPException(415,"Executable content is not permitted in tender document uploads")
+ known=_known_signature_extensions(content)
+ if known and ext not in known: raise HTTPException(415,f"File content does not match .{ext} extension")
  if len(content)>cfg.max_file_size_mb*1024*1024: raise HTTPException(413,"File exceeds configured size limit")
  checksum=hashlib.sha256(content).hexdigest(); duplicate=db.scalar(select(BidDocument).where(BidDocument.bid_project_id==project_id,BidDocument.checksum==checksum,BidDocument.document_status!="Archived"))
  doc=BidDocument(bid_project_id=project_id,original_filename=safe,file_extension=ext,mime_type=content_type or mimetypes.guess_type(safe)[0] or "application/octet-stream",file_size=len(content),checksum=checksum,uploaded_by=user_id,document_status="Duplicate" if duplicate else "Needs Review",classification_status="pending",is_latest_version=True,duplicate_of_document_id=duplicate.id if duplicate else None,information_tags=[])
