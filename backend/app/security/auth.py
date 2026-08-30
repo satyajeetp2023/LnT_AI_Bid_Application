@@ -1,5 +1,7 @@
+import jwt
+from jwt import PyJWKClient
 from enum import StrEnum
-from fastapi import Header, HTTPException
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.core.config import get_settings
@@ -15,10 +17,28 @@ ROLE_PERMISSIONS={
  RoleName.PROPOSAL_ENGINEER:{Permission.UPLOAD_DOCUMENT,Permission.VIEW_DOCUMENT,Permission.DOWNLOAD_DOCUMENT,Permission.CLASSIFY_DOCUMENT,Permission.REQUIREMENT_VIEW,Permission.REQUIREMENT_MANAGE}|MANAGE,
  RoleName.PLANNING:{Permission.VIEW_DOCUMENT,Permission.DOWNLOAD_DOCUMENT,Permission.REQUIREMENT_VIEW}|VIEW, RoleName.ENGINEERING:{Permission.VIEW_DOCUMENT,Permission.DOWNLOAD_DOCUMENT,Permission.REQUIREMENT_VIEW}|VIEW, RoleName.CONTRACTS:{Permission.VIEW_DOCUMENT,Permission.DOWNLOAD_DOCUMENT,Permission.CLASSIFY_DOCUMENT,Permission.REQUIREMENT_VIEW,Permission.REQUIREMENT_MANAGE}|MANAGE, RoleName.COMMERCIAL:{Permission.VIEW_DOCUMENT,Permission.DOWNLOAD_DOCUMENT,Permission.REQUIREMENT_VIEW}|VIEW, RoleName.PROCUREMENT:{Permission.VIEW_DOCUMENT,Permission.DOWNLOAD_DOCUMENT,Permission.REQUIREMENT_VIEW}|VIEW, RoleName.FINANCE:{Permission.VIEW_DOCUMENT,Permission.DOWNLOAD_DOCUMENT,Permission.REQUIREMENT_VIEW}|VIEW, RoleName.MANAGEMENT_REVIEWER:{Permission.VIEW_DOCUMENT,Permission.DOWNLOAD_DOCUMENT,Permission.REQUIREMENT_VIEW,Permission.PRE_BID_QUERY_APPROVE,Permission.PREPARED_ARTIFACT_APPROVE}|VIEW, RoleName.READ_ONLY:{Permission.VIEW_DOCUMENT,Permission.DOWNLOAD_DOCUMENT,Permission.REQUIREMENT_VIEW}|VIEW,
 }
-def current_user(db:Session,x_user_id:int=Header(alias="X-User-ID"))->User:
- if get_settings().environment.strip().lower()=="production": raise HTTPException(503,"Development identity is disabled in production; enterprise identity provider is required")
- user=db.get(User,x_user_id)
- if not user or not user.is_active: raise HTTPException(401,"Invalid development identity")
+def current_user(db:Session,x_user_id:int|None=None,authorization:str|None=None)->User:
+ settings=get_settings()
+ if settings.auth_mode=="development_header":
+  if x_user_id is None:raise HTTPException(401,"Development identity header is required")
+  user=db.get(User,x_user_id)
+  if not user or not user.is_active:raise HTTPException(401,"Invalid development identity")
+  return user
+ if settings.auth_mode!="oidc":raise HTTPException(503,"Unsupported authentication mode")
+ if not authorization or not authorization.lower().startswith("bearer "):raise HTTPException(401,"Bearer token is required")
+ token=authorization.split(" ",1)[1].strip()
+ try:
+  signing_key=PyJWKClient(settings.oidc_jwks_url).get_signing_key_from_jwt(token).key
+  claims=jwt.decode(
+   token,signing_key,algorithms=["RS256","RS384","RS512","ES256","ES384","ES512"],
+   audience=settings.oidc_audience,issuer=settings.oidc_issuer,
+  )
+ except Exception as exc:
+  raise HTTPException(401,"Invalid enterprise identity token") from exc
+ email=str(claims.get(settings.oidc_email_claim) or "").strip().lower()
+ if not email:raise HTTPException(401,"Verified identity does not include the configured email claim")
+ user=db.scalar(select(User).where(User.email==email))
+ if not user or not user.is_active:raise HTTPException(403,"Verified enterprise identity is not provisioned for this application")
  return user
 def is_admin(user:User)->bool: return any(r.name==RoleName.SYSTEM_ADMIN for r in user.roles)
 def require_permission(user:User,permission:Permission)->None:
