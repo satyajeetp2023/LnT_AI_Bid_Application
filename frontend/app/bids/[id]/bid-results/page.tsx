@@ -4,7 +4,7 @@ import {use,useEffect,useState,type ReactNode} from "react";
 import {BidWorkspaceHeader} from "@/components/BidWorkspaceHeader";
 import {ErrorState,LoadingState,PageHeader,StatusBadge,SummaryCard} from "@/components/design-system";
 import {request} from "@/services/api";
-import type {Bid,BidOutcomeResponse,HistoricalBidImportPreview,HistoricalBidPrice} from "@/types";
+import type {Bid,BidOutcomeResponse,HistoricalBidComparison,HistoricalBidImportPreview,HistoricalBidPrice} from "@/types";
 
 const emptyPrice=(rank:number):HistoricalBidPrice=>({rank,bidder_name:"",bid_value:0,currency:"INR",is_ours:false,source_reference:null});
 const inputClass="w-full rounded border border-slate-300 bg-white px-2.5 py-2 text-xs text-slate-800 outline-none focus:border-[#c69b2d] focus:ring-2 focus:ring-[#d5aa35]/20";
@@ -28,6 +28,7 @@ export default function BidResultsPage({params}:{params:Promise<{id:string}>}){
  const [prices,setPrices]=useState<HistoricalBidPrice[]>([1,2,3,4].map(emptyPrice));
  const [importing,setImporting]=useState(false);
  const [importPreview,setImportPreview]=useState<HistoricalBidImportPreview|null>(null);
+ const [comparison,setComparison]=useState<HistoricalBidComparison|null>(null);
 
  const apply=(x:BidOutcomeResponse)=>{
   setResult(x);
@@ -47,8 +48,8 @@ export default function BidResultsPage({params}:{params:Promise<{id:string}>}){
 
  useEffect(()=>{
   setLoading(true);setError("");
-  Promise.all([request<Bid>("/bids/"+id),request<BidOutcomeResponse>("/bids/"+id+"/outcome")])
-   .then(([b,o])=>{setBid(b);apply(o)})
+  Promise.all([request<Bid>("/bids/"+id),request<BidOutcomeResponse>("/bids/"+id+"/outcome"),request<HistoricalBidComparison>("/bids/"+id+"/historical-comparison")])
+   .then(([b,o,h])=>{setBid(b);apply(o);setComparison(h)})
    .catch(()=>setError("Unable to load bid result information."))
    .finally(()=>setLoading(false));
  },[id]);
@@ -124,6 +125,27 @@ export default function BidResultsPage({params}:{params:Promise<{id:string}>}){
    <SummaryCard label="Gap to L1" value={result?.price_summary.our_gap_to_l1_percent!==null&&result?.price_summary.our_gap_to_l1_percent!==undefined?result.price_summary.our_gap_to_l1_percent+"%":"—"} tone={(result?.price_summary.our_gap_to_l1_percent||0)>0?"amber":undefined}/>
    <SummaryCard label="Recorded Margin" value={margin?margin+"%":"—"}/>
   </div>
+
+  <section className="mb-3 overflow-hidden rounded border border-slate-200 bg-white">
+   <div className="border-b bg-slate-50 px-4 py-3">
+    <h2 className="text-sm font-bold text-slate-900">Comparable Historical Bids</h2>
+    <p className="text-xs text-slate-500">Deterministic comparison against completed bids you are authorized to see. This is descriptive only, not a win prediction.</p>
+   </div>
+   {comparison&&comparison.matches.length>0?<>
+    <div className="grid grid-cols-2 gap-3 border-b p-3 md:grid-cols-5">
+     <SummaryCard label="Comparable" value={comparison.summary.comparable_bids}/>
+     <SummaryCard label="Won" value={comparison.summary.won??0} tone="green"/>
+     <SummaryCard label="Lost" value={comparison.summary.lost??0} tone="red"/>
+     <SummaryCard label="Historical Win Rate" value={comparison.summary.win_rate_percent!==null&&comparison.summary.win_rate_percent!==undefined?comparison.summary.win_rate_percent+"%":"—"}/>
+     <SummaryCard label="Avg Gap to L1" value={comparison.summary.average_gap_to_l1_percent!==null&&comparison.summary.average_gap_to_l1_percent!==undefined?comparison.summary.average_gap_to_l1_percent+"%":"—"}/>
+    </div>
+    <div className="overflow-x-auto"><table className="w-full min-w-[900px] text-left text-xs">
+     <thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500"><tr><th className="px-3 py-2">Bid</th><th className="px-3 py-2">Client</th><th className="px-3 py-2">Type</th><th className="px-3 py-2">Result</th><th className="px-3 py-2">Our Rank</th><th className="px-3 py-2">Gap to L1</th><th className="px-3 py-2">Similarity</th><th className="px-3 py-2">Matched On</th></tr></thead>
+     <tbody>{comparison.matches.map(x=><tr key={x.bid_project_id} className="border-t"><td className="px-3 py-3"><div className="font-semibold text-slate-900">{x.bid_id}</div><div className="text-[10px] text-slate-500">{x.tender_name}</div></td><td className="px-3 py-3">{x.client}</td><td className="px-3 py-3">{x.project_type}</td><td className="px-3 py-3"><StatusBadge value={x.result_status}/></td><td className="px-3 py-3">{x.our_rank??"—"}</td><td className="px-3 py-3">{x.our_gap_to_l1_percent!==null?x.our_gap_to_l1_percent+"%":"—"}</td><td className="px-3 py-3 font-semibold">{x.similarity_score}%</td><td className="px-3 py-3">{x.matched_fields.map(v=>v.replaceAll("_"," ")).join(", ")}</td></tr>)}</tbody>
+    </table></div>
+    <div className="border-t bg-slate-50 px-4 py-2 text-[10px] text-slate-500">{comparison.methodology}</div>
+   </>:<div className="p-4 text-xs text-slate-500">No completed comparable historical bids are available yet.</div>}
+  </section>
 
   <section className="mb-3 rounded border border-slate-200 bg-white p-3">
    <div className="flex flex-wrap items-center justify-between gap-3">
