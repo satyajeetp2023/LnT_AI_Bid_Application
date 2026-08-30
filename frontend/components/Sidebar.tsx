@@ -16,10 +16,12 @@ type NavGroup={id:string;n:string;i:any;description:string;items:NavItem[]};
 export function Sidebar({mobileOpen=false,onClose}:{mobileOpen?:boolean;onClose?:()=>void}){
  const p=usePathname();
  const bidMatch=p.match(/^\/bids\/([^/]+)(?:\/|$)/);
- const rawBidId=bidMatch?.[1];\n const bidId=rawBidId&&/^\\d+$/.test(rawBidId)?rawBidId:undefined;
+ const rawBidId=bidMatch?.[1];
+ const bidId=rawBidId&&/^\\d+$/.test(rawBidId)?rawBidId:undefined;
  const [activeGroup,setActiveGroup]=useState<string|null>(null);
  const [query,setQuery]=useState("");
- const [permissions,setPermissions]=useState<Set<string>|null>(null);\n const [bidAccess,setBidAccess]=useState<{isAdmin:boolean;ids:Set<number>}>({isAdmin:false,ids:new Set()});
+ const [permissions,setPermissions]=useState<Set<string>|null>(null);
+ const [bidAccess,setBidAccess]=useState<{isAdmin:boolean;ids:Set<number>}>({isAdmin:false,ids:new Set()});
  const closeTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
  const flyoutRef=useRef<HTMLElement|null>(null);
 
@@ -74,7 +76,8 @@ export function Sidebar({mobileOpen=false,onClose}:{mobileOpen?:boolean;onClose?
   ]},
  ],[bidId]);
 
- const canUseCurrentBid=!bidId||bidAccess.isAdmin||bidAccess.ids.has(Number(bidId));\n const visibleGroups=useMemo(()=>groups.map(group=>({...group,items:group.items.filter(item=>{const roleAllowed=!item.permissions||(permissions!==null&&item.permissions.some(p=>permissions.has(p)));const bidSpecific=Boolean(bidId&&item.h?.startsWith(`/bids/${bidId}/`));return roleAllowed&&(!bidSpecific||canUseCurrentBid)});})).filter(group=>group.items.length>0),[groups,permissions,bidId,canUseCurrentBid]);
+ const canUseCurrentBid=!bidId||bidAccess.isAdmin||bidAccess.ids.has(Number(bidId));
+ const visibleGroups=useMemo(()=>groups.map(group=>({...group,items:group.items.filter(item=>{const roleAllowed=!item.permissions||(permissions!==null&&item.permissions.some(p=>permissions.has(p)));const bidSpecific=Boolean(bidId&&item.h?.startsWith(`/bids/${bidId}/`));return roleAllowed&&(!bidSpecific||canUseCurrentBid)});})).filter(group=>group.items.length>0),[groups,permissions,bidId,canUseCurrentBid]);
  const allItems=useMemo(()=>visibleGroups.flatMap(g=>g.items.map(item=>({...item,group:g.n,groupId:g.id}))),[visibleGroups]);
  const normalized=query.trim().toLowerCase();
  const searchResults=useMemo(()=>normalized?allItems.filter(x=>
