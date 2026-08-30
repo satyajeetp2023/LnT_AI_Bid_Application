@@ -398,6 +398,9 @@ def test_phase8_learning_factors_require_source_and_future_lesson_before_review(
     ).status_code==200
     assert client.post(f"/api/v1/bids/{bid['id']}/execution-outcome/review").status_code==200
 
+    parent_review=client.post(f"/api/v1/bids/{bid['id']}/execution-outcome/review")
+    assert parent_review.status_code==200
+
     created=client.post(
         f"/api/v1/bids/{bid['id']}/execution-learning-factors",
         json={
@@ -498,7 +501,7 @@ def test_phase9_decision_snapshots_are_deduplicated_and_change_sensitive(client,
     requirement=client.post(
         f"/api/v1/bids/{bid['id']}/requirements",
         json={
-            "requirement_category":"Commercial",
+            "requirement_category":"Commercial Requirement",
             "requirement_title":"New mandatory condition",
             "requirement_text":"A newly recorded mandatory condition.",
             "priority":"Critical","requirement_status":"Open","is_mandatory":True,
