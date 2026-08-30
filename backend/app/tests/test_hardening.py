@@ -169,6 +169,11 @@ def test_historical_intelligence_filters_are_server_side(client,bid_payload):
     assert competitor["head_to_head"]==1
     assert competitor["competitor_ahead"]==1
     assert competitor["our_ahead"]==0
+    assert len(body["records"])==1
+    record=body["records"][0]
+    assert record["bid_id"]=="HIST-A"
+    assert record["evidence_status"]=="Complete"
+    assert record["source_reference"]=="Official Result Notice"
 
 
 def test_failed_historical_result_save_rolls_back_previous_state(client,bid_payload,monkeypatch):
