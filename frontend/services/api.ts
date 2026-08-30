@@ -11,6 +11,13 @@ export class ApiError extends Error{
  constructor(message:string,status:number,requestId:string|null=null){super(message);this.name="ApiError";this.status=status;this.requestId=requestId}
 }
 
+export class AuthTransitionError extends Error{
+ constructor(message:string){super(message);this.name="AuthTransitionError"}
+}
+
+type ResponseLifecycle={finish:()=>void;timedOut:()=>boolean;timeoutMs:number};
+const responseLifecycles=new WeakMap<Response,ResponseLifecycle>();
+
 function timeoutMessage(timeoutMs:number){
  const seconds=Math.max(1,Math.round(timeoutMs/1000));
  return `The service did not respond within ${seconds} seconds. Please try again.`;
@@ -26,13 +33,38 @@ async function authHeaders(init:ApiRequestInit){
   const token=getAccessToken();
   if(!token){
    if(typeof window!=="undefined")await beginLogin(window.location.pathname+window.location.search);
-   throw new Error("Enterprise authentication is required");
+   throw new AuthTransitionError("Enterprise authentication is required");
   }
   headers.set("Authorization","Bearer "+token);
  }else{
   throw new Error("Unsupported frontend authentication mode");
  }
  return {mode,headers};
+}
+
+function finishResponse(r:Response){
+ responseLifecycles.get(r)?.finish();
+ responseLifecycles.delete(r);
+}
+
+async function consumeBody<T>(r:Response,reader:()=>Promise<T>):Promise<T>{
+ const lifecycle=responseLifecycles.get(r);
+ try{
+  return await reader();
+ }catch(error){
+  if(lifecycle?.timedOut())throw new Error(timeoutMessage(lifecycle.timeoutMs));
+  throw error;
+ }finally{
+  finishResponse(r);
+ }
+}
+
+async function readJson<T=any>(r:Response):Promise<T>{
+ return consumeBody(r,()=>r.json() as Promise<T>);
+}
+
+async function readBlob(r:Response):Promise<Blob>{
+ return consumeBody(r,()=>r.blob());
 }
 
 export async function authenticatedFetch(path:string,init:ApiRequestInit={}):Promise<Response>{
@@ -43,6 +75,13 @@ export async function authenticatedFetch(path:string,init:ApiRequestInit={}):Pro
  const timeoutId=setTimeout(()=>{timedOut=true;controller.abort()},timeoutMs);
  const externalSignal=init.signal;
  const abortFromCaller=()=>controller.abort();
+ let finished=false;
+ const finish=()=>{
+  if(finished)return;
+  finished=true;
+  clearTimeout(timeoutId);
+  externalSignal?.removeEventListener("abort",abortFromCaller);
+ };
  if(externalSignal){
   if(externalSignal.aborted)controller.abort();
   else externalSignal.addEventListener("abort",abortFromCaller,{once:true});
@@ -51,26 +90,38 @@ export async function authenticatedFetch(path:string,init:ApiRequestInit={}):Pro
  try{
   const r=await fetch(API+path,{...fetchInit,headers,signal:controller.signal});
   if(r.status===401&&mode==="oidc"&&typeof window!=="undefined"){
+   finish();
    await beginLogin(window.location.pathname+window.location.search);
-   throw new Error("Enterprise session expired");
+   throw new AuthTransitionError("Enterprise session expired");
   }
+  responseLifecycles.set(r,{finish,timedOut:()=>timedOut,timeoutMs});
   return r;
  }catch(error){
+  finish();
   if(timedOut)throw new Error(timeoutMessage(timeoutMs));
   if(controller.signal.aborted){
    if(error instanceof Error&&error.name==="AbortError")throw error;
    throw new DOMException("The request was cancelled.","AbortError");
   }
   throw error;
- }finally{
-  clearTimeout(timeoutId);
-  externalSignal?.removeEventListener("abort",abortFromCaller);
  }
 }
 
 async function responseError(r:Response,fallback="Request failed"){
- const e=await r.json().catch(()=>({detail:fallback}));
+ const e=await readJson<{detail?:string}>(r).catch(()=>({detail:fallback}));
  return new ApiError(e.detail||fallback,r.status,r.headers.get("x-request-id"));
+}
+
+function filenameFromDisposition(disposition:string,fallbackFilename:string){
+ const extended=disposition.match(/filename\*\s*=\s*UTF-8''([^;]+)/i);
+ if(extended){
+  const value=extended[1].trim().replace(/^"|"$/g,"");
+  try{return decodeURIComponent(value)}catch{return value}
+ }
+ const quoted=disposition.match(/filename\s*=\s*"([^"]*)"/i);
+ if(quoted)return quoted[1];
+ const plain=disposition.match(/filename\s*=\s*([^;]+)/i);
+ return (plain?.[1]||fallbackFilename).trim();
 }
 
 export async function request<T>(path:string,init:ApiRequestInit={}):Promise<T>{
@@ -80,7 +131,7 @@ export async function request<T>(path:string,init:ApiRequestInit={}):Promise<T>{
  while(true){
   try{
    const r=await authenticatedFetch(path,init);
-   if(r.ok)return r.json();
+   if(r.ok)return readJson<T>(r);
    const error=await responseError(r);
    if(r.status===403&&typeof window!=="undefined"&&!window.location.pathname.startsWith("/access-denied")){
     const from=window.location.pathname+window.location.search;
@@ -90,7 +141,7 @@ export async function request<T>(path:string,init:ApiRequestInit={}):Promise<T>{
    if(retryable&&attempt<retries){attempt+=1;continue}
    throw error;
   }catch(error){
-   if(error instanceof ApiError)throw error;
+   if(error instanceof ApiError||error instanceof AuthTransitionError)throw error;
    if(error instanceof Error&&error.name==="AbortError")throw error;
    if(attempt<retries){attempt+=1;continue}
    throw error;
@@ -108,10 +159,9 @@ export async function downloadFile(path:string,fallbackFilename:string,init:ApiR
   }
   throw error;
  }
- const blob=await r.blob();
+ const blob=await readBlob(r);
  const disposition=r.headers.get("content-disposition")||"";
- const match=disposition.match(/filename\*?=(?:UTF-8''|")?([^";]+)"?/i);
- const filename=decodeURIComponent((match?.[1]||fallbackFilename).trim());
+ const filename=filenameFromDisposition(disposition,fallbackFilename);
  const url=URL.createObjectURL(blob);
  try{
   const a=document.createElement("a");
