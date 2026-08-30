@@ -189,6 +189,25 @@ def _child_text(node,*names):
     return None
 
 
+def _msp_relationship_type(value):
+    mapping={"0":"PR_FF","1":"PR_FS","2":"PR_SF","3":"PR_SS","FF":"PR_FF","FS":"PR_FS","SF":"PR_SF","SS":"PR_SS"}
+    return mapping.get(str(value or "").strip().upper(),str(value or "PR_FS"))
+
+
+def _msp_link_lag_hours(value):
+    text=str(value or "").strip()
+    if not text:return 0.0
+    if re.search(r"[A-Za-z]",text):
+        return _duration_hours(text) or 0.0
+    number=_number(text)
+    return (number/600.0) if number is not None else 0.0
+
+
+def _xml_source_kind(content:bytes):
+    sample=content[:5000].decode("utf-8",errors="ignore").lower()
+    return "Microsoft Project XML" if "schemas.microsoft.com/project" in sample or "<tasks>" in sample and "<task>" in sample else "Primavera / Schedule XML"
+
+
 def _p6_xml(content:bytes):
     try:root=ET.fromstring(content)
     except ET.ParseError:return None
@@ -196,31 +215,47 @@ def _p6_xml(content:bytes):
     for node in root.iter():
         tag=_local(node.tag).lower()
         if tag in {"activity","task"}:
-            code=_child_text(node,"Id","ActivityId","ObjectId","Code")
+            uid=_child_text(node,"UID","ObjectId")
+            code=_child_text(node,"Id","ActivityId","Code") or uid
             name=_child_text(node,"Name","ActivityName")
             if not name:continue
-            task_id=code or _child_text(node,"ObjectId") or str(len(tasks)+1)
+            task_id=uid or code or str(len(tasks)+1)
+            milestone=str(_child_text(node,"Milestone") or "").strip().lower() in {"1","true","yes"}
+            percent=_number(_child_text(node,"PercentComplete","PhysicalPercentComplete"))
+            status=_child_text(node,"Status","ActivityStatus")
+            if not status and percent is not None:
+                status="Complete" if percent>=100 else "In Progress" if percent>0 else "Not Started"
             task={
                 "task_id":task_id,
                 "task_code":code or task_id,
                 "task_name":name,
-                "wbs_id":_child_text(node,"WBSObjectId","WBSId"),
-                "status_code":_child_text(node,"Status","ActivityStatus"),
-                "task_type":_child_text(node,"Type","ActivityType") or "TT_Task",
+                "wbs_id":_child_text(node,"WBSObjectId","WBSId","WBS","OutlineNumber"),
+                "status_code":status,
+                "task_type":"TT_Mile" if milestone else (_child_text(node,"Type","ActivityType") or "TT_Task"),
                 "target_start_date":_child_text(node,"PlannedStartDate","StartDate","Start"),
                 "target_end_date":_child_text(node,"PlannedFinishDate","FinishDate","Finish"),
                 "early_start_date":_child_text(node,"EarlyStartDate"),
                 "early_end_date":_child_text(node,"EarlyFinishDate"),
                 "act_start_date":_child_text(node,"ActualStartDate"),
                 "act_end_date":_child_text(node,"ActualFinishDate"),
-                "target_drtn_hr_cnt":_duration_hours(_child_text(node,"PlannedDuration","OriginalDuration")),
+                "target_drtn_hr_cnt":_duration_hours(_child_text(node,"PlannedDuration","OriginalDuration","Duration")),
                 "remain_drtn_hr_cnt":_duration_hours(_child_text(node,"RemainingDuration")),
-                "total_float_hr_cnt":_duration_hours(_child_text(node,"TotalFloat")),
-                "clndr_id":_child_text(node,"CalendarObjectId","CalendarId"),
+                "total_float_hr_cnt":_duration_hours(_child_text(node,"TotalFloat","TotalSlack")),
+                "clndr_id":_child_text(node,"CalendarObjectId","CalendarId","CalendarUID"),
                 "cstr_type":_child_text(node,"PrimaryConstraintType","ConstraintType"),
                 "cstr_date":_child_text(node,"PrimaryConstraintDate","ConstraintDate"),
             }
             tasks.append(task)
+            for child in list(node):
+                if _local(child.tag).lower()!="predecessorlink":continue
+                pred=_child_text(child,"PredecessorUID","PredecessorActivityId","PredecessorActivityObjectId")
+                if pred:
+                    rels.append({
+                        "task_id":task_id,
+                        "pred_task_id":pred,
+                        "pred_type":_msp_relationship_type(_child_text(child,"Type")),
+                        "lag_hr_cnt":_msp_link_lag_hours(_child_text(child,"LinkLag","Lag")),
+                    })
         elif tag=="relationship":
             pred=_child_text(node,"PredecessorActivityId","PredecessorActivityObjectId")
             succ=_child_text(node,"SuccessorActivityId","SuccessorActivityObjectId")
@@ -232,14 +267,14 @@ def _p6_xml(content:bytes):
         elif tag=="project":
             projects.append({"proj_id":_child_text(node,"ObjectId","Id"),"proj_short_name":_child_text(node,"Id","ProjectId"),"proj_name":_child_text(node,"Name"),"plan_start_date":_child_text(node,"PlannedStartDate","StartDate"),"plan_end_date":_child_text(node,"ScheduledFinishDate","FinishDate"),"data_date":_child_text(node,"DataDate")})
         elif tag=="calendar":
-            cid=_child_text(node,"ObjectId","Id")
+            cid=_child_text(node,"UID","ObjectId","Id")
             if cid:calendars.append({"clndr_id":cid,"clndr_name":_child_text(node,"Name") or cid})
         elif tag=="resource":
-            rid=_child_text(node,"ObjectId","Id")
+            rid=_child_text(node,"UID","ObjectId","Id")
             if rid:resources.append({"rsrc_id":rid,"rsrc_name":_child_text(node,"Name"),"rsrc_type":_child_text(node,"ResourceType","Type")})
-        elif tag in {"resourceassignment","resourceassignmentspread"}:
-            tid=_child_text(node,"ActivityObjectId","ActivityId")
-            rid=_child_text(node,"ResourceObjectId","ResourceId")
+        elif tag in {"resourceassignment","resourceassignmentspread","assignment"}:
+            tid=_child_text(node,"TaskUID","ActivityObjectId","ActivityId")
+            rid=_child_text(node,"ResourceUID","ResourceObjectId","ResourceId")
             if tid and rid:assignments.append({"task_id":tid,"rsrc_id":rid})
     if not tasks:return None
     return {"PROJECT":projects,"TASK":tasks,"TASKPRED":rels,"PROJWBS":wbs,"CALENDAR":calendars,"RSRC":resources,"TASKRSRC":assignments}
@@ -295,7 +330,7 @@ def ingest_schedule(extension:str,content:bytes):
     if ext=="xer":
         tables=parse_xer(content);source_kind="Primavera P6 XER";fidelity="Full Native"
     elif ext=="xml":
-        tables=_p6_xml(content);source_kind="Primavera / Schedule XML";fidelity="Structured"
+        tables=_p6_xml(content);source_kind=_xml_source_kind(content);fidelity="Structured"
     elif ext in {"xlsx","csv"}:
         tables=_spreadsheet(ext,content);source_kind="Schedule Spreadsheet";fidelity="Structured Table"
     elif ext in {"pdf","docx","txt"}:
