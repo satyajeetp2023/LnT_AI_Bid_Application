@@ -73,6 +73,21 @@ def _duration_hours(value):
     return number*8
 
 
+def _parse_predecessor_token(value):
+    text=str(value or "").strip()
+    if not text:return None
+    match=re.match(r"^(?P<code>.+?)(?P<rtype>FS|SS|FF|SF)?(?P<lag>[+-]\s*\d+(?:\.\d+)?\s*(?:h|hr|hrs|hour|hours|d|day|days|w|week|weeks)?)?$",text,re.I)
+    if not match:return {"code":text,"type":"PR_FS","lag_hours":0.0}
+    code=(match.group("code") or "").strip()
+    rtype=(match.group("rtype") or "FS").upper()
+    lag_text=(match.group("lag") or "").replace(" ","")
+    lag_hours=0.0
+    if lag_text:
+        sign=-1 if lag_text.startswith("-") else 1
+        lag_hours=sign*(_duration_hours(lag_text.lstrip("+-")) or 0.0)
+    return {"code":code,"type":"PR_"+rtype,"lag_hours":lag_hours}
+
+
 def _table_matrix_to_schedule(matrix:list[list],sheet_name:str=""):
     best=None
     for row_index,row in enumerate(matrix[:80]):
@@ -85,7 +100,7 @@ def _table_matrix_to_schedule(matrix:list[list],sheet_name:str=""):
             if best is None or score>best[0]:best=(score,row_index,mapping)
     if not best:return None
     _,header_row,mapping=best
-    tasks=[];wbs_names={};rels=[]
+    tasks=[];wbs_names={};rels=[];resource_ids={};resources=[];assignments=[]
     for index,row in enumerate(matrix[header_row+1:],1):
         def get(name):
             col=mapping.get(name)
@@ -101,7 +116,7 @@ def _table_matrix_to_schedule(matrix:list[list],sheet_name:str=""):
             "task_name":name,
             "wbs_id":wbs_names.get(wbs),
             "status_code":str(get("status_code") or "").strip() or None,
-            "task_type":str(get("task_type") or "").strip() or "TT_Task",
+            "task_type":str(get("task_type") or "").strip() or ("TT_Mile" if (_number(get("duration"))==0 and get("duration") not in (None,"")) else "TT_Task"),
             "target_start_date":_date_text(get("start_date")),
             "target_end_date":_date_text(get("finish_date")),
             "target_drtn_hr_cnt":_duration_hours(get("duration")),
@@ -113,12 +128,20 @@ def _table_matrix_to_schedule(matrix:list[list],sheet_name:str=""):
         tasks.append(task)
         pred_text=str(get("predecessors") or "").strip()
         if pred_text:
-            for pred in re.split(r"[,;\n]+",pred_text):
-                pred=pred.strip()
-                if pred:
-                    rels.append({"task_id":code,"pred_task_id":pred,"pred_type":"PR_FS","lag_hr_cnt":0})
+            for raw_pred in re.split(r"[,;\n]+",pred_text):
+                parsed=_parse_predecessor_token(raw_pred)
+                if parsed and parsed["code"]:
+                    rels.append({"task_id":code,"pred_task_id":parsed["code"],"pred_type":parsed["type"],"lag_hr_cnt":parsed["lag_hours"]})
+        resource_text=str(get("resources") or "").strip()
+        if resource_text:
+            for resource_name in [x.strip() for x in re.split(r"[,;\n]+",resource_text) if x.strip()]:
+                if resource_name not in resource_ids:
+                    rid=f"R{len(resource_ids)+1}"
+                    resource_ids[resource_name]=rid
+                    resources.append({"rsrc_id":rid,"rsrc_name":resource_name,"rsrc_type":"Unspecified"})
+                assignments.append({"task_id":code,"rsrc_id":resource_ids[resource_name]})
     wbs=[{"wbs_id":wid,"wbs_name":name,"parent_wbs_id":None} for name,wid in wbs_names.items()]
-    return {"TASK":tasks,"PROJWBS":wbs,"TASKPRED":rels}
+    return {"TASK":tasks,"PROJWBS":wbs,"TASKPRED":rels,"RSRC":resources,"TASKRSRC":assignments}
 
 
 def _spreadsheet(extension:str,content:bytes):
@@ -134,10 +157,10 @@ def _spreadsheet(extension:str,content:bytes):
         parsed=_table_matrix_to_schedule(matrix,"CSV")
         if parsed and parsed["TASK"]:candidates.append(parsed)
     if not candidates:return None
-    tasks=[];wbs=[];rels=[]
+    tasks=[];wbs=[];rels=[];resources=[];assignments=[]
     for x in candidates:
-        tasks.extend(x["TASK"]);wbs.extend(x["PROJWBS"]);rels.extend(x["TASKPRED"])
-    return {"PROJECT":[],"TASK":tasks,"PROJWBS":wbs,"TASKPRED":rels,"CALENDAR":[],"RSRC":[],"TASKRSRC":[]}
+        tasks.extend(x["TASK"]);wbs.extend(x["PROJWBS"]);rels.extend(x["TASKPRED"]);resources.extend(x.get("RSRC",[]));assignments.extend(x.get("TASKRSRC",[]))
+    return {"PROJECT":[],"TASK":tasks,"PROJWBS":wbs,"TASKPRED":rels,"CALENDAR":[],"RSRC":resources,"TASKRSRC":assignments}
 
 
 def _local(tag):
