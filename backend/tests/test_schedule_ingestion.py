@@ -170,3 +170,22 @@ def test_microsoft_project_xml_semantics_are_normalized():
     assert rel["lag_hr_cnt"]==1
     assert ing["capabilities"]["resources"] is True
     assert ing["capabilities"]["calendars"] is True
+
+
+def test_excel_progress_actual_dates_and_constraints_are_normalized():
+    wb=Workbook()
+    ws=wb.active
+    ws.append(["Activity ID","Activity Name","Duration","Remaining Duration","% Complete","Actual Start","Actual Finish","Constraint Type","Constraint Date"])
+    ws.append(["A100","Foundation","10 days","4 days",60,"2026-01-01","", "Must Finish By","2026-01-15"])
+    ws.append(["A200","Completed Work","5 days","0 days",100,"2026-01-02","2026-01-06","",""])
+    stream=io.BytesIO();wb.save(stream)
+
+    ing=ingest_schedule("xlsx",stream.getvalue())
+    tasks={x["task_code"]:x for x in ing["tables"]["TASK"]}
+    assert tasks["A100"]["status_code"]=="In Progress"
+    assert tasks["A100"]["act_start_date"]=="2026-01-01"
+    assert tasks["A100"]["remain_drtn_hr_cnt"]==32
+    assert tasks["A100"]["cstr_type"]=="Must Finish By"
+    assert tasks["A100"]["cstr_date"]=="2026-01-15"
+    assert tasks["A200"]["status_code"]=="Complete"
+    assert tasks["A200"]["act_end_date"]=="2026-01-06"
