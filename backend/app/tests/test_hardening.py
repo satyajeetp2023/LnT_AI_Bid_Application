@@ -251,3 +251,30 @@ def test_historical_result_period_filter_and_invalid_range(client,bid_payload):
     assert filtered.json()["applied_filters"]["result_from"]=="2026-01-01"
     invalid=client.get("/api/v1/historical-bids/intelligence",params={"result_from":"2026-12-31","result_to":"2026-01-01"})
     assert invalid.status_code==422
+
+
+def test_current_bid_comparison_aggregates_competitors_from_only_comparable_bids(client,bid_payload):
+    current=client.post("/api/v1/bids",json={**bid_payload,"bid_id":"CMP-CUR","tender_reference_no":"CMP-CUR","client":"DFCCIL","project_type":"OHE","location":"Gujarat"}).json()
+    histories=[]
+    for suffix in ("A","B"):
+        bid=client.post("/api/v1/bids",json={**bid_payload,"bid_id":"CMP-"+suffix,"tender_reference_no":"CMP-"+suffix,"client":"DFCCIL","project_type":"OHE","location":"Gujarat"}).json()
+        histories.append(bid)
+        saved=client.put(
+            f"/api/v1/bids/{bid['id']}/outcome",
+            json={
+                "result_status":"Lost","result_date":"2026-01-01","our_rank":2,"our_bid_value":110,
+                "prices":[
+                    {"bidder_name":"Repeat Competitor","rank":1,"bid_value":100,"currency":"INR","is_ours":False},
+                    {"bidder_name":"L&T","rank":2,"bid_value":110,"currency":"INR","is_ours":True},
+                ],
+            },
+        )
+        assert saved.status_code==200
+    comparison=client.get(f"/api/v1/bids/{current['id']}/historical-comparison")
+    assert comparison.status_code==200
+    body=comparison.json()
+    assert body["summary"]["comparable_bids"]==2
+    competitor=next(x for x in body["competitors"] if x["name"]=="Repeat Competitor")
+    assert competitor["appearances"]==2
+    assert competitor["l1_wins"]==2
+    assert competitor["l1_rate_percent"]==100.0
