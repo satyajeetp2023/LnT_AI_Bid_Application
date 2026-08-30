@@ -1,6 +1,7 @@
 import csv
 import io
 import re
+import zipfile
 from decimal import Decimal,InvalidOperation
 
 from openpyxl import load_workbook
@@ -14,6 +15,10 @@ ALIASES={
  "currency":{"currency","curr"},
  "is_ours":{"our bid","is ours","ours","l&t","our offer"},
 }
+MAX_PREVIEW_ROWS=10000
+MAX_PREVIEW_COLUMNS=100
+MAX_XLSX_UNCOMPRESSED_BYTES=50*1024*1024
+MAX_XLSX_MEMBER_BYTES=20*1024*1024
 
 
 def _norm(value):
@@ -43,6 +48,7 @@ def _money(value):
 
 def _truthy(value):
  return _norm(value) in {"yes","y","true","1","ours","our bid","l&t","lt","l and t"}
+
 
 def _finalize(prices,warnings,filename,parser_version):
  prices.sort(key=lambda x:x["rank"])
@@ -98,14 +104,40 @@ def _preview_pdf(content:bytes,filename:str):
  return _preview_pdf_text(text,filename)
 
 
+def _validate_xlsx_archive(content:bytes):
+ try:
+  with zipfile.ZipFile(io.BytesIO(content)) as archive:
+   total=0
+   for member in archive.infolist():
+    if member.file_size>MAX_XLSX_MEMBER_BYTES:
+     raise ValueError("XLSX preview rejected because one archive member is excessively large.")
+    total+=member.file_size
+    if total>MAX_XLSX_UNCOMPRESSED_BYTES:
+     raise ValueError("XLSX preview rejected because uncompressed workbook content exceeds the safe preview limit.")
+ except zipfile.BadZipFile as exc:
+  raise ValueError("XLSX preview rejected because the workbook archive is invalid.") from exc
+
+
+def _bounded_rows(rows):
+ matrix=[]
+ for index,row in enumerate(rows,start=1):
+  if index>MAX_PREVIEW_ROWS:
+   raise ValueError(f"Historical result preview supports at most {MAX_PREVIEW_ROWS} rows.")
+  values=list(row)
+  if len(values)>MAX_PREVIEW_COLUMNS:
+   raise ValueError(f"Historical result preview supports at most {MAX_PREVIEW_COLUMNS} columns.")
+  matrix.append(values)
+ return matrix
+
 
 def _matrix(extension,content):
  if extension=="csv":
-  return list(csv.reader(io.StringIO(content.decode("utf-8-sig",errors="replace"))))
+  return _bounded_rows(csv.reader(io.StringIO(content.decode("utf-8-sig",errors="replace"))))
  if extension=="xlsx":
+  _validate_xlsx_archive(content)
   wb=load_workbook(io.BytesIO(content),data_only=True,read_only=True)
   ws=wb.active
-  return [list(row) for row in ws.iter_rows(values_only=True)]
+  return _bounded_rows(ws.iter_rows(values_only=True))
  raise ValueError("Only CSV and XLSX tender result tables are supported for automatic preview.")
 
 
