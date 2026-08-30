@@ -237,6 +237,7 @@ jobs:
         env:
           PGPASSWORD: release-test-password
         run: |
+          test "$(docker image inspect -f '{{.Config.User}}' railway-bid-backend:release-test)" = "appuser"
           docker run -d --name railway-bid-backend-smoke --network host \
             -e ENVIRONMENT=production \
             -e SECRET_KEY=0123456789abcdef0123456789abcdef \
@@ -256,7 +257,10 @@ jobs:
             fi
             sleep 1
           done
-          curl -fsS http://127.0.0.1:8000/api/v1/health/ready >/dev/null
+          curl -fsS -D /tmp/backend-headers.txt http://127.0.0.1:8000/api/v1/health/ready >/dev/null
+          grep -qi '^strict-transport-security: max-age=31536000; includeSubDomains' /tmp/backend-headers.txt
+          grep -qi '^x-request-id:' /tmp/backend-headers.txt
+          grep -qi '^x-content-type-options: nosniff' /tmp/backend-headers.txt
           docker rm -f railway-bid-backend-smoke >/dev/null
           trap - EXIT
 
@@ -273,6 +277,7 @@ jobs:
 
       - name: Frontend container runtime smoke
         run: |
+          test "$(docker image inspect -f '{{.Config.User}}' railway-bid-frontend:release-test)" = "node"
           docker run -d --name railway-bid-frontend-smoke -p 3000:3000 railway-bid-frontend:release-test
           trap 'docker rm -f railway-bid-frontend-smoke >/dev/null 2>&1 || true' EXIT
           for i in {1..30}; do
@@ -282,7 +287,10 @@ jobs:
             fi
             sleep 1
           done
-          curl -fsS http://127.0.0.1:3000 >/dev/null
+          curl -fsS -D /tmp/frontend-headers.txt http://127.0.0.1:3000 >/dev/null
+          grep -qi '^content-security-policy:' /tmp/frontend-headers.txt
+          grep -qi '^x-frame-options: DENY' /tmp/frontend-headers.txt
+          grep -qi '^x-content-type-options: nosniff' /tmp/frontend-headers.txt
           docker rm -f railway-bid-frontend-smoke >/dev/null
           trap - EXIT
 
