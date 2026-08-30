@@ -1,4 +1,4 @@
-from app.services.planning_package_reconciliation import _score
+from app.services.planning_package_reconciliation import _finding_candidates,_score
 
 
 def test_resource_activity_matching_is_scope_sensitive():
@@ -8,3 +8,35 @@ def test_resource_activity_matching_is_scope_sensitive():
 
 def test_work_front_terms_help_resource_matching():
     assert _score("Section A mast erection","A100 mast erection section A")>.55
+
+
+def test_planning_findings_are_created_for_uncovered_and_contract_staff_gaps():
+    analysis={
+        "issues":[{"severity":"High","type":"Missing Staff Plan","message":"No bidder Staff Plan has been identified."}],
+        "activity_resource_coverage":[
+            {"task_code":"A100","task_id":"1","task_name":"Foundation","coverage_status":"Uncovered"}
+        ],
+        "separate_plan_matching":[],
+        "staff_plan":{"missing_contract_required_roles":["Planning Manager"]},
+    }
+    findings=_finding_candidates(analysis)
+    keys={x["finding_key"] for x in findings}
+    assert "issue:missing-staff-plan" in keys
+    assert "uncovered-activity:A100" in keys
+    assert "contract-staff:planning-manager" in keys
+
+
+def test_resource_timing_misalignment_becomes_reviewable_finding():
+    analysis={
+        "issues":[],
+        "activity_resource_coverage":[],
+        "separate_plan_matching":[{
+            "id":7,"timeline_status":"Starts After Activity","match_status":"Matched",
+            "resource_name":"Crane","matched_task_code":"A200","matched_task_name":"Mast Erection",
+            "activity_reference":"Mast Erection","work_front":None,
+        }],
+        "staff_plan":{"missing_contract_required_roles":[]},
+    }
+    findings=_finding_candidates(analysis)
+    assert findings[0]["finding_key"]=="resource-timing:7"
+    assert findings[0]["severity"]=="Medium"
