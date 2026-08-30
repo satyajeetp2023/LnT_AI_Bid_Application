@@ -40,8 +40,8 @@ export function Sidebar({mobileOpen=false,onClose}:{mobileOpen?:boolean;onClose?
   {id:"review",n:"Review & Insights",i:ShieldCheck,description:"Approve, submit and learn",items:[
    {n:"Review & Approval",h:bidId?`/bids/${bidId}/review-approval`:undefined,i:ShieldCheck,keywords:"approval management gate"},
    {n:"Submission",h:bidId?`/bids/${bidId}/submission`:undefined,i:FileCheck2,keywords:"package final submission"},
-   {n:"Bid Results",i:BarChart3,keywords:"win loss result"},
-   {n:"Historical Intelligence",i:History,keywords:"history previous bids benchmark"},
+   {n:"Bid Results",h:bidId?`/bids/${bidId}/bid-results`:undefined,i:BarChart3,keywords:"win loss result l1 l2 l3 l4"},
+   {n:"Historical Intelligence",h:"/historical-intelligence",i:History,keywords:"history previous bids benchmark win loss competitor"},
    {n:"Reports & Analytics",i:BarChart3,keywords:"dashboard reports analytics"},
   ]},
  ],[bidId]);
