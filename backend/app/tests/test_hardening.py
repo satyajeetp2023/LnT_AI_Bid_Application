@@ -45,8 +45,8 @@ def test_read_only_member_cannot_preview_or_save_bid_result(client,bid_payload):
 def test_sensitive_api_requires_explicit_identity_header():
     anonymous=TestClient(app)
     response=anonymous.get("/api/v1/auth/me")
-    assert response.status_code==422
-    assert "X-User-ID" in response.text
+    assert response.status_code==401
+    assert "Development identity header is required" in response.text
 
 
 def test_known_file_signature_mismatch_is_rejected(client,bid_payload):
