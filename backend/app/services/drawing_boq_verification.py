@@ -131,7 +131,8 @@ def verify_drawing_boq(db:Session,bid_id:int,user_id:int|None=None,request_metad
    bid_project_id=bid_id,observation_id=observation.id,boq_scope_item_id=scope_id,
    match_confidence=Decimal(str(best_score)),boq_reference=boq_ref,boq_description=boq_desc,
    boq_quantity=boq_qty,boq_unit=boq_unit,drawing_quantity=observation.quantity,drawing_unit=observation.unit,
-   variance_quantity=variance,variance_percent=variance_pct,finding_status=status,review_status="Open",
+   variance_quantity=variance,variance_percent=variance_pct,finding_status=status,
+   responsible_function="Engineering",review_status="Informational" if status=="Match" else "Open",
   )
   db.add(finding);db.flush();created.append(finding)
  if user_id is not None:
@@ -169,7 +170,8 @@ def drawing_boq_summary(db:Session,bid_id:int):
    "boq_unit":row.boq_unit,"match_confidence":float(row.match_confidence),
    "variance_quantity":float(row.variance_quantity) if row.variance_quantity is not None else None,
    "variance_percent":float(row.variance_percent) if row.variance_percent is not None else None,
-   "finding_status":row.finding_status,"review_status":row.review_status,
+   "finding_status":row.finding_status,"responsible_function":row.responsible_function,"responsible_person":row.responsible_person,
+   "review_status":row.review_status,
    "reviewer_disposition":row.reviewer_disposition,"reviewer_comment":row.reviewer_comment,
   })
  return {
@@ -180,7 +182,7 @@ def drawing_boq_summary(db:Session,bid_id:int):
    "quantity_variances":sum(1 for x in items if x["finding_status"]=="Quantity Variance"),
    "unit_reviews":sum(1 for x in items if x["finding_status"]=="Unit Review"),
    "unmatched":sum(1 for x in items if x["finding_status"]=="No BOQ Match"),
-   "open_reviews":sum(1 for x in items if x["review_status"]!="Closed"),
+   "open_reviews":sum(1 for x in items if x["review_status"]=="Open"),
   },
   "version":"drawing-boq-verification-v1",
   "note":"Drawing quantities are sanity-check evidence only. A mismatch is a review trigger, not an automatic BOQ correction.",
