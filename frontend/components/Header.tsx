@@ -1,7 +1,8 @@
 "use client";
 
 import {useEffect,useMemo,useState} from "react";
-import {Bell,HelpCircle,Menu,Search} from "lucide-react";
+import Link from "next/link";
+import {HelpCircle,Menu} from "lucide-react";
 import {LTConstructionLogo} from "@/components/LTConstructionLogo";
 import {request} from "@/services/api";
 
@@ -32,9 +33,7 @@ export function Header({onMenu}:{onMenu?:()=>void}){
    </div>
   </div>
   <div className="flex items-center gap-1.5">
-   <button aria-label="Search" className="hidden rounded p-2 text-slate-300 hover:bg-white/10 hover:text-white sm:block"><Search size={17}/></button>
-   <button aria-label="Notifications" className="relative rounded p-2 text-slate-300 hover:bg-white/10 hover:text-white"><Bell size={17}/></button>
-   <button aria-label="Help" className="rounded p-2 text-slate-300 hover:bg-white/10 hover:text-white"><HelpCircle size={17}/></button>
+   <Link aria-label="Help" href="/settings#help" className="rounded p-2 text-slate-300 hover:bg-white/10 hover:text-white"><HelpCircle size={17}/></Link>
    <div className="mx-1 hidden h-7 w-px bg-white/15 sm:block"/>
    <div className="hidden text-right md:block"><div className="max-w-[170px] truncate text-[11px] font-semibold">{displayName}</div><div className="max-w-[170px] truncate text-[9px] text-slate-300">{role}</div></div>
    <div className="grid h-8 w-8 place-items-center rounded-full bg-[#e2b635] text-[10px] font-bold text-[#24313d]" aria-label={displayName}>{avatar}</div>
