@@ -161,6 +161,8 @@ def test_historical_intelligence_filters_are_server_side(client,bid_payload):
     names={x["name"] for x in body["competitors"]}
     assert "Rail Competitor" in names
     assert "Metro Competitor" not in names
+    assert body["data_quality"]["outcome_source_coverage_percent"]==100.0
+    assert body["data_quality"]["price_source_coverage_percent"]==100.0
 
 
 def test_failed_historical_result_save_rolls_back_previous_state(client,bid_payload,monkeypatch):
@@ -192,3 +194,26 @@ def test_failed_historical_result_save_rolls_back_previous_state(client,bid_payl
     assert persisted["outcome"]["result_status"]=="Lost"
     assert persisted["outcome"]["our_rank"]==2
     assert len(persisted["prices"])==2
+
+
+def test_unchanged_historical_result_save_is_idempotent(client,bid_payload):
+    bid=client.post("/api/v1/bids",json={**bid_payload,"bid_id":"IDEMP-HIST","tender_reference_no":"IDEMP-HIST"}).json()
+    payload={
+        "result_status":"Lost","our_rank":2,"our_bid_value":108,"source_reference":"Official Result",
+        "prices":[
+            {"bidder_name":"Competitor A","rank":1,"bid_value":100,"currency":"INR","is_ours":False,"source_reference":"Official Result"},
+            {"bidder_name":"L&T","rank":2,"bid_value":108,"currency":"INR","is_ours":True,"source_reference":"Official Result"},
+        ],
+    }
+    first=client.put(f"/api/v1/bids/{bid['id']}/outcome",json=payload)
+    assert first.status_code==200
+    first_body=first.json()
+    first_ids=[x["id"] for x in first_body["prices"]]
+    saved_events_before=[x for x in client.get("/api/v1/audit").json() if x["event_type"]=="historical_bid.outcome_saved" and x["bid_project_id"]==bid["id"]]
+
+    second=client.put(f"/api/v1/bids/{bid['id']}/outcome",json=payload)
+    assert second.status_code==200
+    second_body=second.json()
+    assert [x["id"] for x in second_body["prices"]]==first_ids
+    saved_events_after=[x for x in client.get("/api/v1/audit").json() if x["event_type"]=="historical_bid.outcome_saved" and x["bid_project_id"]==bid["id"]]
+    assert len(saved_events_after)==len(saved_events_before)
