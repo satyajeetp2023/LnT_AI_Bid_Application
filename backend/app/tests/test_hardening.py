@@ -396,6 +396,7 @@ def test_phase8_learning_factors_require_source_and_future_lesson_before_review(
         f"/api/v1/bids/{bid['id']}/execution-outcome",
         json={"execution_status":"In Progress","data_date":"2026-08-30","actual_start_date":"2026-01-01","actual_cost":500,"source_reference":"Monthly certified cost report"},
     ).status_code==200
+    assert client.post(f"/api/v1/bids/{bid['id']}/execution-outcome/review").status_code==200
 
     created=client.post(
         f"/api/v1/bids/{bid['id']}/execution-learning-factors",
@@ -457,7 +458,7 @@ def test_phase9_noncompliant_requirement_forces_blocked_decision_posture(client,
     requirement=client.post(
         f"/api/v1/bids/{bid['id']}/requirements",
         json={
-            "requirement_category":"Commercial",
+            "requirement_category":"Commercial Requirement",
             "requirement_title":"Mandatory commercial condition",
             "requirement_text":"Bidder shall comply with mandatory commercial condition.",
             "priority":"Critical","requirement_status":"Open","is_mandatory":True,
