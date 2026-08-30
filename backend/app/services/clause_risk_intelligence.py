@@ -151,11 +151,17 @@ def bid_clause_risk_summary(db:Session,bid_id:int):
  rows=db.scalars(select(BidClauseRiskFinding).where(
   BidClauseRiskFinding.bid_project_id==bid_id
  ).order_by(BidClauseRiskFinding.created_at.desc())).all()
+ documents={x.id:x for x in db.scalars(select(BidDocument).where(BidDocument.bid_project_id==bid_id)).all()}
+ patterns={x.id:x for x in db.scalars(select(ClauseRiskPattern)).all()}
  return {
   "items":[{
-   "id":x.id,"source_document_id":x.source_document_id,"risk_code":x.risk_code,"risk_title":x.risk_title,
+   "id":x.id,"source_document_id":x.source_document_id,
+   "source_document_name":documents.get(x.source_document_id).original_filename if documents.get(x.source_document_id) else None,
+   "risk_code":x.risk_code,"risk_title":x.risk_title,
    "risk_category":x.risk_category,"severity":x.severity,"source_page":x.source_page,"source_clause":x.source_clause,
    "source_section":x.source_section,"source_excerpt":x.source_excerpt,"confidence":float(x.confidence),
+   "explanation":patterns.get(x.risk_pattern_id).explanation if patterns.get(x.risk_pattern_id) else None,
+   "reviewer_guidance":patterns.get(x.risk_pattern_id).reviewer_guidance if patterns.get(x.risk_pattern_id) else None,
    "review_status":x.review_status,"reviewer_disposition":x.reviewer_disposition,"reviewer_comment":x.reviewer_comment,
   } for x in rows],
   "summary":{
