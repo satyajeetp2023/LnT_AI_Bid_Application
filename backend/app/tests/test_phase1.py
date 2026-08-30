@@ -1,6 +1,5 @@
 import pytest
 from app.storage.base import LocalSecureStorage
-from app.tests.conftest import TestingSession
 from app.models import AuditEvent,ProjectMembership
 
 def create(client,payload,headers=None): return client.post("/api/v1/bids",json=payload,headers=headers or {}).json()
@@ -15,10 +14,10 @@ def test_upload_duplicate_classify_notes_archive_and_filter(client,bid_payload):
  assert client.post(f"/api/v1/documents/{doc['id']}/archive").json()["document_status"]=="Archived"
 def test_unsupported_revision_and_protected_download(client,bid_payload):
  bid=create(client,bid_payload);assert upload(client,bid["id"],"run.exe").status_code==415;one=upload(client,bid["id"],"base.pdf",b"one").json()[0];two=upload(client,bid["id"],"revised.pdf",b"two").json()[0];rev=client.post(f"/api/v1/documents/{two['id']}/revision",json={"revision_of_document_id":one["id"]});assert rev.json()["revision_no"]==2 and rev.json()["revision_of_document_id"]==one["id"];history=client.get(f"/api/v1/documents/{one['id']}/revisions").json();assert len(history)==2;download=client.get(f"/api/v1/documents/{one['id']}/download");assert download.status_code==200 and download.content==b"one"
-def test_project_authorized_and_cross_project_denied(client,bid_payload):
+def test_project_authorized_and_cross_project_denied(client,bid_payload,testing_session):
  bid=create(client,bid_payload);doc=upload(client,bid["id"],"private.pdf").json()[0]
  assert client.get(f"/api/v1/bids/{bid['id']}/documents",headers={"X-User-ID":"2"}).status_code==403;assert client.get(f"/api/v1/documents/{doc['id']}/download",headers={"X-User-ID":"2"}).status_code==403
- with TestingSession() as db: db.add(ProjectMembership(bid_project_id=bid["id"],user_id=2,role="Read Only"));db.commit()
+ with testing_session() as db: db.add(ProjectMembership(bid_project_id=bid["id"],user_id=2,role="Read Only"));db.commit()
  assert client.get(f"/api/v1/bids/{bid['id']}/documents",headers={"X-User-ID":"2"}).status_code==200;assert client.get(f"/api/v1/documents/{doc['id']}/download",headers={"X-User-ID":"2"}).status_code==200
 def test_audit_events_and_admin_only(client,bid_payload):
  bid=create(client,bid_payload);doc=upload(client,bid["id"],"audit.pdf").json()[0];client.patch(f"/api/v1/documents/{doc['id']}/classification",json={"document_category":"BOQ / Price Schedule","information_tags":[]});events=client.get("/api/v1/audit").json();names={x["event_type"] for x in events};assert {"bid.created","document.uploaded","document.reclassified"}<=names;assert client.get("/api/v1/audit",headers={"X-User-ID":"2"}).status_code==403
