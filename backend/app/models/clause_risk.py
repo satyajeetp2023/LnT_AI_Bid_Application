@@ -46,6 +46,8 @@ class BidClauseRiskFinding(Base):
     responsible_function:Mapped[str]=mapped_column(String(100),default="Contracts",index=True)
     responsible_person:Mapped[str|None]=mapped_column(String(200))
     detection_method:Mapped[str]=mapped_column(String(60),default="Firm Risk Pattern")
+    responsible_function:Mapped[str]=mapped_column(String(100),default="Contracts",index=True)
+    responsible_person:Mapped[str|None]=mapped_column(String(200))
     review_status:Mapped[str]=mapped_column(String(40),default="Open",index=True)
     reviewer_disposition:Mapped[str|None]=mapped_column(String(50),index=True)
     reviewer_comment:Mapped[str|None]=mapped_column(Text)
