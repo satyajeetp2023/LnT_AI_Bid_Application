@@ -1,5 +1,6 @@
 import io
 
+from docx import Document
 from openpyxl import Workbook
 
 from app.services.planning_package_ingestion import detect_planning_resource_document
@@ -43,3 +44,17 @@ def test_non_resource_spreadsheet_is_ignored():
     )
     result=detect_planning_resource_document("BOQ.xlsx","xlsx",content)
     assert result["detected"] is False
+
+
+def test_word_staff_plan_table_is_detected():
+    document=Document()
+    table=document.add_table(rows=1,cols=5)
+    for i,value in enumerate(["Designation","Strength","Start Date","Finish Date","Section"]):
+        table.rows[0].cells[i].text=value
+    row=table.add_row().cells
+    for i,value in enumerate(["Safety Manager","1","2026-01-01","2027-12-31","Project"]):
+        row[i].text=value
+    stream=io.BytesIO();document.save(stream)
+    result=detect_planning_resource_document("Staff Deployment.docx","docx",stream.getvalue())
+    assert result["detected"] is True
+    assert "Staff Plan" in result["plan_types"]
