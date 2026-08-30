@@ -15,7 +15,7 @@ describe("GAP-002 API request timeout and cancellation",()=>{
    init?.signal?.addEventListener("abort",()=>reject(new DOMException("Aborted","AbortError")),{once:true});
   })));
   const {request}=await import("./api");
-  const pending=request("/slow",{timeoutMs:25});
+  const pending=request("/slow",{timeoutMs:25,retries:0});
   await vi.advanceTimersByTimeAsync(25);
   await expect(pending).rejects.toThrow("did not respond within 1 seconds");
  });
@@ -26,7 +26,7 @@ describe("GAP-002 API request timeout and cancellation",()=>{
   })));
   const {request}=await import("./api");
   const controller=new AbortController();
-  const pending=request("/cancel",{signal:controller.signal,timeoutMs:5000});
+  const pending=request("/cancel",{signal:controller.signal,timeoutMs:5000,retries:0});
   controller.abort();
   await expect(pending).rejects.toMatchObject({name:"AbortError"});
  });
@@ -35,7 +35,7 @@ describe("GAP-002 API request timeout and cancellation",()=>{
   const clearSpy=vi.spyOn(globalThis,"clearTimeout");
   vi.stubGlobal("fetch",vi.fn().mockResolvedValue(new Response(JSON.stringify({ok:true}),{status:200,headers:{"Content-Type":"application/json"}})));
   const {request}=await import("./api");
-  await expect(request<{ok:boolean}>("/ok",{timeoutMs:1000})).resolves.toEqual({ok:true});
+  await expect(request<{ok:boolean}>("/ok",{timeoutMs:1000,retries:0})).resolves.toEqual({ok:true});
   expect(clearSpy).toHaveBeenCalled();
  });
  test("downloads through the authenticated API client",async()=>{
