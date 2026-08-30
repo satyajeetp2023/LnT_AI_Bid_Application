@@ -177,7 +177,7 @@ def historical_bid_intelligence(db:Session,bid_ids:list[int]):
    project=projects.get(outcome.bid_project_id)
    if project:bucket[getattr(project,field) or "Unspecified"].append(outcome)
   return [{"name":k,"bids":len(v),"won":sum(x.result_status=="Won" for x in v),"win_rate_percent":round(sum(x.result_status=="Won" for x in v)*100/len(v),1)} for k,v in sorted(bucket.items())]
- appearances=Counter();wins=Counter();rank_totals=Counter();display_names={};client_context=defaultdict(Counter);project_type_context=defaultdict(Counter);head_to_head=Counter();competitor_ahead=Counter();our_ahead=Counter)
+ appearances=Counter();wins=Counter();rank_totals=Counter();display_names={};client_context=defaultdict(Counter);project_type_context=defaultdict(Counter);head_to_head=Counter();competitor_ahead=Counter();our_ahead=Counter()
  our_rank_by_bid={}
  for outcome in completed:
   ours=next((x for x in prices if x.bid_project_id==outcome.bid_project_id and x.is_ours),None)
