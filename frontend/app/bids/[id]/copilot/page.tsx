@@ -4,7 +4,7 @@ import {use,useEffect,useState} from "react";
 import {BidWorkspaceHeader} from "@/components/BidWorkspaceHeader";
 import {ErrorState,LoadingState,PageHeader,StatusBadge,SummaryCard} from "@/components/design-system";
 import {request} from "@/services/api";
-import type {Bid,ClauseRiskFinding,ClauseRiskSummary,DrawingBoqFinding,DrawingBoqSummary,DrawingVisionStatus,FirmRiskLibrary,TenderKnowledgeStatus,TenderQAResponse} from "@/types";
+import type {Bid,ClauseRiskFinding,ClauseRiskSummary,ContractClauseVariationResponse,DrawingBoqFinding,DrawingBoqSummary,DrawingVisionStatus,FirmRiskLibrary,TenderKnowledgeStatus,TenderQAResponse} from "@/types";
 
 const dispositions=["Open","Escalate","Mitigated / Qualified","Accept Risk","Not Applicable","False Positive"];
 const drawingDispositions=["Confirmed Variance","BOQ Correct","Drawing Correct","Different Scope","Unit Conversion Required","False Match","Escalate"];
@@ -17,6 +17,7 @@ export default function CopilotPage({params}:{params:Promise<{id:string}>}){
  const [library,setLibrary]=useState<FirmRiskLibrary|null>(null);
  const [visionStatus,setVisionStatus]=useState<DrawingVisionStatus|null>(null);
  const [knowledgeStatus,setKnowledgeStatus]=useState<TenderKnowledgeStatus|null>(null);
+ const [clauseVariations,setClauseVariations]=useState<ContractClauseVariationResponse|null>(null);
  const [loading,setLoading]=useState(true);
  const [error,setError]=useState("");
  const [question,setQuestion]=useState("");
@@ -37,9 +38,10 @@ export default function CopilotPage({params}:{params:Promise<{id:string}>}){
    request<DrawingBoqSummary>("/bids/"+id+"/drawing-boq"),
    request<FirmRiskLibrary>("/firm-risk-library"),
    request<DrawingVisionStatus>("/bids/"+id+"/drawing-vision-status"),
-   request<TenderKnowledgeStatus>("/bids/"+id+"/tender-knowledge-status")
+   request<TenderKnowledgeStatus>("/bids/"+id+"/tender-knowledge-status"),
+   request<ContractClauseVariationResponse>("/bids/"+id+"/contract-clause-variations")
   ])
-   .then(([b,r,d,l,v,k])=>{setBid(b);setRisks(r);setDrawing(d);setLibrary(l);setVisionStatus(v);setKnowledgeStatus(k)})
+   .then(([b,r,d,l,v,k,cv])=>{setBid(b);setRisks(r);setDrawing(d);setLibrary(l);setVisionStatus(v);setKnowledgeStatus(k);setClauseVariations(cv)})
    .catch(()=>setError("Unable to load Bid Intelligence Copilot."))
    .finally(()=>setLoading(false));
  },[id]);
@@ -167,6 +169,15 @@ export default function CopilotPage({params}:{params:Promise<{id:string}>}){
     </div>}
    </section>
   </>}
+
+  {clauseVariations&&clauseVariations.items.length>0&&<section className="mb-3 overflow-hidden rounded border border-slate-200 bg-white">
+   <div className="flex flex-col gap-2 border-b bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="text-sm font-bold text-slate-900">GCC ↔ SCC/PCC Variation Map</h2><p className="text-xs text-slate-500">{clauseVariations.note}</p></div><div className="flex flex-wrap gap-2 text-[10px] font-bold"><span className="rounded bg-amber-50 px-2 py-1 text-amber-700">{clauseVariations.summary.modified} MODIFIED</span><span className="rounded bg-slate-100 px-2 py-1 text-slate-700">{clauseVariations.summary.special_only} SPECIAL-ONLY</span><span className="rounded bg-red-50 px-2 py-1 text-red-700">{clauseVariations.summary.risk_linked} RISK-LINKED</span></div></div>
+   <div className="space-y-2 p-3">{clauseVariations.items.slice(0,30).map(item=><article key={item.special_document_id+"-"+item.clause} className={item.review_priority==="High"?"rounded border border-red-200 bg-red-50/30 p-3":"rounded border border-slate-200 bg-white p-3"}>
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between"><div><div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Clause {item.clause} · {item.special_role}</div><div className="mt-1 text-sm font-semibold text-slate-900">{item.status}</div><div className="mt-1 text-[11px] text-slate-500">{item.special_document_name}{item.special_page&&" · p."+item.special_page}{item.gcc_document_name&&" ↔ "+item.gcc_document_name}</div></div><StatusBadge tone={item.review_priority==="High"?"red":"amber"}>{item.review_priority}</StatusBadge></div>
+    <div className="mt-3 grid gap-2 lg:grid-cols-2"><div className="rounded bg-slate-50 p-3 text-xs leading-5 text-slate-700"><div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{item.special_role}</div>{item.special_text}</div><div className="rounded bg-slate-50 p-3 text-xs leading-5 text-slate-700"><div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">GCC</div>{item.gcc_text||"No same-numbered GCC clause was found in the indexed evidence."}</div></div>
+    <div className="mt-2 flex flex-wrap gap-2 text-[10px] text-slate-500"><span>Text similarity: {Math.round(item.similarity*100)}%</span>{item.risk_flags.map(r=><span key={r.id} className={r.severity==="Critical"?"rounded bg-red-100 px-2 py-1 font-bold text-red-800":"rounded bg-amber-100 px-2 py-1 font-bold text-amber-800"}>{r.severity} · {r.title}</span>)}</div>
+   </article>)}</div>
+  </section>}
 
   {library&&<section className="mb-3 overflow-hidden rounded border border-slate-200 bg-white">
    <div className="flex flex-col gap-2 border-b bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
