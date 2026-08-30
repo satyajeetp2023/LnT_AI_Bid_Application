@@ -157,7 +157,7 @@ def upsert_bid_outcome(db:Session,bid:BidProject,payload,user_id:int,request_met
 
 def historical_bid_intelligence(db:Session,bid_ids:list[int],result_from=None,result_to=None):
  if not bid_ids:
-  return {"summary":{"recorded":0,"won":0,"lost":0,"win_rate_percent":None},"by_project_type":[],"by_client":[],"competitors":[],"market_spread":{"samples":0,"average_l2_to_l1_percent":None,"average_l3_to_l1_percent":None,"average_l4_to_l1_percent":None},"data_quality":{"completed_results":0,"outcome_source_coverage_percent":None,"price_source_coverage_percent":None,"complete_l1_l4_coverage_percent":None,"results_with_our_bid_marked_percent":None},"version":"phase7-historical-bid-intelligence-v3","note":"Descriptive only. No predictive judgement is produced."}
+  return {"summary":{"recorded":0,"won":0,"lost":0,"win_rate_percent":None},"by_project_type":[],"by_client":[],"records":[],"competitors":[],"market_spread":{"samples":0,"average_l2_to_l1_percent":None,"average_l3_to_l1_percent":None,"average_l4_to_l1_percent":None},"data_quality":{"completed_results":0,"outcome_source_coverage_percent":None,"price_source_coverage_percent":None,"complete_l1_l4_coverage_percent":None,"results_with_our_bid_marked_percent":None},"version":"phase7-historical-bid-intelligence-v3","note":"Descriptive only. No predictive judgement is produced."}
  outcomes=db.scalars(select(BidOutcome).where(BidOutcome.bid_project_id.in_(bid_ids))).all()
  if result_from:outcomes=[x for x in outcomes if x.result_date is not None and x.result_date>=result_from]
  if result_to:outcomes=[x for x in outcomes if x.result_date is not None and x.result_date<=result_to]
@@ -211,6 +211,33 @@ def historical_bid_intelligence(db:Session,bid_ids:list[int],result_from=None,re
   recorded_ranks={x.rank for x in rows}
   if {1,2,3,4}<=recorded_ranks:complete_l1_l4+=1
   if any(x.is_ours for x in rows):with_ours+=1
+ records=[]
+ for outcome in sorted(outcomes,key=lambda x:(x.result_date is None,x.result_date),reverse=True):
+  project=projects.get(outcome.bid_project_id)
+  rows=[x for x in prices if x.bid_project_id==outcome.bid_project_id]
+  psummary=price_summary([{"bidder_name":x.bidder_name,"rank":x.rank,"bid_value":_f(x.bid_value),"currency":x.currency,"is_ours":x.is_ours,"source_reference":x.source_reference} for x in rows])
+  missing=[]
+  if not (outcome.source_reference or "").strip():missing.append("Outcome source reference")
+  if not rows:missing.append("Ranked bidder prices")
+  elif any(not (x.source_reference or "").strip() for x in rows):missing.append("Price source reference")
+  if outcome.result_status in {"Won","Lost"} and not psummary["l1"]:missing.append("L1 price")
+  if outcome.result_status in {"Won","Lost"} and not psummary["our_price"]:missing.append("Our bid row")
+  records.append({
+   "bid_project_id":outcome.bid_project_id,
+   "bid_id":project.bid_id if project else str(outcome.bid_project_id),
+   "tender_name":project.tender_name if project else None,
+   "client":project.client if project else None,
+   "project_type":project.project_type if project else None,
+   "result_status":outcome.result_status,
+   "result_date":outcome.result_date.isoformat() if outcome.result_date else None,
+   "our_rank":outcome.our_rank,
+   "our_bid_value":_f(outcome.our_bid_value),
+   "l1_bid_value":psummary["l1"]["bid_value"] if psummary["l1"] else None,
+   "our_gap_to_l1_percent":psummary["our_gap_to_l1_percent"],
+   "source_reference":outcome.source_reference,
+   "evidence_status":"Complete" if not missing else "Partial",
+   "missing_evidence":missing,
+  })
  return {
   "summary":{
    "recorded":len(outcomes),"completed":len(completed),"won":len(won),"lost":len(completed)-len(won),
@@ -220,6 +247,7 @@ def historical_bid_intelligence(db:Session,bid_ids:list[int],result_from=None,re
    "average_recorded_margin_percent":round(sum(margins)/len(margins),2) if margins else None,
   },
   "by_project_type":grouped("project_type"),"by_client":grouped("client"),
+  "records":records,
   "competitors":[{"name":display_names[name],"appearances":count,"l1_wins":wins[name],"l1_rate_percent":round(wins[name]*100/count,1),"average_rank":round(rank_totals[name]/count,2),"top_client":client_context[name].most_common(1)[0][0] if client_context[name] else None,"top_project_type":project_type_context[name].most_common(1)[0][0] if project_type_context[name] else None,"head_to_head":head_to_head[name],"competitor_ahead":competitor_ahead[name],"our_ahead":our_ahead[name]} for name,count in appearances.most_common(20)],
   "market_spread":{
    "samples":len(market_spreads),
