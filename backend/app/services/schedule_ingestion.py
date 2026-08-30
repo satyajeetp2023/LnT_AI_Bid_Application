@@ -101,6 +101,12 @@ def _table_matrix_to_schedule(matrix:list[list],sheet_name:str=""):
             if best is None or score>best[0]:best=(score,row_index,mapping)
     if not best:return None
     _,header_row,mapping=best
+    raw_headers=[]
+    seen_headers={}
+    for col_index,value in enumerate(matrix[header_row]):
+        base=str(value or f"Column {col_index+1}").strip()
+        count=seen_headers.get(base,0)+1;seen_headers[base]=count
+        raw_headers.append(base if count==1 else f"{base} [{count}]")
     tasks=[];wbs_names={};rels=[];resource_ids={};resources=[];assignments=[]
     for index,row in enumerate(matrix[header_row+1:],1):
         def get(name):
@@ -111,6 +117,11 @@ def _table_matrix_to_schedule(matrix:list[list],sheet_name:str=""):
         code=str(get("task_code") or f"{sheet_name or 'SCH'}-{index:05d}").strip()
         wbs=str(get("wbs") or "").strip()
         if wbs and wbs not in wbs_names:wbs_names[wbs]=str(len(wbs_names)+1)
+        source_fields={
+            raw_headers[col]:row[col]
+            for col in range(min(len(raw_headers),len(row)))
+            if row[col] not in (None,"")
+        }
         task={
             "task_id":code,
             "task_code":code,
@@ -125,6 +136,7 @@ def _table_matrix_to_schedule(matrix:list[list],sheet_name:str=""):
             "total_float_hr_cnt":_number(get("total_float")),
             "clndr_id":str(get("calendar") or "").strip() or None,
             "_source_sheet":sheet_name,
+            "_source_fields":source_fields,
         }
         tasks.append(task)
         pred_text=str(get("predecessors") or "").strip()
@@ -225,6 +237,11 @@ def _p6_xml(content:bytes):
             status=_child_text(node,"Status","ActivityStatus")
             if not status and percent is not None:
                 status="Complete" if percent>=100 else "In Progress" if percent>0 else "Not Started"
+            source_fields={}
+            for child in list(node):
+                if list(child):continue
+                value=(child.text or "").strip()
+                if value:source_fields[_local(child.tag)]=value
             task={
                 "task_id":task_id,
                 "task_code":code or task_id,
@@ -244,6 +261,7 @@ def _p6_xml(content:bytes):
                 "clndr_id":_child_text(node,"CalendarObjectId","CalendarId","CalendarUID"),
                 "cstr_type":_child_text(node,"PrimaryConstraintType","ConstraintType"),
                 "cstr_date":_child_text(node,"PrimaryConstraintDate","ConstraintDate"),
+                "_source_fields":source_fields,
             }
             tasks.append(task)
             for child in list(node):
@@ -352,7 +370,7 @@ def ingest_schedule(extension:str,content:bytes):
             "fidelity":fidelity,
             "capabilities":{"activities":False,"logic":False,"float":False,"resources":False,"calendars":False,"wbs":False},
             "limitations":["No reliable structured activity table could be extracted from this source."],
-            "parser_version":"phase6-unified-schedule-ingestion-v2",
+            "parser_version":"phase6-unified-schedule-ingestion-v3",
         }
 
     task_fields={k for row in tables.get("TASK",[]) for k,v in row.items() if v not in (None,"")}
@@ -374,5 +392,5 @@ def ingest_schedule(extension:str,content:bytes):
         "fidelity":fidelity,
         "capabilities":capabilities,
         "limitations":limitations,
-        "parser_version":"phase6-unified-schedule-ingestion-v2",
+        "parser_version":"phase6-unified-schedule-ingestion-v3",
     }
