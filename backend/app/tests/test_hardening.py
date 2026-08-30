@@ -166,6 +166,9 @@ def test_historical_intelligence_filters_are_server_side(client,bid_payload):
     competitor=next(x for x in body["competitors"] if x["name"]=="Rail Competitor")
     assert competitor["top_client"]=="DFCCIL"
     assert competitor["top_project_type"]=="OHE"
+    assert competitor["head_to_head"]==1
+    assert competitor["competitor_ahead"]==1
+    assert competitor["our_ahead"]==0
 
 
 def test_failed_historical_result_save_rolls_back_previous_state(client,bid_payload,monkeypatch):
