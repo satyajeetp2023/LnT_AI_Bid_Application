@@ -76,16 +76,17 @@ def _duration_hours(value):
 def _parse_predecessor_token(value):
     text=str(value or "").strip()
     if not text:return None
-    match=re.match(r"^(?P<code>.+?)(?P<rtype>FS|SS|FF|SF)?(?P<lag>[+-]\s*\d+(?:\.\d+)?\s*(?:h|hr|hrs|hour|hours|d|day|days|w|week|weeks)?)?$",text,re.I)
-    if not match:return {"code":text,"type":"PR_FS","lag_hours":0.0}
-    code=(match.group("code") or "").strip()
-    rtype=(match.group("rtype") or "FS").upper()
-    lag_text=(match.group("lag") or "").replace(" ","")
     lag_hours=0.0
-    if lag_text:
+    lag_match=re.search(r"([+-]\s*\d+(?:\.\d+)?\s*(?:h|hr|hrs|hour|hours|d|day|days|w|week|weeks)?)$",text,re.I)
+    if lag_match:
+        lag_text=lag_match.group(1).replace(" ","")
         sign=-1 if lag_text.startswith("-") else 1
         lag_hours=sign*(_duration_hours(lag_text.lstrip("+-")) or 0.0)
-    return {"code":code,"type":"PR_"+rtype,"lag_hours":lag_hours}
+        text=text[:lag_match.start()].strip()
+    type_match=re.search(r"(FS|SS|FF|SF)$",text,re.I)
+    rtype=(type_match.group(1).upper() if type_match else "FS")
+    if type_match:text=text[:type_match.start()].strip()
+    return {"code":text,"type":"PR_"+rtype,"lag_hours":lag_hours}
 
 
 def _table_matrix_to_schedule(matrix:list[list],sheet_name:str=""):
@@ -157,9 +158,22 @@ def _spreadsheet(extension:str,content:bytes):
         parsed=_table_matrix_to_schedule(matrix,"CSV")
         if parsed and parsed["TASK"]:candidates.append(parsed)
     if not candidates:return None
-    tasks=[];wbs=[];rels=[];resources=[];assignments=[]
+    tasks=[];wbs=[];rels=[];resources=[];assignments=[];global_resource_ids={}
     for x in candidates:
-        tasks.extend(x["TASK"]);wbs.extend(x["PROJWBS"]);rels.extend(x["TASKPRED"]);resources.extend(x.get("RSRC",[]));assignments.extend(x.get("TASKRSRC",[]))
+        tasks.extend(x["TASK"]);wbs.extend(x["PROJWBS"]);rels.extend(x["TASKPRED"])
+        local_to_global={}
+        for resource in x.get("RSRC",[]):
+            name=str(resource.get("rsrc_name") or resource.get("rsrc_id") or "").strip()
+            if not name:continue
+            key=name.lower()
+            if key not in global_resource_ids:
+                gid=f"R{len(global_resource_ids)+1}"
+                global_resource_ids[key]=gid
+                resources.append({**resource,"rsrc_id":gid})
+            local_to_global[resource.get("rsrc_id")]=global_resource_ids[key]
+        for assignment in x.get("TASKRSRC",[]):
+            rid=local_to_global.get(assignment.get("rsrc_id"))
+            if rid:assignments.append({**assignment,"rsrc_id":rid})
     return {"PROJECT":[],"TASK":tasks,"PROJWBS":wbs,"TASKPRED":rels,"CALENDAR":[],"RSRC":resources,"TASKRSRC":assignments}
 
 
