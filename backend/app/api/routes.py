@@ -113,9 +113,17 @@ async def preview_bid_outcome_import(bid_id:int,file:UploadFile=File(...),db:Ses
  except ValueError as exc:raise HTTPException(422,str(exc))
 
 @router.get("/historical-bids/intelligence")
-def portfolio_historical_bid_intelligence(db:Session=Depends(get_db),user:User=Depends(user_dep)):
+def portfolio_historical_bid_intelligence(
+ project_type:str|None=Query(None,max_length=100),
+ client:str|None=Query(None,max_length=200),
+ db:Session=Depends(get_db),user:User=Depends(user_dep),
+):
  visible=list_bids(db,user)
- return historical_bid_intelligence(db,[x.id for x in visible])
+ if project_type:visible=[x for x in visible if (x.project_type or "").casefold()==project_type.strip().casefold()]
+ if client:visible=[x for x in visible if (x.client or "").casefold()==client.strip().casefold()]
+ result=historical_bid_intelligence(db,[x.id for x in visible])
+ result["applied_filters"]={"project_type":project_type.strip() if project_type else None,"client":client.strip() if client else None}
+ return result
 
 @router.get("/bids/{bid_id}/historical-comparison")
 def bid_historical_comparison(bid_id:int,limit:int=Query(10,ge=1,le=50),db:Session=Depends(get_db),user:User=Depends(user_dep)):
