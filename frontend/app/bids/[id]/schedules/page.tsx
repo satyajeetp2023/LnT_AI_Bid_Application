@@ -5,7 +5,7 @@ import {use,useCallback,useEffect,useState} from "react";
 import {BidWorkspaceHeader} from "@/components/BidWorkspaceHeader";
 import {EmptyState,ErrorState,LoadingState,PageHeader,StatusBadge,SummaryCard} from "@/components/design-system";
 import {request} from "@/services/api";
-import type {Bid,Document,P6ActivityProfile,P6ScheduleAnalysis,P6ScheduleComparison,ScheduleScopeCatalog,ScheduleScopeCoverage,ScheduleScopeItem,ScheduleSkeleton} from "@/types";
+import type {Bid,Document,P6ActivityProfile,P6ScheduleAnalysis,P6ScheduleComparison,ScheduleScopeCatalog,ScheduleScopeCoverage,ScheduleScopeItem,ScheduleSkeleton,ScheduleSourceProfile} from "@/types";
 
 const ISSUE_LABELS:Record<string,string>={
  open_start:"Open Start / No Predecessor",
@@ -29,6 +29,7 @@ export default function SchedulesPage({params}:{params:Promise<{id:string}>}){
  const [documents,setDocuments]=useState<Document[]>([]);
  const [selected,setSelected]=useState<number|null>(null);
  const [analysis,setAnalysis]=useState<P6ScheduleAnalysis|null>(null);
+ const [sourceProfile,setSourceProfile]=useState<ScheduleSourceProfile|null>(null);
  const [baseline,setBaseline]=useState<number|null>(null);
  const [comparison,setComparison]=useState<P6ScheduleComparison|null>(null);
  const [activityProfile,setActivityProfile]=useState<P6ActivityProfile|null>(null);
@@ -45,14 +46,20 @@ export default function SchedulesPage({params}:{params:Promise<{id:string}>}){
  const [error,setError]=useState("");
 
  const analyze=useCallback(async(documentId:number)=>{
-  setAnalyzing(true);setScopeLoading(true);setError("");
+  setAnalyzing(true);setScopeLoading(true);setError("");setComparison(null);setActivityProfile(null);
   try{
+   const profile=await request<ScheduleSourceProfile>("/documents/"+documentId+"/schedule-source-profile");
+   setSourceProfile(profile);
+   if(!profile.structured){
+    setAnalysis(null);setScopeCoverage(null);
+    return;
+   }
    const [nextAnalysis,nextCoverage]=await Promise.all([
     request<P6ScheduleAnalysis>("/documents/"+documentId+"/schedule-analysis"),
     request<ScheduleScopeCoverage>("/documents/"+documentId+"/schedule-scope-coverage")
    ]);
    setAnalysis(nextAnalysis);setScopeCoverage(nextCoverage);
-  }catch{setError("Unable to analyze this schedule document.");setAnalysis(null);setScopeCoverage(null)}
+  }catch{setError("Unable to inspect this schedule document.");setAnalysis(null);setScopeCoverage(null);setSourceProfile(null)}
   finally{setAnalyzing(false);setScopeLoading(false)}
  },[]);
 
