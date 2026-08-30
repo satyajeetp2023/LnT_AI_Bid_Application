@@ -23,6 +23,7 @@ def build_planning_readiness(schedule:dict,scope:dict,planning_package:dict,find
         warnings.append(f"{manual} tender schedule requirement check(s) still require manual review.")
 
     strategy=planning_package.get("resource_strategy",{})
+    package_summary=planning_package.get("summary",{})
     mode=strategy.get("mode")
     if mode=="No Resource Basis Available":
         blockers.append("No resource basis is available from the schedule or a separate bidder resource/equipment plan.")
@@ -30,6 +31,16 @@ def build_planning_readiness(schedule:dict,scope:dict,planning_package:dict,find
         blockers.append("The schedule is only partially resource-loaded and no separate resource/equipment plan fills the gap.")
     elif mode:
         passes.append(f"Resource basis available: {mode}.")
+
+    uncovered=int(package_summary.get("uncovered_activities") or 0)
+    if uncovered:
+        blockers.append(f"{uncovered} executable schedule activity/activities have no identifiable resource coverage from the schedule or separate plans.")
+    unlinked=int(package_summary.get("unlinked_resource_entries") or 0)
+    if unlinked:
+        warnings.append(f"{unlinked} separate-plan resource entry/entries are not reliably linked to a scheduled activity or work front.")
+    timing=int(package_summary.get("resource_timing_misalignments") or 0)
+    if timing:
+        warnings.append(f"{timing} resource deployment entry/entries start too late or finish too early for the linked activity period.")
 
     staff=planning_package.get("staff_plan",{})
     missing_staff=staff.get("missing_contract_required_roles",[]) or []
@@ -86,7 +97,9 @@ def build_planning_readiness(schedule:dict,scope:dict,planning_package:dict,find
             "open_high_findings":len(high_findings),"open_medium_findings":len(medium_findings),
             "scope_blockers":blocking_scope,"tender_failures":failed,
             "productivity_shortfalls":shortfalls,"missing_contract_staff_roles":len(missing_staff),
+            "uncovered_activities":uncovered,"unlinked_resource_entries":unlinked,
+            "resource_timing_misalignments":timing,
         },
-        "methodology":"integrated-planning-readiness-v1",
+        "methodology":"integrated-planning-readiness-v2",
         "note":"Readiness is rule-based and evidence-driven. It does not invent productivity, staffing or equipment norms and does not replace planner approval.",
     }
