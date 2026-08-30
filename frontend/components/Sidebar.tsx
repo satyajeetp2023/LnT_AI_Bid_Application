@@ -66,12 +66,13 @@ export function Sidebar({mobileOpen=false,onClose}:{mobileOpen?:boolean;onClose?
   setActiveGroup(null);
  },[p]);
 
- const renderItem=(x:NavItem,compact=false)=>{
+ const renderItem=(x:NavItem,theme:"dark"|"light"="dark")=>{
   const isSelected=selected(x.h);
-  if(x.h)return <Link key={x.n} href={x.h} onClick={()=>{setActiveGroup(null);setQuery("");onClose?.()}} className={`flex min-h-[38px] items-center gap-3 rounded px-3 py-2 text-[11.5px] transition ${isSelected?"bg-[#e2b635] font-semibold text-[#263442]":"text-slate-200 hover:bg-white/10 hover:text-white"}`}>
+  const light=theme==="light";
+  if(x.h)return <Link key={x.n} href={x.h} onClick={()=>{setActiveGroup(null);setQuery("");onClose?.()}} className={`flex min-h-[38px] items-center gap-3 rounded px-3 py-2 text-[11.5px] transition ${isSelected?"bg-[#e2b635] font-semibold text-[#263442]":light?"text-slate-700 hover:bg-slate-100 hover:text-[#243241]":"text-slate-200 hover:bg-white/10 hover:text-white"}`}>
    <x.i size={14} strokeWidth={isSelected?2.2:1.8}/><span className="min-w-0 flex-1 truncate">{x.n}</span>
   </Link>;
-  return <div key={x.n} aria-disabled="true" className="flex min-h-[38px] items-center gap-3 rounded px-3 py-2 text-[11px] text-slate-400">
+  return <div key={x.n} aria-disabled="true" className={`flex min-h-[38px] items-center gap-3 rounded px-3 py-2 text-[11px] ${light?"text-slate-400":"text-slate-400"}`}>
    <x.i size={13.5}/><span className="min-w-0 flex-1 truncate">{x.n}</span><LockKeyhole size={9}/>
   </div>;
  };
@@ -107,7 +108,7 @@ export function Sidebar({mobileOpen=false,onClose}:{mobileOpen?:boolean;onClose?
        <button onClick={()=>{setQuery("");setActiveGroup(isOpen?null:group.id)}} className={`flex w-full items-center gap-3 rounded px-3 py-2.5 text-left transition ${isOpen?"bg-white/12 text-white":containsRoute?"bg-white/8 text-[#f3cc58]":"text-slate-200 hover:bg-white/8 hover:text-white"}`}>
         <group.i size={15}/><span className="min-w-0 flex-1"><span className="block truncate text-[11.8px] font-semibold">{group.n}</span><span className="mt-0.5 hidden truncate text-[8.5px] font-normal text-slate-400 md:block">{group.description}</span></span><ChevronRight size={13} className={`transition-transform md:rotate-0 ${isOpen?"rotate-90":""}`}/>
        </button>
-       {isOpen&&<div className="mt-1 space-y-0.5 rounded bg-[#293b49] p-1.5 md:hidden">{group.items.map(x=>renderItem(x,true))}</div>}
+       {isOpen&&<div className="mt-1 space-y-0.5 rounded bg-[#293b49] p-1.5 md:hidden">{group.items.map(x=>renderItem(x,"dark"))}</div>}
       </div>
      })}
     </div>
@@ -119,17 +120,20 @@ export function Sidebar({mobileOpen=false,onClose}:{mobileOpen?:boolean;onClose?
    </div>
   </aside>
 
-  {showFlyout&&<section className="fixed bottom-0 left-[204px] top-[58px] z-30 hidden w-[286px] border-r border-slate-200 bg-white shadow-[8px_0_24px_rgba(15,23,42,.12)] md:flex md:flex-col">
-   <div className="border-b border-slate-200 px-4 py-3">
+  {showFlyout&&<section
+   className="fixed left-[216px] z-50 hidden w-[292px] overflow-hidden rounded-lg border border-slate-200 bg-white text-slate-800 shadow-[0_12px_34px_rgba(15,23,42,.20)] md:block"
+   style={{top:normalized?72:Math.min(430,132+Math.max(0,groups.findIndex(g=>g.id===activeGroup))*52)}}
+  >
+   <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
     <div className="text-[9px] font-bold uppercase tracking-[.15em] text-slate-400">{normalized?"Search Navigation":"Navigation Group"}</div>
     <div className="mt-1 text-sm font-semibold text-[#243241]">{normalized?`Results for “${query.trim()}”`:active?.n}</div>
-    {!normalized&&active&&<div className="mt-1 text-[10px] text-slate-500">{active.description}</div>}
+    {!normalized&&active&&<div className="mt-1 text-[10px] leading-4 text-slate-500">{active.description}</div>}
    </div>
-   <div className="flex-1 overflow-y-auto p-2">
+   <div className="max-h-[420px] overflow-y-auto p-2">
     {normalized?(
-     searchResults.length?<div className="space-y-1">{searchResults.map(x=><div key={x.groupId+"-"+x.n}><div className="px-3 pb-1 pt-2 text-[8px] font-bold uppercase tracking-wide text-slate-400">{x.group}</div>{renderItem(x)}</div>)}</div>:
+     searchResults.length?<div className="space-y-1">{searchResults.map(x=><div key={x.groupId+"-"+x.n}><div className="px-3 pb-1 pt-2 text-[8px] font-bold uppercase tracking-wide text-slate-400">{x.group}</div>{renderItem(x,"light")}</div>)}</div>:
      <div className="p-4 text-xs text-slate-500">No matching module found.</div>
-    ):active?<div className="space-y-1">{active.items.map(x=>renderItem(x))}</div>:null}
+    ):active?<div className="space-y-1">{active.items.map(x=>renderItem(x,"light"))}</div>:null}
    </div>
    {!bidId&&active&&active.id!=="overview"&&<div className="border-t border-amber-200 bg-amber-50 p-3 text-[10px] leading-4 text-amber-800">Open a bid first to access bid-specific modules.</div>}
   </section>}
