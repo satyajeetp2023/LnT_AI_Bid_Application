@@ -5,7 +5,7 @@ from datetime import datetime,timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import BidRequirement,PlanningPackageFinding,PlanningResourceEntry
+from app.models import BidRequirement,PlanningPackageFinding,PlanningResourceEntry,ScheduleScopeItem
 
 
 MILESTONE_TYPES={"TT_Mile","TT_FinMile","TT_StartMile","TT_FinishMile"}
@@ -52,6 +52,47 @@ def _task_dates(task):
  start=next((_date(task.get(k)) for k in ("act_start_date","early_start_date","target_start_date","late_start_date") if _date(task.get(k))),None)
  finish=next((_date(task.get(k)) for k in ("act_end_date","early_end_date","target_end_date","late_end_date") if _date(task.get(k))),None)
  return start,finish
+
+
+def _boq_quantity(item):
+ text=str(item.source_excerpt or "")
+ match=re.search(r"\|\s*Qty:\s*([0-9,]+(?:\.\d+)?)\s*([^|]*)",text,re.I)
+ if not match:return None,None
+ try:quantity=float(match.group(1).replace(",",""))
+ except ValueError:return None,None
+ unit=(match.group(2) or "").strip() or None
+ return quantity,unit
+
+
+def _unit_norm(value):
+ text=re.sub(r"[^a-z0-9]+"," ",str(value or "").lower()).strip()
+ mapping={
+  "no":"nos","nos":"nos","number":"nos","numbers":"nos","each":"nos",
+  "m":"m","meter":"m","meters":"m","metre":"m","metres":"m",
+  "km":"km","kilometer":"km","kilometre":"km",
+  "m2":"m2","sqm":"m2","sq m":"m2",
+  "m3":"m3","cum":"m3","cu m":"m3",
+ }
+ return mapping.get(text,text)
+
+
+def _productivity_capacity(entry):
+ if entry.productivity_rate is None:return None
+ rate=float(entry.productivity_rate)
+ text=str(entry.productivity_unit or "").lower()
+ base=re.split(r"/|\bper\b",text,1)[0].strip()
+ base_unit=_unit_norm(base)
+ per_resource=any(x in text for x in ("crew","gang","resource","equipment","machine","plant","team"))
+ quantity=float(entry.quantity) if entry.quantity is not None else None
+ if per_resource and quantity is not None:
+  return {"capacity_per_day":rate*quantity,"base_unit":base_unit,"basis":"Per Resource × Quantity","rate":rate,"resource_quantity":quantity}
+ if per_resource:
+  return {"capacity_per_day":None,"base_unit":base_unit,"basis":"Per Resource / Quantity Missing","rate":rate,"resource_quantity":quantity}
+ return {"capacity_per_day":rate,"base_unit":base_unit,"basis":"Total Planned Rate","rate":rate,"resource_quantity":quantity}
+
+
+def _overlap(a_start,a_finish,b_start,b_finish):
+ return bool(a_start and a_finish and b_start and b_finish and a_start<=b_finish and b_start<=a_finish)
 
 
 def _entry_dict(x):
@@ -147,6 +188,80 @@ def reconcile_planning_package(db:Session,bid_id:int,tables:dict[str,list[dict]]
  project_start=min(task_dates).isoformat() if task_dates else None
  project_finish=max(task_dates).isoformat() if task_dates else None
 
+ boq_items=db.scalars(select(ScheduleScopeItem).where(
+  ScheduleScopeItem.bid_project_id==bid_id,
+  ScheduleScopeItem.source_type=="BOQ",
+  ScheduleScopeItem.parent_id.is_(None),
+ )).all()
+ productivity_checks=[]
+ for boq in boq_items:
+  boq_qty,boq_unit=_boq_quantity(boq)
+  if boq_qty is None or not boq_unit:continue
+  ranked=sorted(((_score(boq.activity_name,f"{task.get('task_code','')} {task.get('task_name','')}"),task) for task in tasks),key=lambda x:-x[0])
+  match_score,task=(ranked[0] if ranked else (0.0,None))
+  if not task or match_score<.34:continue
+  duration_hours=max(float(task.get("target_drtn_hr_cnt") or 0),float(task.get("remain_drtn_hr_cnt") or 0))
+  if duration_hours<=0:continue
+  duration_days=duration_hours/8.0
+  required_rate=boq_qty/duration_days
+  plan_entries=[x for x in mapped_external.get(task.get("task_id"),[]) if x.productivity_rate is not None]
+  comparisons=[]
+  for entry in plan_entries:
+   capacity=_productivity_capacity(entry)
+   if not capacity:continue
+   if not entry.productivity_unit:
+    status="Rate Unit Missing";variance=None
+   elif capacity["base_unit"] and _unit_norm(boq_unit)!=capacity["base_unit"]:
+    status="Unit Review";variance=None
+   elif capacity["capacity_per_day"] is None:
+    status="Resource Quantity Missing";variance=None
+   else:
+    variance=capacity["capacity_per_day"]-required_rate
+    status="Meets / Exceeds Implied Requirement" if variance>=0 else "Below Implied Requirement"
+   comparisons.append({
+    "resource_entry_id":entry.id,"resource_name":entry.resource_name,
+    "productivity_rate":capacity["rate"],"productivity_unit":entry.productivity_unit,
+    "resource_quantity":capacity["resource_quantity"],"basis":capacity["basis"],
+    "available_capacity_per_day":round(capacity["capacity_per_day"],4) if capacity["capacity_per_day"] is not None else None,
+    "status":status,"capacity_variance_per_day":round(variance,4) if variance is not None else None,
+   })
+  productivity_checks.append({
+   "boq_scope_item_id":boq.id,"boq_reference":boq.source_reference,
+   "boq_activity":boq.activity_name,"boq_quantity":boq_qty,"boq_unit":boq_unit,
+   "task_code":task.get("task_code"),"task_name":task.get("task_name"),"match_score":match_score,
+   "duration_hours":round(duration_hours,2),"equivalent_working_days":round(duration_days,2),
+   "required_implied_rate_per_day":round(required_rate,4),
+   "comparisons":comparisons,
+   "status":"No Bidder Productivity Rate" if not comparisons else (
+    "Review Required" if any(x["status"] in {"Below Implied Requirement","Unit Review","Resource Quantity Missing","Rate Unit Missing"} for x in comparisons)
+    else "Internally Consistent"
+   ),
+   "note":"Required rate is BOQ quantity divided by scheduled duration using an 8-hour equivalent working day. It is checked only against productivity explicitly stated by the bidder.",
+  })
+
+ matched_with_dates=[]
+ for row in external_matches:
+  if row.get("match_status") not in {"Matched","Possible Match"}:continue
+  start=_date(row.get("activity_start"));finish=_date(row.get("activity_finish"))
+  if not start or not finish:continue
+  matched_with_dates.append((row,start,finish))
+ concurrency_reviews=[]
+ for i,(left,l_start,l_finish) in enumerate(matched_with_dates):
+  for right,r_start,r_finish in matched_with_dates[i+1:]:
+   if left.get("matched_task_code")==right.get("matched_task_code"):continue
+   if _norm(left.get("resource_name"))!=_norm(right.get("resource_name")):continue
+   if not _overlap(l_start,l_finish,r_start,r_finish):continue
+   exact_identifier=bool(re.search(r"\d",str(left.get("resource_name") or "")))
+   concurrency_reviews.append({
+    "resource_name":left.get("resource_name"),
+    "left_task_code":left.get("matched_task_code"),"left_task_name":left.get("matched_task_name"),
+    "right_task_code":right.get("matched_task_code"),"right_task_name":right.get("matched_task_name"),
+    "overlap_start":max(l_start,r_start).isoformat(),"overlap_finish":min(l_finish,r_finish).isoformat(),
+    "severity":"High" if exact_identifier else "Medium",
+    "status":"Potential Double Booking" if exact_identifier else "Concurrent Resource Review",
+    "note":"Same resource label is deployed against overlapping activities. Confirm whether this represents one shared resource or separate available units.",
+   })
+
  role_counts=Counter((x.role_or_trade or x.resource_name).strip() for x in staff if (x.role_or_trade or x.resource_name))
  staff_without_dates=[x for x in staff if not x.start_date and not x.finish_date]
  staff_timeline=[{
@@ -191,6 +306,12 @@ def reconcile_planning_package(db:Session,bid_id:int,tables:dict[str,list[dict]]
  if temporal_misalignment:
   issues.append({"severity":"Medium","type":"Resource Timing","message":f"{len(temporal_misalignment)} separate-plan entries do not cover the full linked activity period."})
 
+ productivity_shortfalls=[x for x in productivity_checks if any(y["status"]=="Below Implied Requirement" for y in x["comparisons"])]
+ if productivity_shortfalls:
+  issues.append({"severity":"High","type":"Productivity Feasibility","message":f"{len(productivity_shortfalls)} BOQ/schedule activity checks require a higher daily output than the bidder-stated resource productivity provides."})
+ if concurrency_reviews:
+  issues.append({"severity":"Medium","type":"Concurrent Resource Deployment","message":f"{len(concurrency_reviews)} overlapping activity pairs use the same resource label and require sharing/capacity confirmation."})
+
  missing_contract_staff=[x for x in required_staff if not x["present_in_staff_plan"]]
  if missing_contract_staff:
   issues.append({"severity":"High","type":"Contract Staff Requirement","message":"Contract-required staff roles are not identifiable in the Staff Plan: "+", ".join(x["role"] for x in missing_contract_staff)})
@@ -220,6 +341,12 @@ def reconcile_planning_package(db:Session,bid_id:int,tables:dict[str,list[dict]]
    "missing_contract_required_roles":[x["role"] for x in required_staff if not x["present_in_staff_plan"]],
    "note":"Staff timing is compared with the programme timeline. Staff-role checks are raised only where the tender evidence explicitly requires that role; otherwise no staffing norm is invented.",
   },
+  "resource_feasibility":{
+   "productivity_checks":productivity_checks,
+   "productivity_shortfalls":len(productivity_shortfalls),
+   "concurrency_reviews":concurrency_reviews,
+   "note":"Feasibility uses only bidder-supplied BOQ, duration, resource quantities and stated productivity. No external productivity norm is assumed.",
+  },
   "issues":issues,
   "summary":{
    "schedule_activities":len(coverage),"resource_covered_activities":covered,
@@ -230,10 +357,12 @@ def reconcile_planning_package(db:Session,bid_id:int,tables:dict[str,list[dict]]
    "resource_timing_misalignments":len(temporal_misalignment),
    "contract_required_staff_roles":len(required_staff),
    "missing_contract_staff_roles":len(missing_contract_staff),
+   "productivity_shortfalls":len(productivity_shortfalls),
+   "concurrent_resource_reviews":len(concurrency_reviews),
    "high_issues":sum(1 for x in issues if x["severity"]=="High"),
    "medium_issues":sum(1 for x in issues if x["severity"]=="Medium"),
   },
-  "version":"integrated-planning-package-v2",
+  "version":"integrated-planning-package-v3",
   "note":"This reconciles evidence supplied by the bidder. It does not invent crew sizes, equipment quantities, staff norms or productivity assumptions.",
  }
 
