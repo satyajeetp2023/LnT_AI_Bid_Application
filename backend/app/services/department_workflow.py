@@ -4,7 +4,7 @@ from datetime import date,timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import BidClauseRiskFinding,BidMissingInput,BidPreBidQuery,BidRequirement,DrawingBoqFinding
+from app.models import BidClauseRiskFinding,BidMissingInput,BidPreBidQuery,BidRequirement,DrawingBoqFinding,PlanningPackageFinding
 from app.services.missing_input_taxonomy import RESOLVED_STATUSES
 from app.services.responsibility_assignment import suggest_responsible_function
 from app.services.schedule_scope_coverage import schedule_scope_catalog
@@ -113,6 +113,27 @@ def department_work_queue(db:Session,bid_id:int,responsible_function:str|None=No
             "source_page":risk.source_page,"source_clause":risk.source_clause,
         })
 
+    planning_findings=db.scalars(select(PlanningPackageFinding).where(
+        PlanningPackageFinding.bid_project_id==bid_id,
+        PlanningPackageFinding.status=="Open",
+    )).all()
+    for finding in planning_findings:
+        owner=finding.responsible_function or "Planning"
+        person=finding.responsible_person
+        if responsible_function and owner!=responsible_function:continue
+        if responsible_person and person!=responsible_person:continue
+        items.append({
+            "entity_type":"Planning Package","entity_id":finding.id,
+            "title":finding.title,"priority":finding.severity,
+            "responsible_function":owner,"responsible_person":person,
+            "status":finding.disposition or finding.status,"due_date":None,"is_overdue":False,
+            "action":"Review integrated planning package finding",
+            "reason":finding.description,
+            "route":f"/bids/{bid_id}/schedules",
+            "source_document":finding.task_name,
+            "source_page":None,"source_clause":finding.task_code or finding.source_reference,
+        })
+
     drawing_findings=db.scalars(select(DrawingBoqFinding).where(
         DrawingBoqFinding.bid_project_id==bid_id,
         DrawingBoqFinding.review_status=="Open",
@@ -215,6 +236,8 @@ def department_work_queue(db:Session,bid_id:int,responsible_function:str|None=No
     if all_risks:functions.add("Contracts")
     all_drawing_findings=db.scalars(select(DrawingBoqFinding).where(DrawingBoqFinding.bid_project_id==bid_id)).all()
     if all_drawing_findings:functions.add("Engineering")
+    all_planning_findings=db.scalars(select(PlanningPackageFinding).where(PlanningPackageFinding.bid_project_id==bid_id)).all()
+    if all_planning_findings:functions.add("Planning")
     mandatory_scope=[x for x in scope_catalog.get("groups",[]) if x.get("mandatory")]
     if mandatory_scope:functions.add("Planning")
 
@@ -245,6 +268,9 @@ def department_work_queue(db:Session,bid_id:int,responsible_function:str|None=No
                 total+=1
                 if finding.review_status!="Open":completed+=1
         if function_name=="Planning":
+            for finding in all_planning_findings:
+                total+=1
+                if finding.status!="Open":completed+=1
             for scope in mandatory_scope:
                 total+=1
                 if not scope.get("group_blocking"):completed+=1
@@ -278,5 +304,5 @@ def department_work_queue(db:Session,bid_id:int,responsible_function:str|None=No
         "department_control":department_control,
         "department_progress":progress_rows,
         "filter":{"responsible_function":responsible_function,"responsible_person":responsible_person},
-        "version":"phase4-department-work-queue-v9",
+        "version":"phase4-department-work-queue-v10",
     }
