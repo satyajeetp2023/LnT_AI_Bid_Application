@@ -1,4 +1,4 @@
-import hashlib,mimetypes,uuid
+import hashlib,io,mimetypes,uuid,zipfile
 from pathlib import Path
 from fastapi import HTTPException
 from sqlalchemy import func,or_,select
@@ -16,6 +16,22 @@ def _known_signature_extensions(content:bytes):
  if content.startswith(b"PK\x03\x04"):return {"zip","docx","xlsx"}
  if content.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):return {"doc","xls"}
  return None
+
+def _validate_zip_payload(ext:str,content:bytes):
+ try:
+  with zipfile.ZipFile(io.BytesIO(content)) as archive:
+   infos=archive.infolist()
+   if len(infos)>10000:raise HTTPException(415,"Archive contains too many entries")
+   expanded=sum(max(0,x.file_size) for x in infos)
+   if expanded>500*1024*1024 or (len(content)>0 and expanded>len(content)*150):
+    raise HTTPException(415,"Archive expands beyond safe processing limits")
+   names={x.filename.replace("\\","/") for x in infos}
+   if ext=="docx" and not {"[Content_Types].xml","word/document.xml"}<=names:
+    raise HTTPException(415,"DOCX package structure is invalid")
+   if ext=="xlsx" and not {"[Content_Types].xml","xl/workbook.xml"}<=names:
+    raise HTTPException(415,"XLSX package structure is invalid")
+ except zipfile.BadZipFile:
+  raise HTTPException(415,"ZIP-based file content is invalid")
 def audit(db,user_id,project_id,event,doc,metadata=None,details=None): db.add(AuditEvent(user_id=user_id,bid_project_id=project_id,event_type=event,entity_type="BidDocument",entity_id=str(doc.id),request_metadata=metadata or {},details=details or {}))
 def upload_document(db:Session,project_id:int,filename:str,content_type:str|None,content:bytes,user_id:int):
  cfg=get_settings(); safe=Path(filename).name; ext=Path(safe).suffix.lower().lstrip(".")
@@ -23,6 +39,7 @@ def upload_document(db:Session,project_id:int,filename:str,content_type:str|None
  if content.startswith(b"MZ") or content.startswith(b"\x7fELF"): raise HTTPException(415,"Executable content is not permitted in tender document uploads")
  known=_known_signature_extensions(content)
  if known and ext not in known: raise HTTPException(415,f"File content does not match .{ext} extension")
+ if ext in {"zip","docx","xlsx"} and content.startswith(b"PK\x03\x04"):_validate_zip_payload(ext,content)
  if len(content)>cfg.max_file_size_mb*1024*1024: raise HTTPException(413,"File exceeds configured size limit")
  checksum=hashlib.sha256(content).hexdigest(); duplicate=db.scalar(select(BidDocument).where(BidDocument.bid_project_id==project_id,BidDocument.checksum==checksum,BidDocument.document_status!="Archived"))
  doc=BidDocument(bid_project_id=project_id,original_filename=safe,file_extension=ext,mime_type=content_type or mimetypes.guess_type(safe)[0] or "application/octet-stream",file_size=len(content),checksum=checksum,uploaded_by=user_id,document_status="Duplicate" if duplicate else "Needs Review",classification_status="pending",is_latest_version=True,duplicate_of_document_id=duplicate.id if duplicate else None,information_tags=[])
