@@ -177,11 +177,15 @@ def historical_bid_intelligence(db:Session,bid_ids:list[int]):
    project=projects.get(outcome.bid_project_id)
    if project:bucket[getattr(project,field) or "Unspecified"].append(outcome)
   return [{"name":k,"bids":len(v),"won":sum(x.result_status=="Won" for x in v),"win_rate_percent":round(sum(x.result_status=="Won" for x in v)*100/len(v),1)} for k,v in sorted(bucket.items())]
- appearances=Counter();wins=Counter();rank_totals=Counter();display_names={}
+ appearances=Counter();wins=Counter();rank_totals=Counter();display_names={};client_context=defaultdict(Counter);project_type_context=defaultdict(Counter)
  for row in prices:
   if row.is_ours:continue
   clean=" ".join(row.bidder_name.split());key=clean.casefold();display_names.setdefault(key,clean)
   appearances[key]+=1;rank_totals[key]+=row.rank
+  project=projects.get(row.bid_project_id)
+  if project:
+   client_context[key][project.client or "Unspecified"]+=1
+   project_type_context[key][project.project_type or "Unspecified"]+=1
   if row.rank==1:wins[key]+=1
  def spread_average(key):
   values=[x[key] for x in market_spreads if x[key] is not None]
@@ -204,7 +208,7 @@ def historical_bid_intelligence(db:Session,bid_ids:list[int]):
    "average_recorded_margin_percent":round(sum(margins)/len(margins),2) if margins else None,
   },
   "by_project_type":grouped("project_type"),"by_client":grouped("client"),
-  "competitors":[{"name":display_names[name],"appearances":count,"l1_wins":wins[name],"l1_rate_percent":round(wins[name]*100/count,1),"average_rank":round(rank_totals[name]/count,2)} for name,count in appearances.most_common(20)],
+  "competitors":[{"name":display_names[name],"appearances":count,"l1_wins":wins[name],"l1_rate_percent":round(wins[name]*100/count,1),"average_rank":round(rank_totals[name]/count,2),"top_client":client_context[name].most_common(1)[0][0] if client_context[name] else None,"top_project_type":project_type_context[name].most_common(1)[0][0] if project_type_context[name] else None} for name,count in appearances.most_common(20)],
   "market_spread":{
    "samples":len(market_spreads),
    "average_l2_to_l1_percent":spread_average("l2_to_l1_percent"),
