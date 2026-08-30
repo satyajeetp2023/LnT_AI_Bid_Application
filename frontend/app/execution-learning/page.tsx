@@ -22,13 +22,25 @@ export default function ExecutionLearningPortfolioPage(){
 
  return <div className="mx-auto max-w-[1500px]">
   <PageHeader items={[{label:"Review & Insights"},{label:"Execution Learning"}]} title="Bid vs Actual Execution Learning" description="Portfolio learning from reviewed execution actuals only. Missing project actuals remain unknown and are not inferred."/>
-  <div className="mb-3 grid grid-cols-2 gap-3 md:grid-cols-5">
+  <div className="mb-3 grid grid-cols-2 gap-3 md:grid-cols-6">
    <SummaryCard label="Reviewed Projects" value={data.summary.reviewed_projects}/>
+   <SummaryCard label="Reviewed Factors" value={data.summary.reviewed_factors??0}/>
    <SummaryCard label="Avg Revenue Change vs Bid" value={data.summary.average_revenue_change_vs_bid_percent!==null&&data.summary.average_revenue_change_vs_bid_percent!==undefined?data.summary.average_revenue_change_vs_bid_percent+"%":"—"}/>
    <SummaryCard label="Avg Margin Change" value={data.summary.average_margin_change_percentage_points!==null&&data.summary.average_margin_change_percentage_points!==undefined?data.summary.average_margin_change_percentage_points+" pp":"—"}/>
    <SummaryCard label="Avg Actual Duration" value={data.summary.average_actual_duration_days!==null&&data.summary.average_actual_duration_days!==undefined?data.summary.average_actual_duration_days+" days":"—"}/>
    <SummaryCard label="Avg EOT" value={data.summary.average_eot_days!==null&&data.summary.average_eot_days!==undefined?data.summary.average_eot_days+" days":"—"}/>
   </div>
+  {data.factor_summary&&<section className="mb-3 rounded border border-slate-200 bg-white p-3">
+   <div className="mb-3"><h2 className="text-sm font-bold text-slate-900">Reviewed Variance Factors</h2><p className="text-xs text-slate-500">Source-backed execution lessons approved for reuse in future bid intelligence.</p></div>
+   <div className="grid grid-cols-3 gap-3 md:grid-cols-6">
+    <SummaryCard label="Adverse" value={data.factor_summary.adverse}/>
+    <SummaryCard label="Favorable" value={data.factor_summary.favorable}/>
+    <SummaryCard label="Neutral" value={data.factor_summary.neutral}/>
+    <SummaryCard label="Categories" value={data.factor_summary.by_category.length}/>
+    <SummaryCard label="Impact Areas" value={data.factor_summary.by_impact_area.length}/>
+    <SummaryCard label="Reviewed Factors" value={data.summary.reviewed_factors??0}/>
+   </div>
+  </section>}
   {data.records.length===0?<EmptyState title="No reviewed execution actuals yet" description="Won bids appear here only after execution actuals have evidence and are marked Reviewed."/>:
   <section className="overflow-hidden rounded border border-slate-200 bg-white">
    <div className="border-b bg-slate-50 px-4 py-3"><h2 className="text-sm font-bold text-slate-900">Reviewed Project Learning Register</h2><p className="text-xs text-slate-500">Each row links back to the bid workspace and uses only reviewed execution evidence.</p></div>
