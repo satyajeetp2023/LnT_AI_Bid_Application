@@ -55,7 +55,7 @@ from app.services.execution_learning import create_execution_factor,execution_le
 from app.services.bid_decision_analytics import bid_decision_analytics,create_decision_snapshot,list_decision_snapshots
 from app.storage.base import LocalSecureStorage
 router=APIRouter()
-def user_dep(db:Session=Depends(get_db),x_user_id:int=Header(alias="X-User-ID")): return current_user(db,x_user_id)
+def user_dep(db:Session=Depends(get_db),x_user_id:int|None=Header(default=None,alias="X-User-ID"),authorization:str|None=Header(default=None,alias="Authorization")): return current_user(db,x_user_id,authorization)
 def metadata(request:Request): return {"ip":request.client.host if request.client else None,"user_agent":request.headers.get("user-agent")}
 def get_bid(db,id):
  bid=db.get(BidProject,id)
