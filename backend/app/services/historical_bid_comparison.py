@@ -24,12 +24,12 @@ def similarity_score(current:BidProject,candidate:BidProject):
 def historical_comparison(db:Session,current:BidProject,visible_bid_ids:list[int],limit:int=10):
  candidate_ids=[x for x in visible_bid_ids if x!=current.id]
  if not candidate_ids:
-  return {"current_bid_id":current.id,"matches":[],"summary":{"comparable_bids":0},"methodology":"Deterministic exact-field similarity using project type, client, contract type and location. Descriptive only.","version":"phase7-historical-comparison-v1"}
+  return {"current_bid_id":current.id,"matches":[],"competitors":[],"summary":{"comparable_bids":0},"methodology":"Deterministic exact-field similarity using project type, client, contract type and location. Descriptive only.","version":"phase7-historical-comparison-v2"}
 
  outcomes=db.scalars(select(BidOutcome).where(BidOutcome.bid_project_id.in_(candidate_ids),BidOutcome.result_status.in_(["Won","Lost"]))).all()
  outcome_by_bid={x.bid_project_id:x for x in outcomes}
  if not outcome_by_bid:
-  return {"current_bid_id":current.id,"matches":[],"summary":{"comparable_bids":0},"methodology":"Deterministic exact-field similarity using project type, client, contract type and location. Descriptive only.","version":"phase7-historical-comparison-v1"}
+  return {"current_bid_id":current.id,"matches":[],"competitors":[],"summary":{"comparable_bids":0},"methodology":"Deterministic exact-field similarity using project type, client, contract type and location. Descriptive only.","version":"phase7-historical-comparison-v2"}
 
  projects=db.scalars(select(BidProject).where(BidProject.id.in_(list(outcome_by_bid)))).all()
  prices=db.scalars(select(BidPriceRecord).where(BidPriceRecord.bid_project_id.in_(list(outcome_by_bid)))).all()
@@ -56,6 +56,20 @@ def historical_comparison(db:Session,current:BidProject,visible_bid_ids:list[int
  completed=len(matches);won=sum(x["result_status"]=="Won" for x in matches)
  gaps=[x["our_gap_to_l1_percent"] for x in matches if x["our_gap_to_l1_percent"] is not None]
  margins=[x["our_margin_percent"] for x in matches if x["our_margin_percent"] is not None]
+ selected_ids={x["bid_project_id"] for x in matches}
+ competitor_stats={}
+ for row in prices:
+  if row.bid_project_id not in selected_ids or row.is_ours:continue
+  key=" ".join(row.bidder_name.split()).casefold()
+  item=competitor_stats.setdefault(key,{"name":" ".join(row.bidder_name.split()),"appearances":0,"l1_wins":0,"rank_total":0})
+  item["appearances"]+=1;item["rank_total"]+=row.rank
+  if row.rank==1:item["l1_wins"]+=1
+ competitors=[{
+  "name":x["name"],"appearances":x["appearances"],"l1_wins":x["l1_wins"],
+  "l1_rate_percent":round(x["l1_wins"]*100/x["appearances"],1),
+  "average_rank":round(x["rank_total"]/x["appearances"],2),
+ } for x in competitor_stats.values()]
+ competitors.sort(key=lambda x:(-x["appearances"],-x["l1_wins"],x["name"].casefold()))
  return {
   "current_bid_id":current.id,
   "summary":{
@@ -65,6 +79,7 @@ def historical_comparison(db:Session,current:BidProject,visible_bid_ids:list[int
    "average_margin_percent":round(sum(margins)/len(margins),2) if margins else None,
   },
   "matches":matches,
+  "competitors":competitors,
   "methodology":"Deterministic exact-field similarity: project type 35, client 30, contract type 20, location 15. Only completed visible bids are compared. Descriptive only; no win prediction is produced.",
-  "version":"phase7-historical-comparison-v1",
+  "version":"phase7-historical-comparison-v2",
  }
