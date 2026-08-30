@@ -89,6 +89,8 @@ def save_execution_outcome(db:Session,bid:BidProject,payload,user_id:int,request
  _won_outcome(db,bid.id)
  execution=db.scalar(select(ExecutionOutcome).where(ExecutionOutcome.bid_project_id==bid.id))
  values=payload.model_dump()
+ if execution is not None and all(getattr(execution,key)==value for key,value in values.items()):
+  return get_execution_outcome(db,bid.id)
  try:
   if execution is None:
    execution=ExecutionOutcome(bid_project_id=bid.id,created_by=user_id,updated_by=user_id,**values)
@@ -97,9 +99,10 @@ def save_execution_outcome(db:Session,bid:BidProject,payload,user_id:int,request
    for key,value in values.items():setattr(execution,key,value)
    execution.updated_by=user_id
    execution.review_status="Draft";execution.reviewed_by=None;execution.reviewed_at=None
+  db.flush()
   db.add(AuditEvent(
    user_id=user_id,bid_project_id=bid.id,event_type="execution_learning.actuals_saved",
-   entity_type="ExecutionOutcome",entity_id=str(execution.id or "new"),request_metadata=request_metadata or {},
+   entity_type="ExecutionOutcome",entity_id=str(execution.id),request_metadata=request_metadata or {},
    details={"execution_status":payload.execution_status,"source_reference":payload.source_reference},
   ))
   db.commit()
