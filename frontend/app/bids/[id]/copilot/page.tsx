@@ -64,10 +64,10 @@ export default function CopilotPage({params}:{params:Promise<{id:string}>}){
     {answer&&<div className="mt-4 rounded border border-slate-200">
      <div className="flex flex-col gap-2 border-b bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="text-sm font-semibold text-slate-900">{answer.question}</div>
-      <StatusBadge tone={answer.grounded?(answer.confidence==="High"?"green":answer.confidence==="Medium"?"blue":"amber"):"grey"}>{answer.confidence}</StatusBadge>
+      <StatusBadge tone={answer.confidence==="Conflict"?"red":answer.grounded?(answer.confidence==="High"?"green":answer.confidence==="Medium"?"blue":"amber"):"grey"}>{answer.confidence}</StatusBadge>
      </div>
      <div className="p-4">
-      <div className="text-sm leading-6 text-slate-800">{answer.answer}</div>
+      <div className="text-sm leading-6 text-slate-800">{answer.answer}</div>{answer.conflicts.length>0&&<div className="mt-3 rounded border border-red-200 bg-red-50 p-3"><div className="text-[10px] font-bold uppercase tracking-wide text-red-700">Conflicting Tender Values</div><div className="mt-2 space-y-2">{answer.conflicts.map((group,i)=><div key={i}>{group.values.map((v,j)=><div key={j} className="text-xs text-red-800">• {v.display}{v.document_name?(" · "+v.document_name):""}{v.page?(" · p."+v.page):""}{v.clause?(" · Cl."+v.clause):""}</div>)}</div>)}</div><div className="mt-2 text-[10px] text-red-700">Do not rely on one value until the governing document/addendum is confirmed.</div></div>}
       <div className="mt-4 text-[10px] text-slate-500">{answer.note}</div>
       {answer.evidence.length>0&&<div className="mt-4 space-y-2">
        <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Source Evidence</div>
