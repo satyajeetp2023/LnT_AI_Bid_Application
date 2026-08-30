@@ -230,8 +230,11 @@ def review_drawing_boq_finding(db:Session,finding_id:int,disposition:str,comment
  if disposition not in allowed:raise ValueError("Unsupported drawing/BOQ disposition")
  row=db.get(DrawingBoqFinding,finding_id)
  if not row:raise ValueError("Drawing/BOQ finding not found")
+ reviewer_comment=(comment or "").strip() or None
+ if disposition!="Escalate" and not reviewer_comment:
+  raise ValueError("A reviewer comment is required to close a drawing/BOQ finding")
  row.reviewer_disposition=disposition
- row.reviewer_comment=(comment or "").strip() or None
+ row.reviewer_comment=reviewer_comment
  row.review_status="Open" if disposition=="Escalate" else "Closed"
  row.reviewed_by=user_id;row.reviewed_at=datetime.now(timezone.utc)
  db.commit();db.refresh(row)
