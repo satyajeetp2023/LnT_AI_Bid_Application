@@ -190,3 +190,64 @@ def review_clause_risk(db:Session,finding_id:int,disposition:str,comment:str|Non
  finding.reviewed_at=datetime.now(timezone.utc)
  db.commit();db.refresh(finding)
  return {"id":finding.id,"review_status":finding.review_status,"reviewer_disposition":finding.reviewer_disposition,"reviewer_comment":finding.reviewer_comment}
+
+
+def promote_finding_to_firm_pattern(
+ db:Session,finding_id:int,payload:dict,user_id:int
+):
+ finding=db.get(BidClauseRiskFinding,finding_id)
+ if not finding:raise ValueError("Clause-risk finding not found")
+ terms=[_norm(x) for x in (payload.get("pattern_terms") or []) if _norm(x)]
+ if not terms:raise ValueError("At least one reusable pattern term is required")
+ code=str(payload.get("risk_code") or f"CUSTOM_{finding.id}_{finding.risk_code}").strip().upper().replace(" ","_")[:80]
+ title=str(payload.get("title") or finding.risk_title).strip()[:300]
+ category=str(payload.get("category") or finding.risk_category).strip()[:100]
+ severity=str(payload.get("severity") or finding.severity).strip()
+ if severity not in {"Critical","High","Medium","Low"}:raise ValueError("Unsupported severity")
+ existing=db.scalar(select(ClauseRiskPattern).where(ClauseRiskPattern.risk_code==code))
+ if existing:raise ValueError("A firm risk pattern with this code already exists")
+ row=ClauseRiskPattern(
+  risk_code=code,title=title,category=category,severity=severity,
+  pattern_terms=terms,
+  exclusion_terms=[_norm(x) for x in (payload.get("exclusion_terms") or []) if _norm(x)],
+  explanation=str(payload.get("explanation") or f"Firm-reviewed precedent derived from bid clause risk finding {finding.id}.").strip(),
+  reviewer_guidance=str(payload.get("reviewer_guidance") or "").strip() or None,
+  is_active=True,source_type="Firm Reviewed Precedent",created_by=user_id,
+ )
+ db.add(row);db.flush()
+ db.add(AuditEvent(
+  user_id=user_id,bid_project_id=finding.bid_project_id,event_type="clause_risk.pattern_promoted",
+  entity_type="ClauseRiskPattern",entity_id=str(row.id),
+  details={"finding_id":finding.id,"risk_code":code,"pattern_terms":terms},
+ ))
+ db.commit();db.refresh(row)
+ return {
+  "id":row.id,"risk_code":row.risk_code,"title":row.title,"category":row.category,
+  "severity":row.severity,"pattern_terms":row.pattern_terms,"source_type":row.source_type,
+ }
+
+
+def firm_risk_library(db:Session):
+ rows=db.scalars(select(ClauseRiskPattern).where(
+  ClauseRiskPattern.is_active.is_(True)
+ ).order_by(ClauseRiskPattern.severity,ClauseRiskPattern.category,ClauseRiskPattern.title)).all()
+ finding_counts={}
+ all_findings=db.scalars(select(BidClauseRiskFinding)).all()
+ for finding in all_findings:
+  if finding.risk_pattern_id:
+   finding_counts[finding.risk_pattern_id]=finding_counts.get(finding.risk_pattern_id,0)+1
+ return {
+  "items":[{
+   "id":x.id,"risk_code":x.risk_code,"title":x.title,"category":x.category,"severity":x.severity,
+   "pattern_terms":x.pattern_terms or [],"exclusion_terms":x.exclusion_terms or [],
+   "explanation":x.explanation,"reviewer_guidance":x.reviewer_guidance,
+   "source_type":x.source_type,"finding_count":finding_counts.get(x.id,0),
+  } for x in rows],
+  "summary":{
+   "patterns":len(rows),
+   "firm_reviewed":sum(1 for x in rows if x.source_type=="Firm Reviewed Precedent"),
+   "critical":sum(1 for x in rows if x.severity=="Critical"),
+   "high":sum(1 for x in rows if x.severity=="High"),
+  },
+  "version":"clause-risk-library-v1",
+ }
