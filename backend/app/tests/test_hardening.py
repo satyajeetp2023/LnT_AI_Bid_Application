@@ -116,6 +116,7 @@ def test_result_import_preview_is_audited_without_saving_outcome(client,bid_payl
     preview=client.post(
         f"/api/v1/bids/{bid['id']}/outcome/import-preview",
         files={"file":("result.csv",payload,"text/csv")},
+        headers={"X-Request-ID":"audit-preview-request-001"},
     )
     assert preview.status_code==200
     assert preview.json()["requires_review"] is True
@@ -125,6 +126,7 @@ def test_result_import_preview_is_audited_without_saving_outcome(client,bid_payl
     assert event["details"]["filename"]=="result.csv"
     assert len(event["details"]["sha256"])==64
     assert event["details"]["price_rows"]==2
+    assert event["request_metadata"]["request_id"]=="audit-preview-request-001"
 
 
 def test_batch_preflight_prevents_partial_persistence(client,bid_payload):
