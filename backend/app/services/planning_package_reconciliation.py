@@ -72,6 +72,21 @@ def _boq_quantity(item):
  unit=(match.group(2) or "").strip() or None
  return quantity,unit
 
+def _boq_work_front(item):
+ text=str(item.source_excerpt or "")
+ match=re.search(r"\|\s*Work Front:\s*([^|]+)",text,re.I)
+ return (match.group(1) or "").strip() if match else None
+
+
+def _work_front_score(left,right):
+ stop={"work","front","section","zone","area","location","site","chainage","ch"}
+ def tokens(value):
+  return {x for x in re.findall(r"[a-z]+|\d+",str(value or "").lower()) if x not in stop}
+ a=tokens(left);b=tokens(right)
+ if not a or not b:return 0.0
+ return round(len(a&b)/max(1,len(a|b)),3)
+
+
 
 def _unit_norm(value):
  text=re.sub(r"[^a-z0-9]+"," ",str(value or "").lower()).strip()
@@ -440,11 +455,41 @@ def reconcile_planning_package(db:Session,bid_id:int,tables:dict[str,list[dict]]
  if temporal_misalignment:
   issues.append({"severity":"Medium","type":"Resource Timing","message":f"{len(temporal_misalignment)} separate-plan entries do not cover the full linked activity period."})
 
+ work_front_checks=[]
+ for boq in boq_items:
+  boq_front=_boq_work_front(boq)
+  if not boq_front:continue
+  ranked=sorted(((_score(boq.activity_name,f"{task.get('task_code','')} {task.get('task_name','')}"),task) for task in tasks),key=lambda x:-x[0])
+  match_score,task=(ranked[0] if ranked else (0.0,None))
+  if not task or match_score<.34:continue
+  linked_entries=mapped_external.get(task.get("task_id"),[])
+  for entry in linked_entries:
+   if not entry.work_front:
+    status="Resource Work Front Missing";score=None
+   else:
+    score=_work_front_score(boq_front,entry.work_front)
+    status="Aligned" if score>=.5 else "Needs Review" if score>=.25 else "Mismatch"
+   work_front_checks.append({
+    "boq_scope_item_id":boq.id,"boq_reference":boq.source_reference,
+    "boq_activity":boq.activity_name,"boq_work_front":boq_front,
+    "task_code":task.get("task_code"),"task_name":task.get("task_name"),
+    "resource_entry_id":entry.id,"resource_name":entry.resource_name,
+    "resource_work_front":entry.work_front,"alignment_score":score,"status":status,
+    "note":"Compares only explicit BOQ and bidder resource-plan work-front/location fields. It does not infer geography or contract scope.",
+   })
+ work_front_mismatches=[x for x in work_front_checks if x["status"]=="Mismatch"]
+ work_front_missing=[x for x in work_front_checks if x["status"]=="Resource Work Front Missing"]
+
  productivity_shortfalls=[x for x in productivity_checks if any(y["status"]=="Below Implied Requirement" for y in x["comparisons"])]
  if productivity_shortfalls:
   issues.append({"severity":"High","type":"Productivity Feasibility","message":f"{len(productivity_shortfalls)} BOQ/schedule activity checks require a higher daily output than the bidder-stated resource productivity provides."})
  if concurrency_reviews:
   issues.append({"severity":"Medium","type":"Concurrent Resource Deployment","message":f"{len(concurrency_reviews)} overlapping activity pairs use the same resource label and require sharing/capacity confirmation."})
+
+ if work_front_mismatches:
+  issues.append({"severity":"Medium","type":"Work Front Alignment","message":f"{len(work_front_mismatches)} BOQ/resource-plan work-front comparisons are explicitly inconsistent and require review."})
+ if work_front_missing:
+  issues.append({"severity":"Medium","type":"Work Front Evidence","message":f"{len(work_front_missing)} linked resource-plan entries do not state a work front even though the BOQ does."})
 
  missing_contract_staff=[x for x in required_staff if not x["present_in_staff_plan"]]
  if missing_contract_staff:
@@ -494,6 +539,12 @@ def reconcile_planning_package(db:Session,bid_id:int,tables:dict[str,list[dict]]
    "concurrency_reviews":concurrency_reviews,
    "note":"Feasibility uses only bidder-supplied BOQ, duration, resource quantities and stated productivity. No external productivity norm is assumed.",
   },
+  "work_front_reconciliation":{
+   "checks":work_front_checks,
+   "mismatches":len(work_front_mismatches),
+   "missing_resource_work_front":len(work_front_missing),
+   "note":"Work-front alignment is checked only where explicit BOQ and bidder resource-plan location/work-front evidence exists.",
+  },
   "issues":issues,
   "summary":{
    "schedule_activities":len(coverage),"resource_covered_activities":covered,
@@ -507,11 +558,13 @@ def reconcile_planning_package(db:Session,bid_id:int,tables:dict[str,list[dict]]
    "staff_phase_timing_gaps":len(phase_timing_gaps),
    "productivity_shortfalls":len(productivity_shortfalls),
    "concurrent_resource_reviews":len(concurrency_reviews),
+   "work_front_mismatches":len(work_front_mismatches),
+   "missing_resource_work_front":len(work_front_missing),
    "undated_resource_entries":sum(1 for x in entries if not x.start_date and not x.finish_date),
    "high_issues":sum(1 for x in issues if x["severity"]=="High"),
    "medium_issues":sum(1 for x in issues if x["severity"]=="Medium"),
   },
-  "version":"integrated-planning-package-v6",
+  "version":"integrated-planning-package-v7",
   "note":"This reconciles evidence supplied by the bidder. It does not invent crew sizes, equipment quantities, staff norms or productivity assumptions.",
  }
 
@@ -534,6 +587,15 @@ def _finding_candidates(analysis:dict):
    "title":"Scheduled activity has no identifiable resource coverage",
    "description":f"{task_key} - {row.get('task_name') or 'Unnamed activity'} is not resource-loaded in the schedule and has no matched separate resource/equipment-plan entry.",
    "task_code":row.get("task_code"),"task_name":row.get("task_name"),"source_reference":None,
+  })
+ for row in analysis.get("work_front_reconciliation",{}).get("checks",[]):
+  if row.get("status") not in {"Mismatch","Resource Work Front Missing"}:continue
+  key=f"work-front:{row.get('boq_scope_item_id')}:{row.get('resource_entry_id')}"
+  candidates.append({
+   "finding_key":key,"finding_type":"Work Front Alignment","severity":"Medium",
+   "title":"BOQ and resource-plan work front require reconciliation",
+   "description":f"BOQ {row.get('boq_reference') or ''} states work front '{row.get('boq_work_front')}'. Resource '{row.get('resource_name')}' states '{row.get('resource_work_front') or 'not provided'}'. Status: {row.get('status')}.",
+   "task_code":row.get("task_code"),"task_name":row.get("task_name"),"source_reference":row.get("boq_reference"),
   })
  for row in analysis.get("separate_plan_matching",[]):
   if row.get("timeline_status") in {"Starts After Activity","Ends Before Activity"}:
