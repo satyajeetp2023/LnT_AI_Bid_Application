@@ -533,6 +533,7 @@ def assign_work_item_person(bid_id:int,payload:dict,request:Request,db:Session=D
  elif entity_type=="Pre-Bid Query":model=BidPreBidQuery;permission=Permission.PRE_BID_QUERY_MANAGE
  elif entity_type=="Schedule Scope":model=ScheduleScopeItem;permission=Permission.REQUIREMENT_MANAGE
  elif entity_type=="Clause Risk":model=BidClauseRiskFinding;permission=Permission.REQUIREMENT_MANAGE
+ elif entity_type=="Drawing BOQ":model=DrawingBoqFinding;permission=Permission.REQUIREMENT_MANAGE
  else:raise HTTPException(422,"Unsupported work item type")
  require_project_access(db,user,bid_id,permission)
  item=db.get(model,entity_id)
