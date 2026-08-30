@@ -123,6 +123,39 @@ jobs:
           done
           PERF_REQUESTS=120 PERF_CONCURRENCY=12 PERF_P95_MS=750 PYTHONPATH=. python release/performance_smoke.py
 
+      - name: Database dependency failure and recovery smoke
+        working-directory: backend
+        env:
+          ENVIRONMENT: development
+          AUTH_MODE: development
+        run: |
+          PYTHONPATH=. uvicorn app.main:app --host 127.0.0.1 --port 8001 >/tmp/recovery-api.log 2>&1 &
+          API_PID=$!
+          trap 'kill $API_PID || true' EXIT
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:8001/api/v1/health/ready >/dev/null; then break; fi
+            sleep 1
+          done
+          PG_CONTAINER=$(docker ps --filter ancestor=postgres:16 --format '{{.ID}}' | head -n1)
+          test -n "$PG_CONTAINER"
+          docker pause "$PG_CONTAINER"
+          curl -fsS --max-time 3 http://127.0.0.1:8001/api/v1/health/live >/dev/null
+          if curl -fsS --max-time 3 http://127.0.0.1:8001/api/v1/health/ready >/dev/null 2>&1; then
+            echo "readiness unexpectedly succeeded while PostgreSQL was paused"
+            docker unpause "$PG_CONTAINER"
+            exit 1
+          fi
+          docker unpause "$PG_CONTAINER"
+          for i in {1..30}; do
+            if curl -fsS --max-time 3 http://127.0.0.1:8001/api/v1/health/ready >/dev/null; then
+              echo "database recovery readiness passed"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "readiness did not recover after PostgreSQL resumed"
+          exit 1
+
       - name: Storage durability and traversal smoke
         working-directory: backend
         run: PYTHONPATH=. python release/storage_durability_smoke.py
