@@ -116,13 +116,16 @@ async def preview_bid_outcome_import(bid_id:int,file:UploadFile=File(...),db:Ses
 def portfolio_historical_bid_intelligence(
  project_type:str|None=Query(None,max_length=100),
  client:str|None=Query(None,max_length=200),
+ result_from:date|None=None,
+ result_to:date|None=None,
  db:Session=Depends(get_db),user:User=Depends(user_dep),
 ):
+ if result_from and result_to and result_from>result_to:raise HTTPException(422,"result_from cannot be after result_to")
  visible=list_bids(db,user)
  if project_type:visible=[x for x in visible if (x.project_type or "").casefold()==project_type.strip().casefold()]
  if client:visible=[x for x in visible if (x.client or "").casefold()==client.strip().casefold()]
- result=historical_bid_intelligence(db,[x.id for x in visible])
- result["applied_filters"]={"project_type":project_type.strip() if project_type else None,"client":client.strip() if client else None}
+ result=historical_bid_intelligence(db,[x.id for x in visible],result_from,result_to)
+ result["applied_filters"]={"project_type":project_type.strip() if project_type else None,"client":client.strip() if client else None,"result_from":result_from.isoformat() if result_from else None,"result_to":result_to.isoformat() if result_to else None}
  return result
 
 @router.get("/bids/{bid_id}/historical-comparison")
