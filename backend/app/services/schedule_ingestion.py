@@ -36,8 +36,10 @@ def _norm(value):
 
 def _semantic(value):
     text=_norm(value)
+    compact=re.sub(r"\([^)]*\)|\[[^]]*\]","",text).strip(" :*-")
     for semantic,names in ALIASES.items():
-        if text in names:return semantic
+        if text in names or compact in names:return semantic
+        if any(compact.startswith(name+" ") for name in names if len(name)>=5):return semantic
     return None
 
 
@@ -206,17 +208,49 @@ def _p6_xml(content:bytes):
     return {"PROJECT":projects,"TASK":tasks,"TASKPRED":rels,"PROJWBS":wbs,"CALENDAR":calendars,"RSRC":resources,"TASKRSRC":assignments}
 
 
+def _docx_schedule_tables(content:bytes):
+    document=DocxDocument(io.BytesIO(content))
+    candidates=[]
+    for index,table in enumerate(document.tables,1):
+        matrix=[[cell.text.strip() for cell in row.cells] for row in table.rows]
+        parsed=_table_matrix_to_schedule(matrix,f"Word Table {index}")
+        if parsed and parsed["TASK"]:candidates.append(parsed)
+    if not candidates:return None
+    tasks=[];wbs=[];rels=[]
+    for parsed in candidates:
+        tasks.extend(parsed["TASK"]);wbs.extend(parsed["PROJWBS"]);rels.extend(parsed["TASKPRED"])
+    return {"PROJECT":[],"TASK":tasks,"PROJWBS":wbs,"TASKPRED":rels,"CALENDAR":[],"RSRC":[],"TASKRSRC":[]}
+
+
+def _fixed_column_matrix(text:str):
+    matrix=[]
+    for raw in text.splitlines():
+        line=raw.strip()
+        if not line:continue
+        cells=[x.strip() for x in re.split(r"\s{2,}",line) if x.strip()]
+        if len(cells)>=2:matrix.append(cells)
+    return matrix
+
+
 def _report_text(extension:str,content:bytes):
+    if extension=="docx":
+        tabular=_docx_schedule_tables(content)
+        if tabular:return tabular
     text=extract_text(extension,content)
     if not text.strip():return None
-    # Conservative report parsing: accept delimited/tabular-looking rows only.
-    matrix=[]
+    matrices=[]
+    delimited=[]
     for line in text.splitlines():
-        if "\t" in line:matrix.append(line.split("\t"))
-        elif "|" in line:matrix.append([x.strip() for x in line.split("|")])
-    parsed=_table_matrix_to_schedule(matrix,"REPORT") if matrix else None
-    if not parsed or not parsed["TASK"]:return None
-    return {"PROJECT":[],"TASK":parsed["TASK"],"PROJWBS":parsed["PROJWBS"],"TASKPRED":parsed["TASKPRED"],"CALENDAR":[],"RSRC":[],"TASKRSRC":[]}
+        if "\t" in line:delimited.append(line.split("\t"))
+        elif "|" in line:delimited.append([x.strip() for x in line.split("|")])
+    if delimited:matrices.append(delimited)
+    fixed=_fixed_column_matrix(text)
+    if fixed:matrices.append(fixed)
+    for matrix in matrices:
+        parsed=_table_matrix_to_schedule(matrix,"REPORT")
+        if parsed and parsed["TASK"]:
+            return {"PROJECT":[],"TASK":parsed["TASK"],"PROJWBS":parsed["PROJWBS"],"TASKPRED":parsed["TASKPRED"],"CALENDAR":[],"RSRC":[],"TASKRSRC":[]}
+    return None
 
 
 def ingest_schedule(extension:str,content:bytes):
