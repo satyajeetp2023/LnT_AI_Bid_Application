@@ -62,6 +62,15 @@ def get_doc(db,id):
  doc=db.get(BidDocument,id)
  if not doc: raise HTTPException(404,"Document not found")
  return doc
+async def read_limited_upload(file:UploadFile,file_limit:int,batch_remaining:int,chunk_size:int=1024*1024):
+ chunks=[];size=0
+ while True:
+  chunk=await file.read(min(chunk_size,file_limit-size+1,batch_remaining-size+1))
+  if not chunk:break
+  chunks.append(chunk);size+=len(chunk)
+  if size>file_limit:raise HTTPException(413,"File exceeds configured size limit")
+  if size>batch_remaining:raise HTTPException(413,"Batch exceeds configured size limit")
+ return b"".join(chunks),size
 @router.get("/health")
 def health(db:Session=Depends(get_db)): db.execute(select(1)); return {"status":"ok","database":"connected"}
 @router.get("/config/upload")
@@ -143,9 +152,9 @@ async def upload(bid_id:int,files:list[UploadFile]=File(...),db:Session=Depends(
  require_project_access(db,user,bid_id,Permission.UPLOAD_DOCUMENT); cfg=get_settings()
  if len(files)>cfg.max_files_per_batch: raise HTTPException(413,"Too many files in batch")
  result=[]; total=0
+ file_limit=cfg.max_file_size_mb*1024*1024;batch_limit=cfg.max_batch_size_mb*1024*1024
  for file in files:
-  data=await file.read(); total+=len(data)
-  if total>cfg.max_batch_size_mb*1024*1024: raise HTTPException(413,"Batch exceeds configured size limit")
+  data,size=await read_limited_upload(file,file_limit,batch_limit-total);total+=size
   result.append(upload_document(db,bid_id,file.filename or "",file.content_type,data,user.id))
  return result
 @router.patch("/documents/{document_id}/classification",response_model=DocumentRead)
