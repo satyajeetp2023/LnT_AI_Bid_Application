@@ -86,11 +86,43 @@ jobs:
           print(f"schema verification passed: {len(tables)} tables")
           PY
 
-      - name: Migration rollback and reapply smoke
+      - name: Migration rollback, reapply and data preservation smoke
         working-directory: backend
         run: |
+          PYTHONPATH=. python -m app.seed
+          PYTHONPATH=. python - <<'PY'
+          from datetime import date
+          from app.database.session import SessionLocal
+          from app.models import BidProject
+          with SessionLocal() as db:
+              marker=BidProject(
+                  bid_id="RELEASE-MIGRATION-MARKER",
+                  tender_reference_no="RELEASE-MIGRATION-MARKER",
+                  client="Release Readiness",
+                  tender_name="Migration preservation marker",
+                  contract_type="EPC",
+                  project_type="OHE",
+                  currency="INR",
+                  tender_due_date=date(2099,1,1),
+                  bid_manager="Release Readiness",
+                  current_stage="Opportunity",
+                  bid_status="Draft",
+                  created_by=1,
+              )
+              db.add(marker);db.commit()
+          PY
           PYTHONPATH=. alembic downgrade 0021
           PYTHONPATH=. alembic upgrade head
+          PYTHONPATH=. python - <<'PY'
+          from sqlalchemy import select
+          from app.database.session import SessionLocal
+          from app.models import BidProject
+          with SessionLocal() as db:
+              marker=db.scalar(select(BidProject).where(BidProject.bid_id=="RELEASE-MIGRATION-MARKER"))
+              assert marker is not None,"Existing bid data did not survive migration rollback/reapply"
+              db.delete(marker);db.commit()
+          print("migration data preservation smoke passed")
+          PY
 
       - name: Backend dependency audit
         working-directory: backend
