@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import {Suspense} from "react";
 import {useSearchParams} from "next/navigation";
 import {ShieldX} from "lucide-react";
 
-export default function AccessDeniedPage(){
+function AccessDeniedContent(){
  const params=useSearchParams();
  const from=params.get("from");
  const requestId=params.get("requestId");
@@ -21,4 +22,10 @@ export default function AccessDeniedPage(){
    </div>
   </div>
  </div>;
+}
+
+export default function AccessDeniedPage(){
+ return <Suspense fallback={<div className="mx-auto max-w-2xl py-12 text-center text-sm text-slate-500">Loading access details…</div>}>
+  <AccessDeniedContent/>
+ </Suspense>;
 }
