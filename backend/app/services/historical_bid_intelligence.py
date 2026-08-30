@@ -115,10 +115,10 @@ def historical_bid_intelligence(db:Session,bid_ids:list[int]):
    project=projects.get(outcome.bid_project_id)
    if project:bucket[getattr(project,field) or "Unspecified"].append(outcome)
   return [{"name":k,"bids":len(v),"won":sum(x.result_status=="Won" for x in v),"win_rate_percent":round(sum(x.result_status=="Won" for x in v)*100/len(v),1)} for k,v in sorted(bucket.items())]
- appearances=Counter();wins=Counter()
+ appearances=Counter();wins=Counter();rank_totals=Counter()
  for row in prices:
   if row.is_ours:continue
-  appearances[row.bidder_name]+=1
+  appearances[row.bidder_name]+=1;rank_totals[row.bidder_name]+=row.rank
   if row.rank==1:wins[row.bidder_name]+=1
  return {
   "summary":{
@@ -129,7 +129,7 @@ def historical_bid_intelligence(db:Session,bid_ids:list[int]):
    "average_recorded_margin_percent":round(sum(margins)/len(margins),2) if margins else None,
   },
   "by_project_type":grouped("project_type"),"by_client":grouped("client"),
-  "competitors":[{"name":name,"appearances":count,"l1_wins":wins[name]} for name,count in appearances.most_common(20)],
+  "competitors":[{"name":name,"appearances":count,"l1_wins":wins[name],"l1_rate_percent":round(wins[name]*100/count,1),"average_rank":round(rank_totals[name]/count,2)} for name,count in appearances.most_common(20)],
   "version":"phase7-historical-bid-intelligence-v1",
   "note":"This is descriptive historical intelligence from recorded bid outcomes and ranked prices. It does not predict future results.",
  }
