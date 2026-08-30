@@ -86,3 +86,10 @@ def test_csv_preview_rejects_binary_content():
     import pytest
     with pytest.raises(ValueError,match="CSV content appears to be binary"):
         preview_historical_result("csv",b"Rank\x00Bidder","fake.csv")
+
+
+def test_csv_preview_rejects_oversized_cell():
+    import pytest
+    payload=("Rank,Bidder Name,Bid Value\n1,"+("A"*20001)+",100\n").encode()
+    with pytest.raises(ValueError,match="cells larger than"):
+        preview_historical_result("csv",payload,"oversized.csv")
