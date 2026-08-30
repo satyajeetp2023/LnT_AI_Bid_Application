@@ -66,3 +66,15 @@ def test_overlap_only_when_activity_periods_intersect():
     from datetime import date
     assert _overlap(date(2026,1,1),date(2026,1,10),date(2026,1,8),date(2026,1,20)) is True
     assert _overlap(date(2026,1,1),date(2026,1,5),date(2026,1,6),date(2026,1,20)) is False
+
+
+def test_per_resource_shortfall_math_supports_minimum_resource_quantity():
+    class Entry:
+        productivity_rate=8
+        productivity_unit="Nos/Crew/Day"
+        quantity=2
+    capacity=_productivity_capacity(Entry())
+    required_rate=20
+    minimum=__import__("math").ceil(required_rate/capacity["rate"])
+    assert minimum==3
+    assert minimum-int(capacity["resource_quantity"])==1
