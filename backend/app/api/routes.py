@@ -52,7 +52,7 @@ from app.services.historical_bid_intelligence import get_bid_outcome,historical_
 from app.services.historical_bid_comparison import historical_comparison
 from app.services.historical_result_import import preview_historical_result
 from app.services.execution_learning import create_execution_factor,execution_learning_intelligence,get_execution_outcome,list_execution_factors,review_execution_factor,review_execution_outcome,save_execution_outcome,update_execution_factor
-from app.services.bid_decision_analytics import bid_decision_analytics
+from app.services.bid_decision_analytics import bid_decision_analytics,create_decision_snapshot,list_decision_snapshots
 from app.storage.base import LocalSecureStorage
 router=APIRouter()
 def user_dep(db:Session=Depends(get_db),x_user_id:int=Header(alias="X-User-ID")): return current_user(db,x_user_id)
@@ -183,6 +183,17 @@ def bid_management_decision_analytics(bid_id:int,db:Session=Depends(get_db),user
  require_project_access(db,user,bid_id,Permission.VIEW_DOCUMENT)
  current=get_bid(db,bid_id);visible=list_bids(db,user)
  return bid_decision_analytics(db,current,[x.id for x in visible])
+
+@router.get("/bids/{bid_id}/decision-snapshots")
+def bid_decision_snapshots(bid_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.VIEW_DOCUMENT);get_bid(db,bid_id)
+ return list_decision_snapshots(db,bid_id)
+
+@router.post("/bids/{bid_id}/decision-snapshots",status_code=201)
+def freeze_bid_decision_snapshot(bid_id:int,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.EDIT_BID)
+ current=get_bid(db,bid_id);visible=list_bids(db,user)
+ return create_decision_snapshot(db,current,[x.id for x in visible],user.id,metadata(request))
 
 @router.get("/bids/{bid_id}/execution-learning-factors")
 def bid_execution_learning_factors(bid_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)):
