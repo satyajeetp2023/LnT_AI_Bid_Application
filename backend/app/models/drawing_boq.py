@@ -50,6 +50,8 @@ class DrawingBoqFinding(Base):
     variance_quantity:Mapped[Decimal|None]=mapped_column(Numeric(18,6))
     variance_percent:Mapped[Decimal|None]=mapped_column(Numeric(18,6))
     finding_status:Mapped[str]=mapped_column(String(50),index=True)
+    responsible_function:Mapped[str]=mapped_column(String(100),default="Engineering",index=True)
+    responsible_person:Mapped[str|None]=mapped_column(String(200))
     review_status:Mapped[str]=mapped_column(String(40),default="Open",index=True)
     reviewer_disposition:Mapped[str|None]=mapped_column(String(60))
     reviewer_comment:Mapped[str|None]=mapped_column(Text)
