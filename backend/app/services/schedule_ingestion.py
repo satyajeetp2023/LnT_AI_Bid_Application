@@ -5,13 +5,14 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime
 
+from docx import Document as DocxDocument
 from openpyxl import load_workbook
 
 from app.services.document_classification import extract_text
 from app.services.p6_xer import parse_xer
 
 
-SCHEDULE_EXTENSIONS={"xer","xml","xlsx","xls","csv","pdf","docx","txt"}
+SCHEDULE_EXTENSIONS={"xer","xml","xlsx","xls","csv","pdf","doc","docx","txt","mpp"}
 
 ALIASES={
     "task_code":("activity id","activity code","task id","id","activity no","activity number"),
@@ -57,11 +58,16 @@ def _number(value):
 def _duration_hours(value):
     if value in (None,""):return None
     if isinstance(value,(int,float)):return float(value)*8.0
-    text=str(value).lower().strip()
-    number=_number(text)
+    text=str(value).strip()
+    iso=re.fullmatch(r"P(?:(?P<days>\d+(?:\.\d+)?)D)?(?:T(?:(?P<hours>\d+(?:\.\d+)?)H)?(?:(?P<minutes>\d+(?:\.\d+)?)M)?)?",text,re.I)
+    if iso:
+        return float(iso.group("days") or 0)*8+float(iso.group("hours") or 0)+float(iso.group("minutes") or 0)/60
+    lower=text.lower()
+    number=_number(lower)
     if number is None:return None
-    if "hour" in text or text.endswith("h"):return number
-    if "week" in text:return number*40
+    if "hour" in lower:return number
+    if "minute" in lower:return number/60
+    if "week" in lower:return number*40
     return number*8
 
 
