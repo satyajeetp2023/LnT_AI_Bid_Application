@@ -97,7 +97,7 @@ export function Sidebar({mobileOpen=false,onClose}:{mobileOpen?:boolean;onClose?
   let active=true;
   request<{permissions:string[];is_admin:boolean;bid_project_ids:number[]}>("/auth/me").then(me=>{if(active){setPermissions(new Set(me.permissions||[]));setBidAccess({isAdmin:Boolean(me.is_admin),ids:new Set(me.bid_project_ids||[])})}}).catch(()=>{if(active){setPermissions(new Set());setBidAccess({isAdmin:false,ids:new Set()})}});
   return()=>{active=false};
- },[]);
+ },[bidId]);
 
  useEffect(()=>{
   setQuery("");
