@@ -7,7 +7,7 @@ from datetime import datetime,timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import BidPreparedArtifact
+from app.models import BidClauseRiskFinding,BidPreparedArtifact,DrawingBoqFinding
 from app.services.estimation_readiness import calculate_estimation_readiness
 from app.services.submission_format_intelligence import detect_submission_formats
 from app.storage.base import StorageProvider
@@ -74,6 +74,28 @@ def submission_readiness(db:Session,bid_id:int):
     if estimation["grade"]!="Ready":
         warnings.append(f'Estimation readiness is {estimation["overall_score"]}% ({estimation["grade"]}).')
 
+    clause_risks=db.scalars(select(BidClauseRiskFinding).where(
+        BidClauseRiskFinding.bid_project_id==bid_id,
+        BidClauseRiskFinding.review_status!="Closed",
+    )).all()
+    critical_clause_risks=[x for x in clause_risks if x.severity=="Critical"]
+    high_clause_risks=[x for x in clause_risks if x.severity=="High"]
+    for risk in critical_clause_risks:
+        blockers.append(f'Critical clause risk unresolved: {risk.risk_title}' + (f' (Cl. {risk.source_clause})' if risk.source_clause else ''))
+    for risk in high_clause_risks:
+        warnings.append(f'High clause risk awaiting Contracts disposition: {risk.risk_title}')
+
+    drawing_findings=db.scalars(select(DrawingBoqFinding).where(
+        DrawingBoqFinding.bid_project_id==bid_id,
+        DrawingBoqFinding.review_status=="Open",
+    )).all()
+    drawing_blockers=[x for x in drawing_findings if x.finding_status in {"Quantity Variance","No BOQ Match"}]
+    drawing_warnings=[x for x in drawing_findings if x.finding_status in {"Unit Review","BOQ Quantity Unavailable"}]
+    for finding in drawing_blockers:
+        blockers.append(f'Drawing/BOQ review unresolved: {finding.finding_status}' + (f' ({finding.boq_reference})' if finding.boq_reference else ''))
+    for finding in drawing_warnings:
+        warnings.append(f'Drawing/BOQ review required: {finding.finding_status}' + (f' ({finding.boq_reference})' if finding.boq_reference else ''))
+
     if not detected["items"]:
         warnings.append("No employer-prescribed submission formats were detected automatically; manual tender-package confirmation is required.")
 
@@ -103,19 +125,24 @@ def submission_readiness(db:Session,bid_id:int):
             "mandatory_blockers":sum(1 for x in formats if x["mandatory"] and x["status"]!="Approved"),
             "warnings":len(warnings),
             "approved_artifacts":len(approved_current),
+            "critical_clause_risk_blockers":len(critical_clause_risks),
+            "high_clause_risk_warnings":len(high_clause_risks),
+            "drawing_boq_blockers":len(drawing_blockers),
+            "drawing_boq_warnings":len(drawing_warnings),
+            "intelligence_blockers":len(critical_clause_risks)+len(drawing_blockers),
         },
         "estimation_readiness":{
             "overall_score":estimation["overall_score"],
             "grade":estimation["grade"],
         },
-        "version":"phase5-submission-readiness-v2",
+        "version":"phase5-submission-readiness-v3",
     }
 
 
 def build_submission_package(db:Session,bid_id:int,storage:StorageProvider):
     readiness=submission_readiness(db,bid_id)
     if not readiness["ready"]:
-        raise ValueError("Submission package cannot be generated while mandatory submission-format blockers remain")
+        raise ValueError("Submission package cannot be generated while submission-readiness blockers remain unresolved")
 
     artifact_ids=[x["id"] for x in readiness["approved_artifacts"]]
     artifacts=db.scalars(select(BidPreparedArtifact).where(
