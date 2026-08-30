@@ -13,12 +13,16 @@ export default function HistoricalIntelligencePage(){
  const [client,setClient]=useState("");
  const [projectTypes,setProjectTypes]=useState<string[]>([]);
  const [clients,setClients]=useState<string[]>([]);
+ const [resultFrom,setResultFrom]=useState("");
+ const [resultTo,setResultTo]=useState("");
 
  useEffect(()=>{
   setLoading(true);setError("");
   const params=new URLSearchParams();
   if(projectType)params.set("project_type",projectType);
   if(client)params.set("client",client);
+  if(resultFrom)params.set("result_from",resultFrom);
+  if(resultTo)params.set("result_to",resultTo);
   request<HistoricalBidIntelligence>("/historical-bids/intelligence"+(params.size?"?"+params.toString():""))
    .then(x=>{
     setData(x);
@@ -28,7 +32,7 @@ export default function HistoricalIntelligencePage(){
     }
    }).catch(()=>setError("Unable to load historical bid intelligence."))
    .finally(()=>setLoading(false));
- },[projectType,client]);
+ },[projectType,client,resultFrom,resultTo]);
 
  if(loading)return <LoadingState label="Loading historical intelligence"/>;
  if(error)return <ErrorState message={error}/>;
@@ -40,7 +44,9 @@ export default function HistoricalIntelligencePage(){
    <div className="flex flex-wrap items-end gap-3">
     <label className="min-w-52 text-xs font-semibold text-slate-600">Project Type<select value={projectType} onChange={e=>setProjectType(e.target.value)} className="mt-1 w-full rounded border border-slate-300 bg-white px-2.5 py-2 text-xs font-normal text-slate-800"><option value="">All project types</option>{projectTypes.map(x=><option key={x}>{x}</option>)}</select></label>
     <label className="min-w-52 text-xs font-semibold text-slate-600">Client<select value={client} onChange={e=>setClient(e.target.value)} className="mt-1 w-full rounded border border-slate-300 bg-white px-2.5 py-2 text-xs font-normal text-slate-800"><option value="">All clients</option>{clients.map(x=><option key={x}>{x}</option>)}</select></label>
-    {(projectType||client)&&<button onClick={()=>{setProjectType("");setClient("")}} className="rounded border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700">Clear Filters</button>}
+    <label className="min-w-44 text-xs font-semibold text-slate-600">Result From<input type="date" value={resultFrom} onChange={e=>setResultFrom(e.target.value)} className="mt-1 w-full rounded border border-slate-300 bg-white px-2.5 py-2 text-xs font-normal text-slate-800"/></label>
+    <label className="min-w-44 text-xs font-semibold text-slate-600">Result To<input type="date" value={resultTo} onChange={e=>setResultTo(e.target.value)} className="mt-1 w-full rounded border border-slate-300 bg-white px-2.5 py-2 text-xs font-normal text-slate-800"/></label>
+    {(projectType||client||resultFrom||resultTo)&&<button onClick={()=>{setProjectType("");setClient("");setResultFrom("");setResultTo("")}} className="rounded border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700">Clear Filters</button>}
     <div className="text-[10px] text-slate-500">Filters apply server-side to historical bids you are authorized to view.</div>
    </div>
   </section>
