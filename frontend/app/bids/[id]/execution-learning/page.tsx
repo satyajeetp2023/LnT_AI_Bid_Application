@@ -4,7 +4,7 @@ import {use,useEffect,useState,type ReactNode} from "react";
 import {BidWorkspaceHeader} from "@/components/BidWorkspaceHeader";
 import {ErrorState,LoadingState,PageHeader,SummaryCard} from "@/components/design-system";
 import {request} from "@/services/api";
-import type {Bid,ExecutionOutcomeResponse} from "@/types";
+import type {Bid,ExecutionLearningFactorResponse,ExecutionOutcomeResponse} from "@/types";
 
 const inputClass="w-full rounded border border-slate-300 bg-white px-2.5 py-2 text-xs text-slate-800 outline-none focus:border-[#c69b2d] focus:ring-2 focus:ring-[#d5aa35]/20";
 
@@ -16,6 +16,8 @@ export default function ExecutionLearningPage({params}:{params:Promise<{id:strin
  const [saving,setSaving]=useState(false);
  const [reviewing,setReviewing]=useState(false);
  const [error,setError]=useState("");
+ const [factors,setFactors]=useState<ExecutionLearningFactorResponse|null>(null);
+ const [factorForm,setFactorForm]=useState({factor_category:"Planning",impact_area:"Time",direction:"Adverse",title:"",description:"",quantified_impact:"",impact_unit:"days",source_reference:"",source_excerpt:"",lesson_for_future_bids:""});
  const [form,setForm]=useState({
   execution_status:"Not Started",data_date:"",actual_start_date:"",actual_completion_date:"",
   final_contract_value:"",actual_cost:"",final_margin_percent:"",approved_variations:"",
@@ -37,8 +39,8 @@ export default function ExecutionLearningPage({params}:{params:Promise<{id:strin
   setLoading(true);setError("");
   request<Bid>("/bids/"+id).then(b=>{
    setBid(b);
-   return request<ExecutionOutcomeResponse>("/bids/"+id+"/execution-outcome");
-  }).then(apply).catch(e=>setError(e instanceof Error?e.message:"Unable to load execution learning.")).finally(()=>setLoading(false));
+   return Promise.all([request<ExecutionOutcomeResponse>("/bids/"+id+"/execution-outcome"),request<ExecutionLearningFactorResponse>("/bids/"+id+"/execution-learning-factors")]);
+  }).then(([outcome,factorData])=>{apply(outcome);setFactors(factorData)}).catch(e=>setError(e instanceof Error?e.message:"Unable to load execution learning.")).finally(()=>setLoading(false));
  },[id]);
 
  const set=(key:string,value:string)=>setForm(x=>({...x,[key]:value}));
@@ -61,6 +63,22 @@ export default function ExecutionLearningPage({params}:{params:Promise<{id:strin
   try{apply(await request<ExecutionOutcomeResponse>("/bids/"+id+"/execution-outcome/review",{method:"POST"}))}
   catch(e){setError(e instanceof Error?e.message:"Unable to mark execution actuals reviewed.")}
   finally{setReviewing(false)}
+ };
+
+ const addFactor=async()=>{
+  setError("");
+  try{
+   await request("/bids/"+id+"/execution-learning-factors",{method:"POST",body:JSON.stringify({...factorForm,quantified_impact:factorForm.quantified_impact===""?null:Number(factorForm.quantified_impact),impact_unit:factorForm.impact_unit||null,source_reference:factorForm.source_reference||null,source_excerpt:factorForm.source_excerpt||null,lesson_for_future_bids:factorForm.lesson_for_future_bids||null})});
+   setFactors(await request<ExecutionLearningFactorResponse>("/bids/"+id+"/execution-learning-factors"));
+   setFactorForm(x=>({...x,title:"",description:"",quantified_impact:"",source_reference:"",source_excerpt:"",lesson_for_future_bids:""}));
+  }catch(e){setError(e instanceof Error?e.message:"Unable to add execution learning factor.")}
+ };
+ const reviewFactor=async(factorId:number)=>{
+  setError("");
+  try{
+   await request("/execution-learning-factors/"+factorId+"/review",{method:"POST"});
+   setFactors(await request<ExecutionLearningFactorResponse>("/bids/"+id+"/execution-learning-factors"));
+  }catch(e){setError(e instanceof Error?e.message:"Unable to review execution learning factor.")}
  };
 
  if(loading)return <LoadingState label="Loading execution learning"/>;
@@ -105,6 +123,27 @@ export default function ExecutionLearningPage({params}:{params:Promise<{id:strin
      <SummaryCard label="EOT" value={form.eot_days?form.eot_days+" days":"—"}/>
     </div>
     <div className="mt-3 text-[10px] text-slate-500">{data.note}</div>
+   </section>
+   <section className="mt-3 rounded border border-slate-200 bg-white p-3">
+    <div className="mb-3"><h2 className="text-sm font-bold text-slate-900">Execution Variance Factors</h2><p className="text-xs text-slate-500">Record evidence-backed reasons for bid-versus-actual variance. Only reviewed factors with source reference and future-bid lesson become reusable learning.</p></div>
+    <div className="grid gap-3 md:grid-cols-3">
+     <Field label="Category"><input value={factorForm.factor_category} onChange={e=>setFactorForm(x=>({...x,factor_category:e.target.value}))} className={inputClass}/></Field>
+     <Field label="Impact Area"><select value={factorForm.impact_area} onChange={e=>setFactorForm(x=>({...x,impact_area:e.target.value}))} className={inputClass}>{["Cost","Time","Margin","Revenue","Productivity","Scope","Mixed"].map(x=><option key={x}>{x}</option>)}</select></Field>
+     <Field label="Direction"><select value={factorForm.direction} onChange={e=>setFactorForm(x=>({...x,direction:e.target.value}))} className={inputClass}>{["Adverse","Favorable","Neutral"].map(x=><option key={x}>{x}</option>)}</select></Field>
+     <Field label="Title"><input value={factorForm.title} onChange={e=>setFactorForm(x=>({...x,title:e.target.value}))} className={inputClass}/></Field>
+     <Field label="Quantified Impact"><input type="number" min="0" value={factorForm.quantified_impact} onChange={e=>setFactorForm(x=>({...x,quantified_impact:e.target.value}))} className={inputClass}/></Field>
+     <Field label="Impact Unit"><input value={factorForm.impact_unit} onChange={e=>setFactorForm(x=>({...x,impact_unit:e.target.value}))} className={inputClass}/></Field>
+    </div>
+    <div className="mt-3 grid gap-3 md:grid-cols-2">
+     <Field label="Description"><textarea value={factorForm.description} onChange={e=>setFactorForm(x=>({...x,description:e.target.value}))} className={inputClass+" min-h-20"}/></Field>
+     <Field label="Source Excerpt"><textarea value={factorForm.source_excerpt} onChange={e=>setFactorForm(x=>({...x,source_excerpt:e.target.value}))} className={inputClass+" min-h-20"}/></Field>
+     <Field label="Source Reference"><input value={factorForm.source_reference} onChange={e=>setFactorForm(x=>({...x,source_reference:e.target.value}))} className={inputClass}/></Field>
+     <Field label="Lesson for Future Bids"><textarea value={factorForm.lesson_for_future_bids} onChange={e=>setFactorForm(x=>({...x,lesson_for_future_bids:e.target.value}))} className={inputClass+" min-h-20"}/></Field>
+    </div>
+    <button onClick={addFactor} disabled={!data.execution||!factorForm.title||!factorForm.description} className="mt-3 rounded bg-[#304354] px-4 py-2 text-xs font-semibold text-white disabled:opacity-50">Add Learning Factor</button>
+    {factors&&<div className="mt-4"><div className="mb-2 grid grid-cols-3 gap-3 md:grid-cols-5"><SummaryCard label="Factors" value={factors.summary.total}/><SummaryCard label="Reviewed" value={factors.summary.reviewed}/><SummaryCard label="Draft" value={factors.summary.draft}/><SummaryCard label="Adverse" value={factors.summary.adverse}/><SummaryCard label="Favorable" value={factors.summary.favorable}/></div>
+     <div className="space-y-2">{factors.items.map(x=><div key={x.id} className="rounded border border-slate-200 p-3 text-xs"><div className="flex flex-wrap items-center justify-between gap-2"><div><div className="font-semibold text-slate-900">{x.title}</div><div className="text-[10px] text-slate-500">{x.factor_category} · {x.impact_area} · {x.direction}</div></div><button onClick={()=>reviewFactor(x.id)} disabled={x.review_status==="Reviewed"} className="rounded border border-slate-300 px-3 py-1.5 text-[10px] font-semibold disabled:opacity-50">{x.review_status==="Reviewed"?"Reviewed":"Mark Reviewed"}</button></div><div className="mt-2 text-slate-600">{x.description}</div>{x.lesson_for_future_bids&&<div className="mt-2 rounded bg-slate-50 p-2"><span className="font-semibold">Future bid lesson:</span> {x.lesson_for_future_bids}</div>}<div className="mt-2 text-[10px] text-slate-500">Source: {x.source_reference||"Not provided"}</div></div>)}</div>
+    </div>}
    </section>
   </>}
  </div>;
