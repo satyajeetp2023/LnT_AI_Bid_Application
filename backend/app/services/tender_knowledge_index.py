@@ -1,15 +1,20 @@
+import csv
 import hashlib
+import io
 import re
 
-from sqlalchemy import delete,func,select
+from openpyxl import load_workbook
+import xlrd
+
+from sqlalchemy import delete,select
 from sqlalchemy.orm import Session
 
 from app.models import AuditEvent,BidDocument,TenderKnowledgeChunk
-from app.services.requirement_extraction import RuleBasedRequirementExtractionProvider
+from app.services.requirement_extraction import RuleBasedRequirementExtractionProvider,SourceUnit
 
 
-INDEXABLE_EXTENSIONS={"pdf","docx","txt"}
-INDEXER_VERSION="tender-knowledge-index-v1"
+INDEXABLE_EXTENSIONS={"pdf","docx","txt","xlsx","xls","csv"}
+INDEXER_VERSION="tender-knowledge-index-v2"
 
 
 def _clause(text:str):
@@ -37,6 +42,32 @@ def _chunks(text:str,target_chars:int=1300,overlap_sentences:int=1):
  return result
 
 
+def _row_text(values):
+ return " | ".join(str(x).strip() for x in values if x not in (None,"") and str(x).strip())
+
+
+def _spreadsheet_units(extension:str,content:bytes):
+ units=[]
+ if extension=="xlsx":
+  workbook=load_workbook(io.BytesIO(content),data_only=True,read_only=True)
+  for ws in workbook.worksheets:
+   for row in ws.iter_rows(values_only=True):
+    text=_row_text(row)
+    if len(text)>=10:units.append(SourceUnit(text,section=ws.title))
+ elif extension=="xls":
+  workbook=xlrd.open_workbook(file_contents=content)
+  for ws in workbook.sheets():
+   for index in range(ws.nrows):
+    text=_row_text(ws.row_values(index))
+    if len(text)>=10:units.append(SourceUnit(text,section=ws.name))
+ elif extension=="csv":
+  rows=csv.reader(io.StringIO(content.decode("utf-8-sig",errors="replace")))
+  for row in rows:
+   text=_row_text(row)
+   if len(text)>=10:units.append(SourceUnit(text,section="CSV"))
+ return units
+
+
 def index_tender_document(db:Session,document:BidDocument,storage,user_id:int,request_metadata:dict|None=None):
  if document.duplicate_of_document_id or not document.storage_path:
   raise ValueError("Document content is not available for tender indexing")
@@ -46,7 +77,7 @@ def index_tender_document(db:Session,document:BidDocument,storage,user_id:int,re
 
  provider=RuleBasedRequirementExtractionProvider()
  content=storage.read(document.storage_path)
- units=provider.source_units(ext,content)
+ units=_spreadsheet_units(ext,content) if ext in {"xlsx","xls","csv"} else provider.source_units(ext,content)
  db.execute(delete(TenderKnowledgeChunk).where(TenderKnowledgeChunk.source_document_id==document.id))
  created=0
  for unit in units:
