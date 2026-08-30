@@ -1,0 +1,84 @@
+"use client";
+
+import Link from "next/link";
+import {use,useCallback,useEffect,useState} from "react";
+import {BidWorkspaceHeader} from "@/components/BidWorkspaceHeader";
+import {EmptyState,ErrorState,LoadingState,PageHeader,PriorityBadge,StatusBadge,SummaryCard} from "@/components/design-system";
+import {request} from "@/services/api";
+import type {Bid,DepartmentWorkQueue,ProjectMember} from "@/types";
+
+const emptyQueue:DepartmentWorkQueue={items:[],summary:{total:0,critical:0,high:0,overdue:0,unassigned:0,without_person:0,due_soon:0,red_escalations:0,amber_escalations:0},by_function:[],by_type:[],by_person:[],department_control:[],department_progress:[],filter:{responsible_function:null,responsible_person:null},version:""};
+
+export default function WorkQueuePage({params}:{params:Promise<{id:string}>}){
+ const {id}=use(params);
+ const [bid,setBid]=useState<Bid|null>(null);
+ const [queue,setQueue]=useState<DepartmentWorkQueue>(emptyQueue);
+ const [owner,setOwner]=useState("");
+ const [mine,setMine]=useState(false);
+ const [functionOptions,setFunctionOptions]=useState<string[]>([]);
+ const [members,setMembers]=useState<ProjectMember[]>([]);
+ const [loading,setLoading]=useState(true);
+ const [error,setError]=useState("");
+
+ const load=useCallback(()=>{
+  setLoading(true);setError("");
+  const query=new URLSearchParams();if(owner)query.set("responsible_function",owner);if(mine)query.set("mine","true");const suffix=query.toString()?`?${query.toString()}`:"";
+  Promise.all([
+   request<Bid>(`/bids/${id}`),
+   request<DepartmentWorkQueue>(`/bids/${id}/department-work-queue${suffix}`),
+   request<ProjectMember[]>(`/bids/${id}/members`)
+  ]).then(([b,q,m])=>{setBid(b);setQueue(q);setMembers(m);if(!owner&&!mine)setFunctionOptions(Array.from(new Set(q.by_function.map(x=>x.name))).sort())})
+    .catch(()=>setError("Unable to load the department work queue. Please try again."))
+    .finally(()=>setLoading(false));
+ },[id,owner,mine]);
+ useEffect(load,[load]);
+
+ const assignPerson=async(entity_type:string,entity_id:number,user_id:string)=>{
+  await request(`/bids/${id}/work-items/assign-person`,{method:"POST",body:JSON.stringify({entity_type,entity_id,user_id:user_id?Number(user_id):null})});
+  load();
+ };
+
+ const functions=functionOptions.length?functionOptions:Array.from(new Set(queue.by_function.map(x=>x.name))).sort();
+
+ return <div className="mx-auto max-w-[1500px]">
+  <BidWorkspaceHeader bid={bid} active="Work Queue"/>
+  <PageHeader
+   items={[{label:"Bid Workspace",href:"/bids"},{label:"Work Queue"}]}
+   title="Department Work Queue"
+   description="One prioritized queue for requirements, missing inputs and Pre-Bid Queries that still need departmental action."
+   action={<div className="flex flex-wrap gap-2"><div className="inline-flex overflow-hidden rounded border border-slate-300 bg-white"><button onClick={()=>setMine(false)} className={`px-3 py-2 text-xs font-semibold ${!mine?"bg-[#304354] text-white":"text-slate-600"}`}>All Work</button><button onClick={()=>setMine(true)} className={`px-3 py-2 text-xs font-semibold ${mine?"bg-[#304354] text-white":"text-slate-600"}`}>My Work</button></div><select aria-label="Filter by responsible function" disabled={mine} className="rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-50" value={owner} onChange={e=>setOwner(e.target.value)}><option value="">All functions</option>{functions.map(x=><option key={x}>{x}</option>)}</select></div>}
+  />
+
+  <div className="mb-3 grid grid-cols-2 gap-3 md:grid-cols-8">
+   <SummaryCard label="Open Actions" value={queue.summary.total}/>
+   <SummaryCard label="Critical" value={queue.summary.critical} tone="red"/>
+   <SummaryCard label="High" value={queue.summary.high} tone="amber"/>
+   <SummaryCard label="Overdue" value={queue.summary.overdue} tone="red"/>
+   <SummaryCard label="Unassigned Function" value={queue.summary.unassigned}/>
+   <SummaryCard label="No Named Owner" value={queue.summary.without_person} tone="amber"/>
+   <SummaryCard label="Due in 3 Days" value={queue.summary.due_soon} tone="amber"/>
+   <SummaryCard label="Red Escalations" value={queue.summary.red_escalations} tone="red"/>
+  </div>
+
+  {queue.department_progress.length>0&&<section className="mb-3 overflow-hidden rounded border border-slate-200 bg-white"><div className="border-b bg-slate-50 px-4 py-3"><h2 className="text-sm font-bold text-slate-900">Department Completion</h2><p className="text-xs text-slate-500">Completion across tracked Requirements, Missing Inputs and Pre-Bid Queries.</p></div><div className="grid gap-2 p-3 sm:grid-cols-2 lg:grid-cols-4">{queue.department_progress.map(x=><button key={x.name} onClick={()=>{setMine(false);setOwner(x.name)}} className="rounded border border-slate-200 bg-white p-3 text-left hover:bg-slate-50"><div className="flex items-center justify-between gap-2"><div className="truncate text-xs font-bold text-slate-800">{x.name}</div><div className={x.completion_percent>=90?"text-sm font-bold text-emerald-700":x.completion_percent>=70?"text-sm font-bold text-amber-700":"text-sm font-bold text-red-700"}>{Math.round(x.completion_percent)}%</div></div><div className="mt-2 h-1.5 overflow-hidden rounded bg-slate-100"><div className="h-full bg-slate-700" style={{width:`${Math.max(0,Math.min(100,x.completion_percent))}%`}}/></div><div className="mt-2 flex justify-between text-[10px] text-slate-500"><span>{x.completed} completed</span><span>{x.remaining} remaining</span><span>{x.tracked} tracked</span></div></button>)}</div></section>}{queue.department_control.length>0&&<section className="mb-3 overflow-hidden rounded border border-slate-200 bg-white"><div className="border-b bg-slate-50 px-4 py-3"><h2 className="text-sm font-bold text-slate-900">Department Control</h2><p className="text-xs text-slate-500">Escalation and due-date pressure by responsible function.</p></div><div className="grid gap-2 p-3 sm:grid-cols-2 lg:grid-cols-4">{queue.department_control.map(x=><button key={x.name} onClick={()=>{setMine(false);setOwner(x.name)}} className="rounded border border-slate-200 bg-white p-3 text-left hover:bg-slate-50"><div className="flex items-center justify-between gap-2"><div className="truncate text-xs font-bold text-slate-800">{x.name}</div>{x.red_escalations>0?<span className="rounded bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-700">{x.red_escalations} RED</span>:x.amber_escalations>0?<span className="rounded bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">{x.amber_escalations} AMBER</span>:<span className="rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">CONTROLLED</span>}</div><div className="mt-2 grid grid-cols-4 gap-2 text-center"><div><div className="text-base font-bold text-slate-900">{x.open_actions}</div><div className="text-[9px] text-slate-500">Open</div></div><div><div className="text-base font-bold text-red-700">{x.overdue}</div><div className="text-[9px] text-slate-500">Overdue</div></div><div><div className="text-base font-bold text-amber-700">{x.due_soon}</div><div className="text-[9px] text-slate-500">Due Soon</div></div><div><div className="text-base font-bold text-slate-900">{x.without_person}</div><div className="text-[9px] text-slate-500">No Person</div></div></div></button>)}</div></section>}{queue.by_function.length>0&&<section className="mb-3 overflow-hidden rounded border border-slate-200 bg-white">
+   <div className="border-b bg-slate-50 px-4 py-3"><h2 className="text-sm font-bold text-slate-900">Department Load</h2><p className="text-xs text-slate-500">Open actions by responsible function.</p></div>
+   <div className="flex gap-2 overflow-x-auto p-3">{queue.by_function.map(x=><button key={x.name} onClick={()=>setOwner(owner===x.name?"":x.name)} className={`min-w-[135px] rounded border p-3 text-left ${owner===x.name?"border-[#e2b635] bg-amber-50":"border-slate-200 bg-white"}`}><div className="truncate text-[10px] font-semibold uppercase tracking-wide text-slate-500">{x.name}</div><div className="mt-1 text-lg font-bold text-slate-900">{x.count}</div><div className="text-[11px] text-slate-500">open action{x.count===1?"":"s"}</div></button>)}</div>
+  </section>}
+
+  {error?<ErrorState message={error}/>:loading?<LoadingState label="Loading department work queue…"/>:queue.items.length===0?<EmptyState title="No open departmental actions" description={mine?"No open actions are currently assigned to you.":owner?"This function currently has no outstanding bid actions.":"All currently tracked departmental actions are closed."}/>:<>
+   <div className="space-y-2 md:hidden">
+    {queue.items.map((x,index)=><article key={`${x.entity_type}-${x.entity_id}`} className="rounded border border-slate-200 bg-white p-3 shadow-sm">
+     <div className="flex items-start gap-3"><div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-700">{index+1}</div><div className="min-w-0 flex-1"><div className="text-[10px] font-semibold uppercase tracking-wide text-blue-700">{x.entity_type}</div><h3 className="mt-0.5 text-sm font-semibold text-slate-900">{x.title}</h3></div><PriorityBadge value={x.priority}/></div>
+     <div className="mt-3 flex flex-wrap gap-2"><StatusBadge tone={x.is_overdue?"red":x.status==="Resolved"||x.status==="Closed"?"green":"grey"}>{x.is_overdue?`Overdue · ${x.status}`:x.status}</StatusBadge>{x.escalation_level!=="None"&&<span className={x.escalation_level==="Red"?"rounded bg-red-50 px-2 py-1 text-[10px] font-bold text-red-700":"rounded bg-amber-50 px-2 py-1 text-[10px] font-bold text-amber-700"}>{x.escalation_level} escalation</span>}{x.is_due_soon&&!x.is_overdue&&<span className="rounded bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700">Due in {x.days_to_due} day{x.days_to_due===1?"":"s"}</span>}</div>
+     <div className="mt-3 grid grid-cols-2 gap-3 text-xs"><div><span className="text-slate-500">Function</span><div className="font-medium text-slate-800">{x.responsible_function||"Unassigned"}</div></div><div><span className="text-slate-500">Responsible Person</span><select aria-label={`Assign ${x.title}`} className="mt-1 w-full rounded border border-slate-300 bg-white p-2 text-xs" value={members.find(m=>m.name===x.responsible_person)?.user_id||""} onChange={e=>assignPerson(x.entity_type,x.entity_id,e.target.value)}><option value="">Needs assignment</option>{members.map(m=><option key={m.user_id} value={m.user_id}>{m.name} · {m.project_role}</option>)}</select></div><div><span className="text-slate-500">Due</span><div className="font-medium text-slate-800">{x.due_date||"—"}</div></div></div>
+     <div className="mt-3 rounded bg-slate-50 p-2 text-xs leading-5 text-slate-600"><span className="font-semibold text-slate-700">Next:</span> {x.action}. {x.reason}{x.escalation_reason&&<div className={x.escalation_level==="Red"?"mt-1 font-semibold text-red-700":"mt-1 font-semibold text-amber-700"}>{x.escalation_reason}</div>}</div>
+     <div className="mt-3 border-t pt-3"><Link href={x.route} className="inline-flex rounded bg-[#e2b635] px-3 py-2 text-xs font-semibold text-[#243241]">Open Register</Link></div>
+    </article>)}
+   </div>
+
+   <section className="hidden overflow-hidden border border-slate-200 bg-white md:block">
+    <div className="overflow-x-auto"><table className="w-full min-w-[1100px] text-left text-sm"><thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500"><tr>{["#","Work Item","Type","Priority","Status","Function","Responsible Person","Due","Next Action","Source",""].map(x=><th key={x} className="px-3 py-3">{x}</th>)}</tr></thead><tbody>{queue.items.map((x,index)=><tr key={`${x.entity_type}-${x.entity_id}`} className="border-t align-top"><td className="px-3 py-3 text-xs font-bold text-slate-500">{index+1}</td><td className="max-w-xs px-3 py-3"><div className="font-semibold text-slate-900">{x.title}</div><div className="mt-1 line-clamp-2 text-xs text-slate-500">{x.reason}</div></td><td className="px-3 py-3 text-xs">{x.entity_type}</td><td className="px-3 py-3"><PriorityBadge value={x.priority}/></td><td className="px-3 py-3"><StatusBadge tone={x.is_overdue?"red":"grey"}>{x.is_overdue?`Overdue · ${x.status}`:x.status}</StatusBadge>{x.escalation_level!=="None"&&<div className={x.escalation_level==="Red"?"mt-1 text-[10px] font-bold text-red-700":"mt-1 text-[10px] font-bold text-amber-700"}>{x.escalation_level} escalation</div>}</td><td className="px-3 py-3 text-xs">{x.responsible_function||"Unassigned"}</td><td className="px-3 py-3"><select aria-label={`Assign ${x.title}`} className={"max-w-[190px] rounded border bg-white p-1.5 text-xs "+(x.responsible_person?"border-slate-300 text-slate-700":"border-amber-300 text-amber-700")} value={members.find(m=>m.name===x.responsible_person)?.user_id||""} onChange={e=>assignPerson(x.entity_type,x.entity_id,e.target.value)}><option value="">Needs assignment</option>{members.map(m=><option key={m.user_id} value={m.user_id}>{m.name} · {m.project_role}</option>)}</select></td><td className="whitespace-nowrap px-3 py-3 text-xs">{x.due_date||"—"}</td><td className="max-w-xs px-3 py-3 text-xs text-slate-600">{x.action}</td><td className="max-w-40 px-3 py-3 text-xs text-slate-500"><div className="truncate">{x.source_document||"—"}</div>{(x.source_page||x.source_clause)&&<div>{x.source_page&&`p.${x.source_page}`}{x.source_page&&x.source_clause&&" · "}{x.source_clause&&`Cl.${x.source_clause}`}</div>}</td><td className="whitespace-nowrap px-3 py-3"><Link href={x.route} className="font-semibold text-blue-700">Open</Link></td></tr>)}</tbody></table></div>
+   </section>
+  </>}
+ </div>;
+}

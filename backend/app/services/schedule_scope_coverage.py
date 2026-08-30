@@ -1,0 +1,836 @@
+import re
+from collections import defaultdict
+from datetime import datetime,timezone
+from decimal import Decimal
+from difflib import SequenceMatcher
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.models import AuditEvent,BidProject,BidRequirement,ScheduleScopeItem
+from app.services.project_type_activity_library import project_type_activity_library
+from app.services.productivity_benchmarks import benchmark_summary,compare_implied_rate
+from app.services.p6_xer import parse_xer
+
+
+SCOPE_CATEGORIES={
+    "Technical Requirement","Planning / Scheduling Requirement","Design Requirement",
+    "Procurement Requirement","Construction Requirement","Testing & Commissioning Requirement",
+    "Interface Requirement","Quality Requirement","Safety Requirement",
+}
+ACTION_RE=re.compile(
+    r"\b(?:shall|must|required to|is to)\s+(?:be\s+)?"
+    r"(?:design|prepare|procure|manufacture|supply|deliver|construct|install|erect|lay|test|commission|integrate|inspect|approve|complete|execute|provide)\s+(.+)",
+    re.I,
+)
+STOP={
+    "the","and","for","with","shall","must","required","contractor","bidder","tenderer","employer",
+    "work","works","project","system","systems","including","all","any","this","that","from","into",
+}
+LIFECYCLE_STAGES=(
+    ("Design",("design","engineering","drawings","calculation")),
+    ("Approval",("approval","approve","review")),
+    ("Procurement / Supply",("procure","procurement","supply","manufacture","fabricate","deliver")),
+    ("Construction / Installation",("construct","construction","install","installation","erect","erection","lay","laying")),
+    ("Testing",("test","testing","inspection")),
+    ("Commissioning",("commission","commissioning","energize","energisation","energization")),
+)
+
+
+def _lifecycle_stages(text:str):
+    lower=str(text or "").lower()
+    return [stage for stage,signals in LIFECYCLE_STAGES if any(signal in lower for signal in signals)]
+
+
+
+
+def _number(value,default=0.0):
+    try:return float(value)
+    except (TypeError,ValueError):return default
+
+
+def _terms(text:str)->set[str]:
+    return {x for x in re.findall(r"[a-z0-9]+",str(text or "").lower()) if len(x)>2 and x not in STOP}
+
+
+def _activity_name(requirement:BidRequirement)->str:
+    text=re.sub(r"\s+"," ",requirement.requirement_text).strip()
+    match=ACTION_RE.search(text)
+    candidate=match.group(1) if match else requirement.requirement_title
+    candidate=re.split(r"[.;]",candidate,1)[0].strip(" :-")
+    if len(candidate)>180:candidate=candidate[:177]+"..."
+    return candidate or requirement.requirement_title[:180]
+
+
+def _keywords(name:str,text:str)->list[str]:
+    words=_terms(f"{name} {text}")
+    return sorted(words)[:30]
+
+
+def _scope_item_dict(item:ScheduleScopeItem):
+    return {
+        "id":item.id,
+        "bid_project_id":item.bid_project_id,
+        "parent_id":item.parent_id,
+        "source_requirement_id":item.source_requirement_id,
+        "source_document_id":item.source_document_id,
+        "activity_name":item.activity_name,
+        "activity_level":item.activity_level,
+        "source_type":item.source_type,
+        "source_reference":item.source_reference,
+        "source_excerpt":item.source_excerpt,
+        "mandatory":item.mandatory,
+        "responsible_function":item.responsible_function,
+        "responsible_person":item.responsible_person,
+        "match_keywords":item.match_keywords or [],
+        "coverage_status":item.coverage_status,
+        "matched_task_code":item.matched_task_code,
+        "matched_task_name":item.matched_task_name,
+        "match_confidence":float(item.match_confidence) if item.match_confidence is not None else None,
+        "disposition_status":item.disposition_status,
+        "disposition_reason":item.disposition_reason,
+        "disposition_by":item.disposition_by,
+        "disposition_at":item.disposition_at,
+        "blocking":_is_blocking(item),
+        "why_expected":item.source_excerpt or (
+            f"Expected from {item.source_type}" + (f" · {item.source_reference}" if item.source_reference else "")
+        ),
+        "why_flagged":(
+            "No sufficiently similar schedule activity was found."
+            if item.coverage_status=="Missing" else
+            "A possible schedule activity was found, but the match is not strong enough to confirm automatically."
+            if item.coverage_status=="Possible Match" else
+            "A sufficiently strong schedule match was found."
+            if item.coverage_status=="Covered" else
+            "Coverage has not yet been evaluated."
+        ),
+    }
+
+
+def _is_blocking(item:ScheduleScopeItem)->bool:
+    if not item.mandatory:return False
+    if item.coverage_status=="Covered":return False
+    if item.coverage_status=="Possible Match":
+        return item.disposition_status!="Confirmed Covered"
+    if item.coverage_status=="Missing":
+        return item.disposition_status in {"Unexplained","To Be Added"}
+    return True
+
+
+def sync_scope_from_project_type(db:Session,bid_id:int,user_id:int,scope_text:str=""):
+    project=db.get(BidProject,bid_id)
+    if not project:return {"created":0,"updated":0}
+    templates=project_type_activity_library(project.project_type,scope_text)
+    desired_names={x.activity for x in templates}
+    for template in templates:desired_names.update(template.subactivities)
+    existing=db.scalars(select(ScheduleScopeItem).where(
+        ScheduleScopeItem.bid_project_id==bid_id,
+        ScheduleScopeItem.source_type=="Project-Type Knowledge",
+    )).all()
+    created=updated=pruned=0
+    stale=[x for x in existing if x.activity_name not in desired_names]
+    for item in sorted(stale,key=lambda x:0 if x.parent_id is not None else 1):
+        db.delete(item);pruned+=1
+    if stale:db.flush()
+    existing=[x for x in existing if x.activity_name in desired_names]
+    by_ref={(x.source_reference or "",x.activity_name.lower()):x for x in existing}
+
+    for template in templates:
+        key=(project.project_type,template.activity.lower())
+        parent=by_ref.get(key)
+        if not parent:
+            parent=ScheduleScopeItem(
+                bid_project_id=bid_id,
+                activity_name=template.activity,
+                activity_level="Activity Family",
+                source_type="Project-Type Knowledge",
+                source_reference=project.project_type,
+                source_excerpt=f"Suggested from project-type library with confidence {template.confidence:.2f}.",
+                mandatory=False,
+                match_keywords=sorted(set(template.keywords)|_terms(template.activity)),
+                created_by=user_id,
+            )
+            db.add(parent);db.flush();created+=1
+            by_ref[key]=parent
+        else:
+            parent.match_keywords=sorted(set(template.keywords)|_terms(template.activity))
+            updated+=1
+        for subactivity in template.subactivities:
+            child_key=(parent.id,subactivity.lower())
+            child=db.scalar(select(ScheduleScopeItem).where(
+                ScheduleScopeItem.bid_project_id==bid_id,
+                ScheduleScopeItem.parent_id==parent.id,
+                ScheduleScopeItem.source_type=="Project-Type Knowledge",
+                ScheduleScopeItem.activity_name==subactivity,
+            ))
+            if child:continue
+            db.add(ScheduleScopeItem(
+                bid_project_id=bid_id,
+                parent_id=parent.id,
+                activity_name=subactivity,
+                activity_level="Sub-Activity",
+                source_type="Project-Type Knowledge",
+                source_reference=project.project_type,
+                source_excerpt=f"Suggested child activity under {template.activity}.",
+                mandatory=False,
+                match_keywords=_keywords(subactivity," ".join(template.keywords)),
+                created_by=user_id,
+            ));created+=1
+    db.flush()
+    return {"created":created,"updated":updated,"pruned":pruned}
+
+
+def sync_scope_from_requirements(db:Session,bid_id:int,user_id:int,request_metadata:dict|None=None):
+    requirements=db.scalars(select(BidRequirement).where(
+        BidRequirement.bid_project_id==bid_id,
+        BidRequirement.requirement_category.in_(SCOPE_CATEGORIES),
+        BidRequirement.requirement_status.notin_(["Closed","Not Applicable"]),
+    )).all()
+    scope_text=" ".join(f"{x.requirement_title} {x.requirement_text}" for x in requirements)
+    project_sync=sync_scope_from_project_type(db,bid_id,user_id,scope_text)
+    existing=db.scalars(select(ScheduleScopeItem).where(
+        ScheduleScopeItem.bid_project_id==bid_id,
+        ScheduleScopeItem.source_requirement_id.is_not(None),
+    )).all()
+    by_requirement={x.source_requirement_id:x for x in existing if x.parent_id is None}
+    created=updated=0
+    for req in requirements:
+        name=_activity_name(req)
+        words=_keywords(name,req.requirement_text)
+        if len(words)<2:continue
+        item=by_requirement.get(req.id)
+        if item:
+            item.activity_name=name
+            item.source_document_id=req.source_document_id
+            item.source_reference=req.source_clause or req.source_section
+            item.source_excerpt=req.requirement_text[:2000]
+            item.mandatory=req.is_mandatory
+            item.match_keywords=words
+            updated+=1
+        else:
+            item=ScheduleScopeItem(
+                bid_project_id=bid_id,
+                source_requirement_id=req.id,
+                source_document_id=req.source_document_id,
+                activity_name=name,
+                activity_level="Activity",
+                source_type="Contract / Technical Requirement",
+                source_reference=req.source_clause or req.source_section,
+                source_excerpt=req.requirement_text[:2000],
+                mandatory=req.is_mandatory,
+                match_keywords=words,
+                created_by=user_id,
+            )
+            db.add(item);db.flush();created+=1
+        stages=_lifecycle_stages(req.requirement_text)
+        if len(stages)>1:
+            for stage in stages:
+                child_name=f"{stage}: {name}"
+                child=db.scalar(select(ScheduleScopeItem).where(
+                    ScheduleScopeItem.bid_project_id==bid_id,
+                    ScheduleScopeItem.parent_id==item.id,
+                    ScheduleScopeItem.source_requirement_id==req.id,
+                    ScheduleScopeItem.activity_name==child_name,
+                ))
+                if child:
+                    child.source_document_id=req.source_document_id
+                    child.source_reference=req.source_clause or req.source_section
+                    child.source_excerpt=req.requirement_text[:2000]
+                    child.mandatory=req.is_mandatory
+                    child.match_keywords=_keywords(child_name,req.requirement_text)
+                    updated+=1
+                    continue
+                db.add(ScheduleScopeItem(
+                    bid_project_id=bid_id,
+                    parent_id=item.id,
+                    source_requirement_id=req.id,
+                    source_document_id=req.source_document_id,
+                    activity_name=child_name[:300],
+                    activity_level="Sub-Activity",
+                    source_type="Contract / Technical Requirement",
+                    source_reference=req.source_clause or req.source_section,
+                    source_excerpt=req.requirement_text[:2000],
+                    mandatory=req.is_mandatory,
+                    match_keywords=_keywords(child_name,req.requirement_text),
+                    created_by=user_id,
+                ));created+=1
+    db.add(AuditEvent(
+        user_id=user_id,bid_project_id=bid_id,event_type="schedule.scope_catalog_synced",
+        entity_type="BidProject",entity_id=str(bid_id),request_metadata=request_metadata or {},
+        details={"created":created,"updated":updated,"requirements_considered":len(requirements),"project_type_created":project_sync["created"],"project_type_updated":project_sync["updated"],"project_type_pruned":project_sync["pruned"]},
+    ))
+    db.commit()
+    return {"created":created,"updated":updated,"requirements_considered":len(requirements),"project_type":project_sync}
+
+
+def _scope_similarity(a:dict,b:dict)->float:
+    ta=_terms(a.get("activity_name") or "")
+    tb=_terms(b.get("activity_name") or "")
+    if not ta or not tb:return 0.0
+    jaccard=len(ta&tb)/max(1,len(ta|tb))
+    seq=SequenceMatcher(None,(a.get("activity_name") or "").lower(),(b.get("activity_name") or "").lower()).ratio()
+    return max(jaccard,seq)
+
+
+def _consolidate_rows(rows:list[dict]):
+    authority={"BOQ":0,"Contract / Technical Requirement":1,"Manual":2,"Project-Type Knowledge":3}
+    ordered=sorted(rows,key=lambda x:(
+        authority.get(x.get("source_type"),2),
+        0 if x.get("mandatory") else 1,
+        x.get("activity_level") or "",
+        x.get("activity_name") or "",
+    ))
+    groups=[]
+    assigned=set()
+    for row in ordered:
+        if row["id"] in assigned:continue
+        cluster=[row];assigned.add(row["id"])
+        for other in ordered:
+            if other["id"] in assigned:continue
+            same_level=(
+                row.get("activity_level")==other.get("activity_level")
+                or {row.get("activity_level"),other.get("activity_level")}<= {"Activity","BOQ Scope"}
+                or {row.get("activity_level"),other.get("activity_level")}<= {"Sub-Activity","BOQ Sub-Activity"}
+            )
+            distinct_boq_items=(
+                row.get("source_type")=="BOQ"
+                and other.get("source_type")=="BOQ"
+                and (row.get("source_reference") or "")!=(other.get("source_reference") or "")
+            )
+            if same_level and not distinct_boq_items and _scope_similarity(row,other)>=.78:
+                cluster.append(other);assigned.add(other["id"])
+        canonical=min(cluster,key=lambda x:(
+            authority.get(x.get("source_type"),2),
+            0 if x.get("mandatory") else 1,
+            x["id"],
+        ))
+        evidence=[{
+            "item_id":x["id"],
+            "source_type":x.get("source_type"),
+            "source_reference":x.get("source_reference"),
+            "why_expected":x.get("why_expected"),
+            "mandatory":x.get("mandatory"),
+        } for x in cluster]
+        authority_points={"BOQ":45,"Contract / Technical Requirement":40,"Manual":25,"Project-Type Knowledge":10}
+        authority_score=min(100,sum(
+            authority_points.get(x.get("source_type"),15) * (1.0 if x.get("mandatory") else .6)
+            for x in cluster
+        ))
+        evidence_strength=(
+            "Contractual / BOQ Strong"
+            if authority_score>=70 else
+            "Strong Bid Scope Evidence"
+            if authority_score>=50 else
+            "Moderate Evidence"
+            if authority_score>=30 else
+            "Knowledge Suggestion"
+        )
+        coverage_values={x.get("coverage_status") for x in cluster}
+        group_coverage=(
+            "Covered" if "Covered" in coverage_values else
+            "Possible Match" if "Possible Match" in coverage_values else
+            "Missing" if "Missing" in coverage_values else
+            "Not Checked"
+        )
+        group_mandatory=any(bool(x.get("mandatory")) for x in cluster)
+        cleared_dispositions={"Confirmed Covered","Covered Elsewhere","Not Applicable","Explained-Excluded"}
+        if not group_mandatory or group_coverage=="Covered":
+            group_blocking=False
+        elif group_coverage=="Possible Match":
+            group_blocking=canonical.get("disposition_status")!="Confirmed Covered"
+        elif group_coverage=="Missing":
+            group_blocking=canonical.get("disposition_status") not in cleared_dispositions
+        else:
+            group_blocking=True
+        flag_priority=(
+            "Critical" if group_blocking and authority_score>=80 else
+            "High" if group_blocking and authority_score>=50 else
+            "Medium" if group_blocking else
+            "Low"
+        )
+        best_match=max(cluster,key=lambda x:(
+            1 if x.get("coverage_status")=="Covered" else 0,
+            1 if x.get("coverage_status")=="Possible Match" else 0,
+            float(x.get("match_confidence") or 0),
+        ))
+        group={
+            **canonical,
+            "matched_task_code":best_match.get("matched_task_code"),
+            "matched_task_name":best_match.get("matched_task_name"),
+            "match_confidence":best_match.get("match_confidence"),
+            "candidate_matches":best_match.get("candidate_matches") or canonical.get("candidate_matches") or [],
+            "why_flagged":(
+                "A consolidated source record has a sufficiently strong schedule match."
+                if group_coverage=="Covered" else
+                "The consolidated evidence has only a possible schedule match and still needs planner confirmation."
+                if group_coverage=="Possible Match" else
+                "No supporting source record has a sufficiently strong schedule match."
+                if group_coverage=="Missing" else
+                "Coverage has not yet been evaluated."
+            ),
+            "group_id":f"scope-{canonical['id']}",
+            "canonical_item_id":canonical["id"],
+            "evidence_count":len(cluster),
+            "evidence":evidence,
+            "mandatory":group_mandatory,
+            "authority_score":round(authority_score,1),
+            "evidence_strength":evidence_strength,
+            "flag_priority":flag_priority,
+            "group_blocking":group_blocking,
+            "group_coverage_status":group_coverage,
+            "member_item_ids":[x["id"] for x in cluster],
+        }
+        groups.append(group)
+    return groups
+
+
+def schedule_scope_catalog(db:Session,bid_id:int):
+    items=db.scalars(select(ScheduleScopeItem).where(
+        ScheduleScopeItem.bid_project_id==bid_id
+    ).order_by(ScheduleScopeItem.id)).all()
+    by_id={x.id:x for x in items}
+    rows=[]
+    for item in items:
+        row=_scope_item_dict(item)
+        parent=by_id.get(item.parent_id) if item.parent_id else None
+        row["parent_activity_name"]=parent.activity_name if parent else None
+        row["catalog_authority"]=(
+            "Contractual / BOQ"
+            if item.source_type in {"BOQ","Contract / Technical Requirement"} and item.mandatory else
+            "Bid Scope Evidence"
+            if item.source_type in {"BOQ","Contract / Technical Requirement","Manual"} else
+            "Knowledge Suggestion"
+        )
+        rows.append(row)
+    groups=_consolidate_rows(rows)
+    authority_order={"Contractual / BOQ":0,"Bid Scope Evidence":1,"Knowledge Suggestion":2}
+    level_order={"Activity Family":0,"Activity":1,"BOQ Scope":1,"Sub-Activity":2,"BOQ Sub-Activity":2}
+    rows.sort(key=lambda x:(
+        authority_order.get(x["catalog_authority"],2),
+        level_order.get(x["activity_level"],3),
+        x["parent_activity_name"] or x["activity_name"],
+        x["activity_name"],
+    ))
+    return {
+        "items":rows,
+        "groups":groups,
+        "summary":{
+            "total":len(rows),
+            "logical_expected":len(groups),
+            "consolidated_duplicates":len(rows)-len(groups),
+            "mandatory":sum(1 for x in rows if x["mandatory"]),
+            "activity_families":sum(1 for x in rows if x["activity_level"]=="Activity Family"),
+            "activities":sum(1 for x in rows if x["activity_level"] in {"Activity","BOQ Scope"}),
+            "subactivities":sum(1 for x in rows if x["activity_level"] in {"Sub-Activity","BOQ Sub-Activity"}),
+            "contract_items":sum(1 for x in rows if x["source_type"]=="Contract / Technical Requirement"),
+            "boq_items":sum(1 for x in rows if x["source_type"]=="BOQ"),
+            "project_type_items":sum(1 for x in rows if x["source_type"]=="Project-Type Knowledge"),
+            "unmapped_schedule_activities":0,
+            "manual_items":sum(1 for x in rows if x["source_type"]=="Manual"),
+        },
+        "version":"phase6-expected-activity-universe-v2",
+        "note":"This catalog is built independently of the uploaded schedule. Contract/BOQ evidence is stronger than project-type knowledge suggestions.",
+    }
+
+
+def add_scope_item(
+    db:Session,bid_id:int,payload:dict,user_id:int,request_metadata:dict|None=None
+):
+    name=str(payload.get("activity_name") or "").strip()
+    if not name:raise ValueError("activity_name is required")
+    source_type=str(payload.get("source_type") or "Manual").strip()
+    item=ScheduleScopeItem(
+        bid_project_id=bid_id,
+        parent_id=payload.get("parent_id"),
+        source_document_id=payload.get("source_document_id"),
+        activity_name=name,
+        activity_level=str(payload.get("activity_level") or "Activity"),
+        source_type=source_type,
+        source_reference=str(payload.get("source_reference") or "").strip() or None,
+        source_excerpt=str(payload.get("source_excerpt") or "").strip() or None,
+        mandatory=bool(payload.get("mandatory",True)),
+        match_keywords=_keywords(name,str(payload.get("source_excerpt") or "")),
+        created_by=user_id,
+    )
+    db.add(item);db.flush()
+    db.add(AuditEvent(
+        user_id=user_id,bid_project_id=bid_id,event_type="schedule.scope_item_added",
+        entity_type="ScheduleScopeItem",entity_id=str(item.id),request_metadata=request_metadata or {},
+        details={"source_type":source_type,"activity_name":name},
+    ))
+    db.commit();db.refresh(item)
+    return _scope_item_dict(item)
+
+
+def _wbs_paths(rows:list[dict]):
+    by_id={x.get("wbs_id"):x for x in rows if x.get("wbs_id")}
+    cache={}
+    def path(wbs_id):
+        if not wbs_id:return ""
+        if wbs_id in cache:return cache[wbs_id]
+        parts=[];seen=set();current=by_id.get(wbs_id)
+        while current and current.get("wbs_id") not in seen:
+            seen.add(current.get("wbs_id"))
+            label=current.get("wbs_name") or current.get("wbs_short_name") or ""
+            if label:parts.append(str(label))
+            current=by_id.get(current.get("parent_wbs_id"))
+        result=" > ".join(reversed(parts))
+        cache[wbs_id]=result
+        return result
+    return path
+
+
+def _activity_search_index(tables:dict[str,list[dict]]):
+    tasks=tables.get("TASK",[])
+    wbs_path=_wbs_paths(tables.get("PROJWBS",[]))
+    code_rows={x.get("actv_code_id"):x for x in tables.get("ACTVCODE",[]) if x.get("actv_code_id")}
+    type_rows={x.get("actv_code_type_id"):x for x in tables.get("ACTVTYPE",[]) if x.get("actv_code_type_id")}
+    task_codes=defaultdict(list)
+    for row in tables.get("TASKACTV",[]):
+        task_id=row.get("task_id");code=code_rows.get(row.get("actv_code_id")) or {}
+        ctype=type_rows.get(code.get("actv_code_type_id")) or {}
+        code_label=" ".join(str(x) for x in (
+            ctype.get("actv_code_type") or ctype.get("actv_code_type_name") or "",
+            code.get("short_name") or code.get("actv_code_name") or code.get("actv_code") or "",
+        ) if x)
+        if task_id and code_label:task_codes[task_id].append(code_label)
+
+    index=[]
+    for task in tasks:
+        wbs=wbs_path(task.get("wbs_id"))
+        codes=task_codes.get(task.get("task_id"),[])
+        task_name=str(task.get("task_name") or "")
+        task_code=str(task.get("task_code") or "")
+        context=" ".join([task_code,task_name,wbs,*codes])
+        index.append({
+            "task":task,
+            "task_name":task_name,
+            "task_code":task_code,
+            "wbs_path":wbs,
+            "activity_codes":codes,
+            "context":context,
+            "terms":_terms(context),
+        })
+    return index
+
+
+def _match(item:ScheduleScopeItem,index:list[dict]):
+    target=_terms(" ".join(item.match_keywords or [])+" "+item.activity_name)
+    if not target:return None,0.0,[]
+    scored=[]
+    for entry in index:
+        words=entry["terms"]
+        if not words:continue
+        matched=sorted(target&words)
+        overlap=len(matched)/max(1,len(target))
+        task_name=entry["task_name"].lower()
+        name_ratio=SequenceMatcher(None,item.activity_name.lower(),task_name).ratio()
+        contains=1.0 if item.activity_name.lower() in task_name and task_name else 0.0
+        context_bonus=min(.12,len(matched)*.02) if matched else 0.0
+        score=min(1.0,max(contains,.62*overlap+.28*name_ratio+context_bonus))
+        scored.append({
+            "entry":entry,
+            "score":round(score,3),
+            "matched_terms":matched,
+        })
+    scored.sort(key=lambda x:(-x["score"],x["entry"]["task_code"]))
+    best=scored[0] if scored else None
+    candidates=[{
+        "task_code":x["entry"]["task_code"] or None,
+        "task_name":x["entry"]["task_name"] or None,
+        "wbs_path":x["entry"]["wbs_path"] or None,
+        "activity_codes":x["entry"]["activity_codes"],
+        "score":x["score"],
+        "matched_terms":x["matched_terms"],
+    } for x in scored[:3] if x["score"]>=.25]
+    return (best["entry"]["task"] if best else None),(best["score"] if best else 0.0),candidates
+
+
+def _boq_quantity_evidence(group:dict):
+    result=[]
+    for evidence in group.get("evidence",[]):
+        if evidence.get("source_type")!="BOQ":continue
+        text=str(evidence.get("why_expected") or "")
+        match=re.search(r"\|\s*Qty:\s*([0-9,]+(?:\.\d+)?)\s*([^|]*)",text,re.I)
+        if not match:continue
+        quantity=_number(match.group(1).replace(",",""))
+        if quantity is None:continue
+        unit=(match.group(2) or "").strip() or None
+        result.append({
+            "source_reference":evidence.get("source_reference"),
+            "activity_name":group.get("activity_name"),
+            "quantity":quantity,
+            "unit":unit,
+        })
+    return result
+
+
+def _schedule_precision_recommendations(db:Session,bid_id:int,groups:list[dict],tasks:list[dict]):
+    task_by_code={str(x.get("task_code") or ""):x for x in tasks if x.get("task_code")}
+    group_by_member={}
+    for group in groups:
+        for item_id in group.get("member_item_ids",[]):
+            group_by_member[item_id]=group
+
+    by_task=defaultdict(list)
+    for group in groups:
+        code=str(group.get("matched_task_code") or "")
+        if code and group.get("group_coverage_status") in {"Covered","Possible Match"}:
+            by_task[code].append(group)
+
+    recommendations=[]
+    for code,matched_groups in by_task.items():
+        task=task_by_code.get(code) or {}
+        expected_names=sorted({x.get("activity_name") for x in matched_groups if x.get("activity_name")})
+        sub_names=sorted({x.get("activity_name") for x in matched_groups if x.get("activity_level") in {"Sub-Activity","BOQ Sub-Activity"}})
+        duration=max(
+            _number(task.get("target_drtn_hr_cnt")),
+            _number(task.get("remain_drtn_hr_cnt")),
+        )
+        boq_evidence=[]
+        for group in matched_groups:
+            boq_evidence.extend(_boq_quantity_evidence(group))
+        duration_days=(duration/8.0) if duration>0 else None
+        productivity_indicators=[]
+        if duration_days:
+            for evidence in boq_evidence:
+                implied_rate=round(evidence["quantity"]/duration_days,4)
+                project=db.get(BidProject,bid_id)
+                benchmark=benchmark_summary(
+                    db,
+                    evidence.get("activity_name") or task.get("task_name") or "",
+                    evidence.get("unit") or "unit",
+                    project.project_type if project else None,
+                    None,
+                )
+                comparison=compare_implied_rate(implied_rate,benchmark)
+                productivity_indicators.append({
+                    **evidence,
+                    "duration_working_days":round(duration_days,2),
+                    "implied_rate_per_working_day":implied_rate,
+                    "benchmark":benchmark,
+                    "benchmark_comparison":comparison,
+                    "interpretation":(
+                        "Calculated from BOQ quantity and scheduled duration. "
+                        + ("Compared with confirmed company observations." if benchmark.get("available") else "No company benchmark exists yet, so no judgement is applied.")
+                    ),
+                })
+
+        reasons=[];score=0
+        if len(expected_names)>=3:
+            reasons.append(f"One schedule activity is matching {len(expected_names)} logical scope items.")
+            score+=20+min(20,(len(expected_names)-3)*5)
+        if len(sub_names)>=2:
+            reasons.append(f"{len(sub_names)} expected sub-activities are represented by the same Primavera activity.")
+            score+=20
+        if duration>160 and len(expected_names)>=2:
+            reasons.append(f"Activity duration is {duration:.0f} hours while covering multiple scope components.")
+            score+=15
+        if duration>160 and boq_evidence:
+            reasons.append("A quantity-bearing BOQ scope item is represented by one long-duration schedule activity.")
+            score+=15
+        if len(boq_evidence)>=2:
+            reasons.append(f"{len(boq_evidence)} BOQ quantity items map to the same schedule activity.")
+            score+=15
+
+        missing_children=[]
+        parent_member_ids={item_id for g in matched_groups for item_id in g.get("member_item_ids",[])}
+        for group in groups:
+            if group.get("parent_id") in parent_member_ids and group.get("group_coverage_status")!="Covered":
+                missing_children.append(group)
+        if missing_children:
+            names=sorted({x.get("activity_name") for x in missing_children if x.get("activity_name")})
+            reasons.append(f"{len(names)} expected child activity/sub-activity item(s) are not individually covered.")
+            score+=25
+        else:
+            names=[]
+
+        if score<20:continue
+        recommendations.append({
+            "task_code":code,
+            "task_name":task.get("task_name"),
+            "duration_hours":duration,
+            "expected_components":expected_names,
+            "uncovered_child_components":names,
+            "boq_productivity_indicators":productivity_indicators,
+            "precision_score":min(100,score),
+            "priority":"High" if score>=55 else "Medium" if score>=35 else "Low",
+            "reasons":reasons,
+            "recommendation":(
+                "Review whether this activity should be split into expected controllable sub-activities or measurable work fronts. "
+                "For quantity-bearing BOQ scope, use the implied rate as a planning indicator and validate it against approved productivity assumptions before changing duration."
+            ),
+            "guardrail":"Do not split automatically. Rebuild logic and recalculate the programme in Primavera before accepting any refinement.",
+        })
+    recommendations.sort(key=lambda x:(-x["precision_score"],x["task_code"]))
+    return {
+        "candidates":recommendations,
+        "candidate_count":len(recommendations),
+        "high_priority":sum(1 for x in recommendations if x["priority"]=="High"),
+        "medium_priority":sum(1 for x in recommendations if x["priority"]=="Medium"),
+        "methodology":"phase6-scope-driven-schedule-precision-v3",
+        "note":"These recommendations use expected contract/BOQ/project scope to identify activities that may be too aggregated for precise control.",
+    }
+
+
+def evaluate_scope_coverage_from_tables(db:Session,bid_id:int,tables:dict[str,list[dict]],user_id:int,request_metadata:dict|None=None,capabilities:dict|None=None):
+    tasks=tables.get("TASK",[])
+    capabilities=capabilities or {}
+    float_available=bool(capabilities.get("float",any(str(x.get("total_float_hr_cnt") or "").strip() for x in tasks)))
+    search_index=_activity_search_index(tables)
+    candidate_matches={}
+    items=db.scalars(select(ScheduleScopeItem).where(
+        ScheduleScopeItem.bid_project_id==bid_id
+    ).order_by(ScheduleScopeItem.id)).all()
+    for item in items:
+        task,confidence,candidates=_match(item,search_index)
+        candidate_matches[item.id]=candidates
+        previous=item.coverage_status
+        if task and confidence>=.72:
+            item.coverage_status="Covered"
+        elif task and confidence>=.42:
+            item.coverage_status="Possible Match"
+        else:
+            item.coverage_status="Missing"
+            task=None
+        item.matched_task_code=task.get("task_code") if task else None
+        item.matched_task_name=task.get("task_name") if task else None
+        item.match_confidence=Decimal(str(confidence)) if confidence else None
+        if item.coverage_status=="Covered":
+            item.disposition_status="Confirmed Covered"
+            item.disposition_reason=None
+        elif previous=="Covered" and item.coverage_status!="Covered":
+            item.disposition_status="Unexplained"
+            item.disposition_reason=None
+    db.add(AuditEvent(
+        user_id=user_id,bid_project_id=bid_id,event_type="schedule.scope_coverage_evaluated",
+        entity_type="BidProject",entity_id=str(bid_id),request_metadata=request_metadata or {},
+        details={"expected_items":len(items),"schedule_activities":len(tasks)},
+    ))
+    db.commit()
+    rows=[{**_scope_item_dict(x),"candidate_matches":candidate_matches.get(x.id,[])} for x in items]
+    groups=_consolidate_rows(rows)
+    authority_order={"BOQ":0,"Contract / Technical Requirement":1,"Manual":2,"Project-Type Knowledge":3}
+    coverage_order={"Missing":0,"Possible Match":1,"Not Checked":2,"Covered":3}
+    rows.sort(key=lambda x:(
+        0 if x["blocking"] else 1,
+        authority_order.get(x["source_type"],2),
+        coverage_order.get(x["coverage_status"],4),
+        x["activity_level"],
+        x["activity_name"].lower(),
+    ))
+    blocking_groups=[x for x in groups if x["group_blocking"]]
+    mandatory_groups=[x for x in groups if x.get("mandatory")]
+    covered_mandatory=[x for x in mandatory_groups if x.get("group_coverage_status")=="Covered"]
+    contract_groups=[x for x in groups if x.get("source_type")=="Contract / Technical Requirement"]
+    boq_groups=[x for x in groups if x.get("source_type")=="BOQ"]
+    knowledge_groups=[x for x in groups if x.get("source_type")=="Project-Type Knowledge"]
+    subactivity_groups=[x for x in groups if x.get("activity_level") in {"Sub-Activity","BOQ Sub-Activity"}]
+    def coverage_pct(group_rows):
+        if not group_rows:return None
+        return round(sum(1 for x in group_rows if x.get("group_coverage_status")=="Covered")*100/len(group_rows),1)
+    precision_advisor=_schedule_precision_recommendations(db,bid_id,groups,tasks)
+    matched_codes={str(x.get("matched_task_code") or "") for x in groups if x.get("matched_task_code") and x.get("group_coverage_status") in {"Covered","Possible Match"}}
+    search_by_code={str(x["task"].get("task_code") or ""):x for x in search_index if x["task"].get("task_code")}
+    unmapped=[]
+    milestone_types={"TT_Mile","TT_FinMile","TT_StartMile","TT_FinishMile"}
+    for task in tasks:
+        code=str(task.get("task_code") or "")
+        if not code or code in matched_codes:continue
+        task_type=task.get("task_type")
+        duration=max(_number(task.get("target_drtn_hr_cnt")),_number(task.get("remain_drtn_hr_cnt")))
+        total_float=_number(task.get("total_float_hr_cnt")) if float_available else None
+        context=search_by_code.get(code) or {}
+        score=10
+        reasons=["No expected contract/BOQ/project-scope item currently maps to this schedule activity."]
+        if task_type in milestone_types:
+            score+=10;reasons.append("This is a milestone and should have a clear scope or contractual purpose.")
+        if duration>160:
+            score+=15;reasons.append(f"Long duration: {duration:.0f} hours.")
+        if float_available and total_float is not None and total_float<=0:
+            score+=20;reasons.append(f"Critical/negative float screening: {total_float:.0f} hours.")
+        elif float_available and total_float is not None and total_float<=40:
+            score+=10;reasons.append(f"Near-critical float screening: {total_float:.0f} hours.")
+        unmapped.append({
+            "task_id":task.get("task_id"),
+            "task_code":code,
+            "task_name":task.get("task_name"),
+            "task_type":task_type,
+            "wbs_path":context.get("wbs_path"),
+            "activity_codes":context.get("activity_codes") or [],
+            "duration_hours":duration,
+            "total_float_hours":total_float,
+            "review_score":min(100,score),
+            "priority":"High" if score>=45 else "Medium" if score>=25 else "Low",
+            "reasons":reasons,
+            "recommended_action":"Confirm which contract/BOQ/enabling scope this activity represents, or add/link the missing expected scope item.",
+        })
+    unmapped.sort(key=lambda x:(-x["review_score"],x["task_code"]))
+    reverse_coverage={
+        "unmapped_activities":unmapped,
+        "unmapped_count":len(unmapped),
+        "high_priority":sum(1 for x in unmapped if x["priority"]=="High"),
+        "methodology":"phase6-reverse-schedule-scope-coverage-v1",
+        "note":"Unmapped schedule activities are review items, not automatic errors. Enabling, management or temporary-work activities may be valid.",
+    }
+    return {
+        "items":rows,
+        "groups":groups,
+        "precision_advisor":precision_advisor,
+        "reverse_coverage":reverse_coverage,
+        "summary":{
+            "expected":len(rows),
+            "covered":sum(1 for x in rows if x["coverage_status"]=="Covered"),
+            "possible_match":sum(1 for x in rows if x["coverage_status"]=="Possible Match"),
+            "missing":sum(1 for x in rows if x["coverage_status"]=="Missing"),
+            "blocking":len(blocking_groups),
+            "logical_expected":len(groups),
+            "consolidated_duplicates":len(rows)-len(groups),
+            "knowledge_warnings":sum(1 for x in rows if x["source_type"]=="Project-Type Knowledge" and x["coverage_status"]!="Covered"),
+            "contract_items":sum(1 for x in rows if x["source_type"]=="Contract / Technical Requirement"),
+            "boq_items":sum(1 for x in rows if x["source_type"]=="BOQ"),
+            "project_type_items":sum(1 for x in rows if x["source_type"]=="Project-Type Knowledge"),
+            "mandatory_logical":len(mandatory_groups),
+            "mandatory_covered":len(covered_mandatory),
+            "mandatory_coverage_percent":coverage_pct(mandatory_groups),
+            "contract_coverage_percent":coverage_pct(contract_groups),
+            "boq_coverage_percent":coverage_pct(boq_groups),
+            "project_knowledge_coverage_percent":coverage_pct(knowledge_groups),
+            "subactivity_coverage_percent":coverage_pct(subactivity_groups),
+            "unmapped_schedule_activities":len(unmapped),
+            "explained_missing":sum(1 for x in rows if x["coverage_status"]=="Missing" and not x["blocking"]),
+        },
+        "ready":len(blocking_groups)==0 and len(groups)>0,
+        "grade":"Complete" if len(blocking_groups)==0 and groups else "Action Required" if groups else "No Scope Catalog",
+        "methodology":"phase6-schedule-scope-coverage-v11",
+        "note":"Expected activities are independently sourced from bid scope. Missing or ambiguous coverage must be explained; 'To Be Added' remains a blocker until a revised schedule contains the activity.",
+    }
+
+
+def disposition_scope_item(
+    db:Session,item_id:int,status:str,reason:str|None,user_id:int,request_metadata:dict|None=None
+):
+    allowed={"Unexplained","Confirmed Covered","To Be Added","Covered Elsewhere","Not Applicable","Explained-Excluded"}
+    if status not in allowed:raise ValueError("Invalid disposition status")
+    item=db.get(ScheduleScopeItem,item_id)
+    if not item:raise ValueError("Schedule scope item not found")
+    reason=(reason or "").strip() or None
+    if status in {"Covered Elsewhere","Not Applicable","Explained-Excluded","To Be Added"} and not reason:
+        raise ValueError("A reason is required for this disposition")
+    if status=="Confirmed Covered" and item.coverage_status not in {"Covered","Possible Match"}:
+        raise ValueError("Only a covered or possible-match item can be confirmed covered")
+    item.disposition_status=status
+    item.disposition_reason=reason
+    item.disposition_by=user_id
+    item.disposition_at=datetime.now(timezone.utc)
+    db.add(AuditEvent(
+        user_id=user_id,bid_project_id=item.bid_project_id,event_type="schedule.scope_item_dispositioned",
+        entity_type="ScheduleScopeItem",entity_id=str(item.id),request_metadata=request_metadata or {},
+        details={"status":status,"reason":reason},
+    ))
+    db.commit();db.refresh(item)
+    return _scope_item_dict(item)
+
+
+def evaluate_scope_coverage(db:Session,bid_id:int,xer_content:bytes,user_id:int,request_metadata:dict|None=None):
+    return evaluate_scope_coverage_from_tables(db,bid_id,parse_xer(xer_content),user_id,request_metadata)

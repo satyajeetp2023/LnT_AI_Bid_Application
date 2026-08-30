@@ -1,0 +1,308 @@
+from collections import Counter
+from datetime import date,timedelta
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.models import BidClauseRiskFinding,BidMissingInput,BidPreBidQuery,BidRequirement,DrawingBoqFinding,PlanningPackageFinding
+from app.services.missing_input_taxonomy import RESOLVED_STATUSES
+from app.services.responsibility_assignment import suggest_responsible_function
+from app.services.schedule_scope_coverage import schedule_scope_catalog
+
+
+PRIORITY_ORDER={"Critical":0,"High":1,"Medium":2,"Low":3}
+
+
+def _owner(category:str|None,text:str|None,current:str|None)->str:
+    return current or suggest_responsible_function(category,text)
+
+
+def department_work_queue(db:Session,bid_id:int,responsible_function:str|None=None,responsible_person:str|None=None):
+    today=date.today()
+    items=[]
+
+    requirements=db.scalars(select(BidRequirement).where(
+        BidRequirement.bid_project_id==bid_id,
+        BidRequirement.requirement_status.notin_(["Closed","Not Applicable"]),
+    )).all()
+    for r in requirements:
+        owner=_owner(r.requirement_category,r.requirement_text,r.responsible_function)
+        if responsible_function and owner!=responsible_function:continue
+        if responsible_person and r.responsible_person!=responsible_person:continue
+        needs_action=r.review_status=="Not Reviewed" or r.compliance_status=="Not Assessed" or r.review_status=="Needs Clarification"
+        if not needs_action:continue
+        due=r.due_date.isoformat() if r.due_date else None
+        overdue=bool(r.due_date and r.due_date<today)
+        if r.review_status=="Not Reviewed":
+            action="Review requirement"
+            reason="Requirement has not been reviewed."
+        elif r.review_status=="Needs Clarification":
+            action="Resolve clarification"
+            reason="Requirement is marked Needs Clarification."
+        else:
+            action="Assess compliance"
+            reason="Compliance has not been assessed."
+        items.append({
+            "entity_type":"Requirement","entity_id":r.id,"title":r.requirement_title,
+            "priority":r.priority,"responsible_function":owner,"responsible_person":r.responsible_person,
+            "status":r.review_status if r.review_status!="Reviewed" else r.compliance_status,
+            "due_date":due,"is_overdue":overdue,"action":action,"reason":reason,
+            "route":f"/bids/{bid_id}/requirements","source_document":r.source_document_title or r.source_original_filename,
+            "source_page":r.source_page,"source_clause":r.source_clause,
+        })
+
+    gaps=db.scalars(select(BidMissingInput).where(
+        BidMissingInput.bid_project_id==bid_id,
+        BidMissingInput.status.notin_(RESOLVED_STATUSES),
+    )).all()
+    for g in gaps:
+        owner=_owner(g.input_category,f"{g.missing_input_title} {g.missing_input_description}",g.responsible_function)
+        if responsible_function and owner!=responsible_function:continue
+        if responsible_person and g.responsible_person!=responsible_person:continue
+        due=g.required_by_date.isoformat() if g.required_by_date else None
+        overdue=bool(g.required_by_date and g.required_by_date<today)
+        items.append({
+            "entity_type":"Missing Input","entity_id":g.id,"title":g.missing_input_title,
+            "priority":g.priority,"responsible_function":owner,"responsible_person":g.responsible_person,
+            "status":g.status,"due_date":due,"is_overdue":overdue,
+            "action":"Close missing input","reason":"Required bid information or decision is still unresolved.",
+            "route":f"/bids/{bid_id}/missing-inputs","source_document":g.source_document_title or g.source_original_filename,
+            "source_page":g.source_page,"source_clause":g.source_clause,
+        })
+
+    queries=db.scalars(select(BidPreBidQuery).where(
+        BidPreBidQuery.bid_project_id==bid_id,
+        BidPreBidQuery.status.notin_(["Closed","Withdrawn","Responded"]),
+    )).all()
+    for q in queries:
+        owner=_owner(q.query_category,q.query_text,q.responsible_function)
+        if responsible_function and owner!=responsible_function:continue
+        if responsible_person and q.responsible_person!=responsible_person:continue
+        due=q.target_response_date.isoformat() if q.target_response_date else None
+        overdue=bool(q.target_response_date and q.target_response_date<today and q.status=="Submitted")
+        action="Review query" if q.status in {"Draft","Ready for Review"} else "Follow up Employer response" if q.status=="Submitted" else "Progress query"
+        items.append({
+            "entity_type":"Pre-Bid Query","entity_id":q.id,"title":q.query_title,
+            "priority":q.priority,"responsible_function":owner,"responsible_person":q.responsible_person,
+            "status":q.status,"due_date":due,"is_overdue":overdue,"action":action,
+            "reason":"Pre-Bid Query still requires bidder or Employer action.",
+            "route":f"/bids/{bid_id}/pre-bid-queries","source_document":q.source_document_title or q.source_original_filename,
+            "source_page":q.source_page,"source_clause":q.source_clause,
+        })
+
+    risks=db.scalars(select(BidClauseRiskFinding).where(
+        BidClauseRiskFinding.bid_project_id==bid_id,
+        BidClauseRiskFinding.review_status!="Closed",
+        BidClauseRiskFinding.severity.in_(["Critical","High"]),
+    )).all()
+    for risk in risks:
+        owner=risk.responsible_function or "Contracts"
+        person=risk.responsible_person
+        if responsible_function and owner!=responsible_function:continue
+        if responsible_person and person!=responsible_person:continue
+        items.append({
+            "entity_type":"Clause Risk","entity_id":risk.id,"title":risk.risk_title,
+            "priority":"Critical" if risk.severity=="Critical" else "High",
+            "responsible_function":owner,"responsible_person":person,
+            "status":risk.reviewer_disposition or risk.review_status,
+            "due_date":None,"is_overdue":False,
+            "action":"Review contractual risk",
+            "reason":"AI/rule screening found an onerous clause pattern that still requires Contracts disposition.",
+            "route":f"/bids/{bid_id}/copilot",
+            "source_document":f"Document #{risk.source_document_id}",
+            "source_page":risk.source_page,"source_clause":risk.source_clause,
+        })
+
+    planning_findings=db.scalars(select(PlanningPackageFinding).where(
+        PlanningPackageFinding.bid_project_id==bid_id,
+        PlanningPackageFinding.status=="Open",
+    )).all()
+    for finding in planning_findings:
+        owner=finding.responsible_function or "Planning"
+        person=finding.responsible_person
+        if responsible_function and owner!=responsible_function:continue
+        if responsible_person and person!=responsible_person:continue
+        items.append({
+            "entity_type":"Planning Package","entity_id":finding.id,
+            "title":finding.title,"priority":finding.severity,
+            "responsible_function":owner,"responsible_person":person,
+            "status":finding.disposition or finding.status,"due_date":None,"is_overdue":False,
+            "action":"Review integrated planning package finding",
+            "reason":finding.description,
+            "route":f"/bids/{bid_id}/schedules",
+            "source_document":finding.task_name,
+            "source_page":None,"source_clause":finding.task_code or finding.source_reference,
+        })
+
+    drawing_findings=db.scalars(select(DrawingBoqFinding).where(
+        DrawingBoqFinding.bid_project_id==bid_id,
+        DrawingBoqFinding.review_status=="Open",
+    )).all()
+    for finding in drawing_findings:
+        owner=finding.responsible_function or "Engineering"
+        person=finding.responsible_person
+        if responsible_function and owner!=responsible_function:continue
+        if responsible_person and person!=responsible_person:continue
+        items.append({
+            "entity_type":"Drawing BOQ","entity_id":finding.id,
+            "title":f"{finding.finding_status}: {finding.boq_reference or 'Drawing quantity'}",
+            "priority":"High" if finding.finding_status in {"Quantity Variance","No BOQ Match"} else "Medium",
+            "responsible_function":owner,"responsible_person":person,
+            "status":finding.finding_status,"due_date":None,"is_overdue":False,
+            "action":"Review drawing / BOQ quantity",
+            "reason":"Drawing-derived quantity evidence does not cleanly reconcile with the BOQ and requires estimator/engineering review.",
+            "route":f"/bids/{bid_id}/copilot",
+            "source_document":finding.boq_description,
+            "source_page":None,"source_clause":finding.boq_reference,
+        })
+
+    scope_catalog=schedule_scope_catalog(db,bid_id)
+    for scope in scope_catalog.get("groups",[]):
+        if not scope.get("group_blocking"):continue
+        owner=scope.get("responsible_function") or "Planning"
+        person=scope.get("responsible_person")
+        if responsible_function and owner!=responsible_function:continue
+        if responsible_person and person!=responsible_person:continue
+        items.append({
+            "entity_type":"Schedule Scope",
+            "entity_id":scope["canonical_item_id"],
+            "title":scope["activity_name"],
+            "priority":scope.get("flag_priority") or ("High" if scope.get("mandatory") else "Medium"),
+            "responsible_function":owner,
+            "responsible_person":person,
+            "status":scope.get("group_coverage_status") or "Not Checked",
+            "due_date":None,
+            "is_overdue":False,
+            "action":"Resolve schedule scope coverage",
+            "reason":scope.get("why_flagged") or "Expected scope is not clearly covered by the current schedule.",
+            "route":f"/bids/{bid_id}/schedules",
+            "source_document":scope.get("source_type"),
+            "source_page":None,
+            "source_clause":scope.get("source_reference"),
+        })
+
+    due_soon_limit=today+timedelta(days=3)
+    for item in items:
+        due_obj=date.fromisoformat(item["due_date"]) if item["due_date"] else None
+        item["days_to_due"]=(due_obj-today).days if due_obj else None
+        item["is_due_soon"]=bool(due_obj and today<=due_obj<=due_soon_limit)
+        if item["is_overdue"]:
+            item["escalation_level"]="Red";item["escalation_reason"]="Action is overdue."
+        elif item["priority"]=="Critical" and not item["responsible_person"]:
+            item["escalation_level"]="Red";item["escalation_reason"]="Critical action has no named responsible person."
+        elif item["is_due_soon"]:
+            item["escalation_level"]="Amber";item["escalation_reason"]="Action is due within 3 days."
+        elif item["priority"] in {"Critical","High"} and not item["responsible_person"]:
+            item["escalation_level"]="Amber";item["escalation_reason"]="High-priority action has no named responsible person."
+        else:
+            item["escalation_level"]="None";item["escalation_reason"]=None
+
+    items.sort(key=lambda x:(
+        {"Red":0,"Amber":1,"None":2}.get(x["escalation_level"],3),
+        0 if x["is_overdue"] else 1,
+        PRIORITY_ORDER.get(x["priority"],4),
+        x["due_date"] or "9999-12-31",
+        x["entity_type"],x["title"].lower(),
+    ))
+
+    department_control=[]
+    for function_name in sorted(set(x["responsible_function"] or "Unassigned" for x in items)):
+        rows=[x for x in items if (x["responsible_function"] or "Unassigned")==function_name]
+        department_control.append({
+            "name":function_name,
+            "open_actions":len(rows),
+            "critical":sum(1 for x in rows if x["priority"]=="Critical"),
+            "overdue":sum(1 for x in rows if x["is_overdue"]),
+            "due_soon":sum(1 for x in rows if x["is_due_soon"]),
+            "without_person":sum(1 for x in rows if not x["responsible_person"]),
+            "red_escalations":sum(1 for x in rows if x["escalation_level"]=="Red"),
+            "amber_escalations":sum(1 for x in rows if x["escalation_level"]=="Amber"),
+        })
+    department_control.sort(key=lambda x:(-x["red_escalations"],-x["amber_escalations"],-x["overdue"],-x["open_actions"],x["name"]))
+
+    all_requirements=db.scalars(select(BidRequirement).where(BidRequirement.bid_project_id==bid_id)).all()
+    all_gaps=db.scalars(select(BidMissingInput).where(BidMissingInput.bid_project_id==bid_id)).all()
+    all_queries=db.scalars(select(BidPreBidQuery).where(BidPreBidQuery.bid_project_id==bid_id)).all()
+
+    progress_rows=[]
+    functions=set()
+    for r in all_requirements:
+        owner=_owner(r.requirement_category,r.requirement_text,r.responsible_function);functions.add(owner)
+    for g in all_gaps:
+        owner=_owner(g.input_category,f"{g.missing_input_title} {g.missing_input_description}",g.responsible_function);functions.add(owner)
+    for q in all_queries:
+        owner=_owner(q.query_category,q.query_text,q.responsible_function);functions.add(owner)
+    all_risks=db.scalars(select(BidClauseRiskFinding).where(BidClauseRiskFinding.bid_project_id==bid_id)).all()
+    if all_risks:functions.add("Contracts")
+    all_drawing_findings=db.scalars(select(DrawingBoqFinding).where(DrawingBoqFinding.bid_project_id==bid_id)).all()
+    if all_drawing_findings:functions.add("Engineering")
+    all_planning_findings=db.scalars(select(PlanningPackageFinding).where(PlanningPackageFinding.bid_project_id==bid_id)).all()
+    if all_planning_findings:functions.add("Planning")
+    mandatory_scope=[x for x in scope_catalog.get("groups",[]) if x.get("mandatory")]
+    if mandatory_scope:functions.add("Planning")
+
+    for function_name in sorted(functions):
+        total=completed=0
+        for r in all_requirements:
+            owner=_owner(r.requirement_category,r.requirement_text,r.responsible_function)
+            if owner!=function_name:continue
+            total+=1
+            if r.requirement_status in {"Closed","Not Applicable"} or (r.review_status=="Reviewed" and r.compliance_status!="Not Assessed"):
+                completed+=1
+        for g in all_gaps:
+            owner=_owner(g.input_category,f"{g.missing_input_title} {g.missing_input_description}",g.responsible_function)
+            if owner!=function_name:continue
+            total+=1
+            if g.status in RESOLVED_STATUSES:completed+=1
+        for q in all_queries:
+            owner=_owner(q.query_category,q.query_text,q.responsible_function)
+            if owner!=function_name:continue
+            total+=1
+            if q.status in {"Responded","Closed","Withdrawn"}:completed+=1
+        if function_name=="Contracts":
+            for risk in all_risks:
+                total+=1
+                if risk.review_status=="Closed":completed+=1
+        if function_name=="Engineering":
+            for finding in all_drawing_findings:
+                total+=1
+                if finding.review_status!="Open":completed+=1
+        if function_name=="Planning":
+            for finding in all_planning_findings:
+                total+=1
+                if finding.status!="Open":completed+=1
+            for scope in mandatory_scope:
+                total+=1
+                if not scope.get("group_blocking"):completed+=1
+        progress_rows.append({
+            "name":function_name,
+            "tracked":total,
+            "completed":completed,
+            "remaining":max(0,total-completed),
+            "completion_percent":100.0 if total==0 else round(completed*100/total,1),
+        })
+    progress_rows.sort(key=lambda x:(x["completion_percent"],-x["remaining"],x["name"]))
+
+    by_function=Counter(x["responsible_function"] or "Unassigned" for x in items)
+    by_type=Counter(x["entity_type"] for x in items)
+    return {
+        "items":items,
+        "summary":{
+            "total":len(items),
+            "critical":sum(1 for x in items if x["priority"]=="Critical"),
+            "high":sum(1 for x in items if x["priority"]=="High"),
+            "overdue":sum(1 for x in items if x["is_overdue"]),
+            "unassigned":sum(1 for x in items if not x["responsible_function"]),
+            "without_person":sum(1 for x in items if not x["responsible_person"]),
+            "due_soon":sum(1 for x in items if x["is_due_soon"]),
+            "red_escalations":sum(1 for x in items if x["escalation_level"]=="Red"),
+            "amber_escalations":sum(1 for x in items if x["escalation_level"]=="Amber"),
+        },
+        "by_function":[{"name":k,"count":v} for k,v in by_function.most_common()],
+        "by_type":[{"name":k,"count":v} for k,v in by_type.most_common()],
+        "by_person":[{"name":k,"count":v} for k,v in Counter((x["responsible_person"] or "Unassigned") for x in items).most_common()],
+        "department_control":department_control,
+        "department_progress":progress_rows,
+        "filter":{"responsible_function":responsible_function,"responsible_person":responsible_person},
+        "version":"phase4-department-work-queue-v10",
+    }

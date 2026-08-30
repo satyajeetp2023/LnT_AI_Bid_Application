@@ -1,0 +1,7 @@
+INPUT_CATEGORIES=["Technical","Commercial","Contractual","Qualification","Financial","Planning / Scheduling","Design","Procurement / Vendor","Construction","Testing & Commissioning","Safety","Quality","Environmental / Social","Interface","Statutory / Approval","Security / Guarantee","Insurance","Documentation","Management Decision","Employer Clarification","Other"]
+INPUT_TYPES=["Document","Data","Certificate","Declaration","Approval","Confirmation","Calculation","Drawing","Methodology","Schedule","Quotation","Resource Information","Experience Record","Financial Information","Personnel Information","Management Decision","Employer Clarification","Other"]
+PRIORITIES=["Critical","High","Medium","Low"]
+STATUSES=["Open","Requested","In Progress","Received","Resolved","Not Applicable"]
+RESPONSIBLE_FUNCTIONS=["Bid Management","Planning","Engineering","Contracts","Commercial","Procurement","Finance","Construction","Quality","Safety","Testing & Commissioning","Interface","Design","Management","Other"]
+OPEN_STATUSES=["Open","Requested","In Progress","Received"]
+RESOLVED_STATUSES=["Resolved","Not Applicable"]

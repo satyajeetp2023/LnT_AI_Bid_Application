@@ -1,0 +1,168 @@
+from collections import Counter
+from datetime import date
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.models import BidMissingInput,BidRequirement
+from app.services.missing_input_taxonomy import RESOLVED_STATUSES
+from app.services.responsibility_assignment import suggest_responsible_function
+
+
+def calculate_estimation_readiness(db:Session,bid_id:int):
+    requirements=db.scalars(select(BidRequirement).where(
+        BidRequirement.bid_project_id==bid_id,
+        BidRequirement.requirement_status.notin_(["Closed","Not Applicable"]),
+    )).all()
+    gaps=db.scalars(select(BidMissingInput).where(
+        BidMissingInput.bid_project_id==bid_id,
+        BidMissingInput.status.notin_(RESOLVED_STATUSES),
+    )).all()
+
+    total=len(requirements)
+    req_ids={r.id for r in requirements}
+    blocked_ids={g.requirement_id for g in gaps if g.requirement_id in req_ids}
+    info_complete=max(0,total-len(blocked_ids))
+
+    reviewed=sum(1 for r in requirements if r.review_status!="Not Reviewed")
+    compliance_assessed=sum(1 for r in requirements if r.compliance_status!="Not Assessed")
+    critical_open=sum(1 for g in gaps if g.priority=="Critical")
+    high_open=sum(1 for g in gaps if g.priority=="High")
+    overdue=sum(1 for g in gaps if g.required_by_date and g.required_by_date<date.today())
+
+    def pct(value:int)->float:
+        return 100.0 if total==0 else round(value*100/total,1)
+
+    information_score=pct(info_complete)
+    review_score=pct(reviewed)
+    compliance_score=pct(compliance_assessed)
+    blocker_score=max(0.0,round(100-(critical_open*12+high_open*6+max(0,len(gaps)-critical_open-high_open)*2),1))
+    overall=round(information_score*.45+review_score*.25+compliance_score*.20+blocker_score*.10,1)
+
+    existing_gap_req_ids={g.requirement_id for g in gaps if g.requirement_id is not None}
+    candidates=[]
+    for r in requirements:
+        if r.review_status!="Needs Clarification" or r.id in existing_gap_req_ids:continue
+        candidates.append({
+            "requirement_id":r.id,
+            "title":r.requirement_title,
+            "category":r.requirement_category,
+            "priority":r.priority,
+            "responsible_function":r.responsible_function or suggest_responsible_function(r.requirement_category,r.requirement_text),
+            "source_document":r.source_document_title or r.source_original_filename,
+            "source_page":r.source_page,
+            "source_clause":r.source_clause,
+            "reason":"Requirement has been reviewed and marked Needs Clarification, but no unresolved Missing Input is linked to it.",
+        })
+    candidates.sort(key=lambda x:({"Critical":0,"High":1,"Medium":2,"Low":3}.get(x["priority"],4),x["title"].lower()))
+
+    by_function=Counter((g.responsible_function or "Unassigned") for g in gaps)
+    by_category=Counter(g.input_category for g in gaps)
+    priority_order={"Critical":0,"High":1,"Medium":2,"Low":3}
+    today=date.today()
+    action_plan=[]
+    for g in gaps:
+        is_overdue=bool(g.required_by_date and g.required_by_date<today)
+        reason="Overdue blocker" if is_overdue else "Critical blocker" if g.priority=="Critical" else "Open blocker"
+        action_plan.append({
+            "source_kind":"Missing Input",
+            "source_id":g.id,
+            "missing_input_id":g.id,
+            "requirement_id":g.requirement_id,
+            "title":g.missing_input_title,
+            "priority":g.priority,
+            "responsible_function":g.responsible_function or suggest_responsible_function(g.input_category,f"{g.missing_input_title} {g.missing_input_description}"),
+            "due_date":g.required_by_date.isoformat() if g.required_by_date else None,
+            "is_overdue":is_overdue,
+            "reason":reason,
+            "recommended_action":"Resolve the missing input or raise/link a Pre-Bid Query if Employer clarification is required.",
+        })
+    for candidate in candidates:
+        action_plan.append({
+            "source_kind":"Candidate Gap",
+            "source_id":candidate["requirement_id"],
+            "missing_input_id":None,
+            "requirement_id":candidate["requirement_id"],
+            "title":candidate["title"],
+            "priority":candidate["priority"],
+            "responsible_function":candidate["responsible_function"],
+            "due_date":None,
+            "is_overdue":False,
+            "reason":"Reviewed requirement still needs clarification but has no Missing Input.",
+            "recommended_action":"Review the requirement and create a Missing Input if the clarification is genuinely required.",
+        })
+    for r in requirements:
+        if r.review_status=="Not Reviewed":
+            action_plan.append({
+                "source_kind":"Requirement Review",
+                "source_id":r.id,
+                "missing_input_id":None,
+                "requirement_id":r.id,
+                "title":r.requirement_title,
+                "priority":r.priority,
+                "responsible_function":r.responsible_function or suggest_responsible_function(r.requirement_category,r.requirement_text),
+                "due_date":r.due_date.isoformat() if r.due_date else None,
+                "is_overdue":bool(r.due_date and r.due_date<today),
+                "reason":"Requirement has not yet been reviewed.",
+                "recommended_action":"Review the extracted requirement, confirm its relevance and ownership, then mark the review outcome.",
+            })
+        if r.compliance_status=="Not Assessed":
+            action_plan.append({
+                "source_kind":"Compliance Assessment",
+                "source_id":r.id,
+                "missing_input_id":None,
+                "requirement_id":r.id,
+                "title":r.requirement_title,
+                "priority":r.priority,
+                "responsible_function":r.responsible_function or suggest_responsible_function(r.requirement_category,r.requirement_text),
+                "due_date":r.due_date.isoformat() if r.due_date else None,
+                "is_overdue":bool(r.due_date and r.due_date<today),
+                "reason":"Compliance has not yet been assessed.",
+                "recommended_action":"Assess whether the bid is compliant, partially compliant or non-compliant and record any required mitigation.",
+            })
+
+    action_plan.sort(key=lambda x:(
+        0 if x["is_overdue"] else 1,
+        priority_order.get(x["priority"],4),
+        x["due_date"] or "9999-12-31",
+        x["title"].lower(),
+    ))
+    action_plan=action_plan[:12]
+    closure_summary={
+        "unreviewed_requirements":sum(1 for r in requirements if r.review_status=="Not Reviewed"),
+        "unassessed_compliance":sum(1 for r in requirements if r.compliance_status=="Not Assessed"),
+        "requirements_needing_clarification":sum(1 for r in requirements if r.review_status=="Needs Clarification"),
+        "requirements_with_open_gaps":len(blocked_ids),
+    }
+
+    return {
+        "overall_score":overall,
+        "grade":"Ready" if overall>=85 else "Needs Attention" if overall>=65 else "Not Ready",
+        "components":{
+            "information_completeness":information_score,
+            "review_completion":review_score,
+            "compliance_assessment":compliance_score,
+            "blocker_control":blocker_score,
+        },
+        "counts":{
+            "active_requirements":total,
+            "requirements_with_open_gaps":len(blocked_ids),
+            "open_missing_inputs":len(gaps),
+            "critical_open":critical_open,
+            "high_open":high_open,
+            "overdue":overdue,
+            "candidate_gaps":len(candidates),
+        },
+        "candidate_gaps":candidates,
+        "open_gaps_by_function":[{"name":k,"count":v} for k,v in by_function.most_common()],
+        "open_gaps_by_category":[{"name":k,"count":v} for k,v in by_category.most_common()],
+        "action_plan":action_plan,
+        "closure_summary":closure_summary,
+        "methodology":{
+            "information_completeness_weight":45,
+            "review_completion_weight":25,
+            "compliance_assessment_weight":20,
+            "blocker_control_weight":10,
+            "version":"phase3-readiness-rule-v4",
+        },
+    }

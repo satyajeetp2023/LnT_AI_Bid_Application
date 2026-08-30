@@ -1,0 +1,5 @@
+export const inputCategories=["Technical","Commercial","Contractual","Qualification","Financial","Planning / Scheduling","Design","Procurement / Vendor","Construction","Testing & Commissioning","Safety","Quality","Environmental / Social","Interface","Statutory / Approval","Security / Guarantee","Insurance","Documentation","Management Decision","Employer Clarification","Other"];
+export const inputTypes=["Document","Data","Certificate","Declaration","Approval","Confirmation","Calculation","Drawing","Methodology","Schedule","Quotation","Resource Information","Experience Record","Financial Information","Personnel Information","Management Decision","Employer Clarification","Other"];
+export const priorities=["Critical","High","Medium","Low"];
+export const statuses=["Open","Requested","In Progress","Received","Resolved","Not Applicable"];
+export const responsibleFunctions=["Bid Management","Planning","Engineering","Contracts","Commercial","Procurement","Finance","Construction","Quality","Safety","Testing & Commissioning","Interface","Design","Management","Other"];
