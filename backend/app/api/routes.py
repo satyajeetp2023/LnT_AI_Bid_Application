@@ -1,3 +1,4 @@
+from pathlib import Path
 from dataclasses import asdict
 from datetime import date,timedelta
 from decimal import Decimal
@@ -46,6 +47,7 @@ from app.services.schedule_ingestion import SCHEDULE_EXTENSIONS,ingest_schedule
 from app.services.documents import DOCUMENT_CATEGORIES,archive,classify,mark_revision,update_document_metadata,update_notes,upload_document
 from app.services.document_classification import auto_classify_document
 from app.services.historical_bid_intelligence import get_bid_outcome,historical_bid_intelligence,upsert_bid_outcome
+from app.services.historical_result_import import preview_historical_result
 from app.storage.base import LocalSecureStorage
 router=APIRouter()
 def user_dep(db:Session=Depends(get_db),x_user_id:int=Header(default=1,alias="X-User-ID")): return current_user(db,x_user_id)
@@ -83,6 +85,18 @@ def bid_outcome(bid_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep
 def save_bid_outcome(bid_id:int,payload:BidOutcomeUpsert,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
  require_project_access(db,user,bid_id,Permission.EDIT_BID)
  return upsert_bid_outcome(db,get_bid(db,bid_id),payload,user.id,metadata(request))
+
+@router.post("/bids/{bid_id}/outcome/import-preview")
+async def preview_bid_outcome_import(bid_id:int,file:UploadFile=File(...),db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.EDIT_BID);get_bid(db,bid_id)
+ filename=Path(file.filename or "").name
+ ext=Path(filename).suffix.lower().lstrip(".")
+ if ext not in {"csv","xlsx"}:raise HTTPException(415,"Historical result preview supports CSV and XLSX only")
+ content=await file.read()
+ if not content:raise HTTPException(422,"Uploaded result file is empty")
+ if len(content)>10*1024*1024:raise HTTPException(413,"Historical result preview file exceeds 10 MB")
+ try:return preview_historical_result(ext,content,filename)
+ except ValueError as exc:raise HTTPException(422,str(exc))
 
 @router.get("/historical-bids/intelligence")
 def portfolio_historical_bid_intelligence(db:Session=Depends(get_db),user:User=Depends(user_dep)):
