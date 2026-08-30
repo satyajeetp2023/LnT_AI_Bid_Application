@@ -35,6 +35,7 @@ from app.services.clause_risk_intelligence import bid_clause_risk_summary,firm_r
 from app.services.drawing_boq_verification import drawing_boq_summary,record_drawing_observations,review_drawing_boq_finding,verify_drawing_boq
 from app.services.drawing_quantity_extraction import drawing_vision_status,get_drawing_quantity_provider
 from app.services.tender_qa import tender_question_answer
+from app.services.tender_knowledge_index import index_tender_document,tender_knowledge_status
 from app.services.schedule_ingestion import SCHEDULE_EXTENSIONS,ingest_schedule
 from app.services.documents import DOCUMENT_CATEGORIES,archive,classify,mark_revision,update_document_metadata,update_notes,upload_document
 from app.services.document_classification import auto_classify_document
@@ -372,6 +373,17 @@ def add_productivity_benchmark(bid_id:int,payload:dict,request:Request,db:Sessio
  db.add(AuditEvent(user_id=user.id,bid_project_id=bid_id,event_type="schedule.productivity_benchmark_added",entity_type="ProductivityBenchmark",entity_id=str(row.id),request_metadata=metadata(request),details={"activity_name":activity_name,"unit":unit,"rate_per_working_day":str(rate),"source_type":"User Confirmed"}))
  db.commit();db.refresh(row)
  return {"id":row.id,"activity_name":row.activity_name,"unit":row.unit,"rate_per_working_day":float(row.rate_per_working_day),"confidence":float(row.confidence),"source_type":row.source_type}
+
+@router.post("/documents/{document_id}/index-tender-knowledge")
+def index_document_tender_knowledge(document_id:int,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ doc=get_doc(db,document_id);require_project_access(db,user,doc.bid_project_id,Permission.REQUIREMENT_MANAGE)
+ try:return index_tender_document(db,doc,LocalSecureStorage(get_settings().storage_root),user.id,metadata(request))
+ except ValueError as exc:raise HTTPException(422,str(exc)) from None
+
+@router.get("/bids/{bid_id}/tender-knowledge-status")
+def get_tender_knowledge_status(bid_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.REQUIREMENT_VIEW);get_bid(db,bid_id)
+ return tender_knowledge_status(db,bid_id)
 
 @router.post("/bids/{bid_id}/tender-qa")
 def ask_tender(bid_id:int,payload:dict,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
