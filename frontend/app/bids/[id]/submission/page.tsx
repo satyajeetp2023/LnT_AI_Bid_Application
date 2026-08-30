@@ -4,7 +4,7 @@ import Link from "next/link";
 import {use,useCallback,useEffect,useState} from "react";
 import {BidWorkspaceHeader} from "@/components/BidWorkspaceHeader";
 import {EmptyState,ErrorState,LoadingState,PageHeader,PriorityBadge,StatusBadge,SummaryCard} from "@/components/design-system";
-import {API,request} from "@/services/api";
+import {downloadFile,request} from "@/services/api";
 import type {Bid,SubmissionReadiness} from "@/types";
 
 export default function SubmissionPage({params}:{params:Promise<{id:string}>}){
@@ -27,13 +27,7 @@ export default function SubmissionPage({params}:{params:Promise<{id:string}>}){
  const downloadPackage=async()=>{
   setPackaging(true);setError("");
   try{
-   const r=await fetch(API+"/bids/"+id+"/submission-package",{method:"POST",headers:{"X-User-ID":"1"}});
-   if(!r.ok){const e=await r.json().catch(()=>({detail:"Package generation failed"}));throw new Error(e.detail||"Package generation failed")}
-   const blob=await r.blob();
-   const disposition=r.headers.get("content-disposition")||"";
-   const match=disposition.match(/filename="?([^";]+)"?/i);
-   const filename=match?.[1]||"submission_package.zip";
-   const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+   await downloadFile("/bids/"+id+"/submission-package","submission_package.zip",{method:"POST",timeoutMs:120000});
   }catch(e){setError(e instanceof Error?e.message:"Unable to generate submission package.")}
   finally{setPackaging(false)}
  };

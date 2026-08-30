@@ -1,4 +1,4 @@
-export type Bid={id:number;bid_id:string;tender_reference_no:string;tender_name:string;client:string;location?:string|null;contract_type:string;project_type:string;tender_due_date:string;current_stage:string;bid_status:string;bid_manager:string;updated_at:string};
+export type Bid={id:number;bid_id:string;tender_reference_no:string;tender_name:string;client:string;contract_type:string;project_type:string;package_section:string|null;location:string|null;estimated_value:number|string|null;currency:string;tender_due_date:string;pre_bid_meeting_date:string|null;bid_manager:string;co_bid_manager:string|null;current_stage:string;bid_status:string;description:string|null;created_by:number;created_at:string;updated_at:string};
 export type Document={
   id:number;bid_project_id:number;original_filename:string;file_extension:string;mime_type:string;file_size:number;checksum:string;
   uploaded_by:number;uploader_name:string|null;uploaded_at:string;document_status:string;document_category:string|null;

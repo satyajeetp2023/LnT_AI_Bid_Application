@@ -1,0 +1,45 @@
+import {fireEvent,render,screen,waitFor} from "@testing-library/react";
+import {beforeEach,expect,test,vi} from "vitest";
+import {Sidebar} from "./Sidebar";
+
+const api=vi.fn();
+let pathname="/";
+vi.mock("next/navigation",()=>({usePathname:()=>pathname}));
+vi.mock("@/services/api",()=>({request:(...args:unknown[])=>api(...args)}));
+
+beforeEach(()=>{api.mockReset();pathname="/"});
+
+test("GAP-005 hides Create New Bid without create permission",async()=>{
+ api.mockResolvedValue({permissions:["view_document"],is_admin:false,bid_project_ids:[1]});
+ render(<Sidebar/>);
+ await screen.findByText("Overview");
+ fireEvent.click(screen.getByText("Overview"));
+ await screen.findAllByText("Dashboard");
+ expect(screen.queryAllByText("Create New Bid")).toHaveLength(0);
+});
+
+test("GAP-005 does not treat /bids/new as a bid workspace",async()=>{
+ pathname="/bids/new";
+ api.mockResolvedValue({permissions:["create_bid","view_document","requirement_view"],is_admin:false,bid_project_ids:[]});
+ render(<Sidebar/>);
+ const intelligence=await screen.findByText("Tender Intelligence");
+ fireEvent.click(intelligence);
+ const documents=await screen.findAllByText("Document Repository");
+ expect(documents.every(item=>item.closest("[aria-disabled='true']")!==null)).toBe(true);
+});
+
+
+test("GAP-005 refreshes membership after navigating into a newly created bid",async()=>{
+ pathname="/bids/new";
+ api
+  .mockResolvedValueOnce({permissions:["create_bid","view_document"],is_admin:false,bid_project_ids:[]})
+  .mockResolvedValueOnce({permissions:["create_bid","view_document"],is_admin:false,bid_project_ids:[42]});
+ const view=render(<Sidebar/>);
+ await screen.findByText("Tender Intelligence");
+ pathname="/bids/42/documents";
+ view.rerender(<Sidebar/>);
+ await waitFor(()=>expect(api).toHaveBeenCalledTimes(2));
+ fireEvent.click(screen.getByText("Tender Intelligence"));
+ const documents=await screen.findAllByText("Document Repository");
+ expect(documents.some(item=>item.closest("a[href='/bids/42/documents']")!==null)).toBe(true);
+});
