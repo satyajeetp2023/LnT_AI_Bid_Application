@@ -133,7 +133,9 @@ def test_phase_1_to_7_acceptance_journey():
     # Phase 4: department workflow.
     queue=client.get(f"/api/v1/bids/{bid_id}/department-work-queue",headers=admin)
     assert queue.status_code==200,queue.text
-    assert isinstance(queue.json(),list)
+    queue_body=queue.json()
+    assert isinstance(queue_body.get("items"),list)
+    assert queue_body["summary"]["total"]>=1
 
     # Phase 5: pre-bid query workflow and submission readiness.
     query=client.post(
