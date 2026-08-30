@@ -257,7 +257,7 @@ def schedule_source_profile(document_id:int,db:Session=Depends(get_db),user:User
  filename=(doc.original_filename or "").lower()
  filename_signal=any(x in filename for x in ("schedule","programme","program","primavera","baseline","work plan","time schedule"))
  return {
-  "recognized":bool(ingestion["detected"] or filename_signal or (doc.document_type or "").lower().startswith("schedule -")),
+  "recognized":bool(ingestion["detected"] or filename_signal or ext in {"xer","mpp"} or (doc.document_type or "").lower().startswith("schedule -")),
   "structured":bool(ingestion["detected"]),
   "source_kind":ingestion["source_kind"],
   "fidelity":ingestion["fidelity"],
@@ -278,7 +278,8 @@ def detect_schedule_document(document_id:int,request:Request,db:Session=Depends(
  ingestion=ingest_schedule(ext,content)
  filename=(doc.original_filename or "").lower()
  filename_signal=any(x in filename for x in ("schedule","programme","program","primavera","baseline","work plan","time schedule"))
- detected=bool(ingestion["detected"] or filename_signal)
+ intrinsic_schedule=ext in {"xer","mpp"}
+ detected=bool(ingestion["detected"] or filename_signal or intrinsic_schedule)
  if detected and doc.classification_status!="manually_classified":
   doc.document_category="Forms / Formats / Schedules"
   doc.document_type=f"Schedule - {ingestion['source_kind']}"
@@ -301,7 +302,7 @@ def schedule_documents(bid_id:int,db:Session=Depends(get_db),user:User=Depends(u
   name=(doc.original_filename or "").lower()
   candidate=(
    dtype.startswith("schedule -")
-   or doc.file_extension.lower()=="xer"
+   or doc.file_extension.lower() in {"xer","mpp"}
    or any(x in name for x in ("schedule","programme","program","primavera","baseline","time schedule"))
   )
   if not candidate:continue
