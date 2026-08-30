@@ -223,3 +223,26 @@ def test_unchanged_historical_result_save_is_idempotent(client,bid_payload):
     assert [x["id"] for x in second_body["prices"]]==first_ids
     saved_events_after=[x for x in client.get("/api/v1/audit").json() if x["event_type"]=="historical_bid.outcome_saved" and x["bid_project_id"]==bid["id"]]
     assert len(saved_events_after)==len(saved_events_before)
+
+
+def test_historical_result_period_filter_and_invalid_range(client,bid_payload):
+    old=client.post("/api/v1/bids",json={**bid_payload,"bid_id":"HIST-OLD","tender_reference_no":"H-OLD"}).json()
+    new=client.post("/api/v1/bids",json={**bid_payload,"bid_id":"HIST-NEW","tender_reference_no":"H-NEW"}).json()
+    for bid,result_date in [(old,"2025-01-15"),(new,"2026-08-15")]:
+        response=client.put(
+            f"/api/v1/bids/{bid['id']}/outcome",
+            json={
+                "result_status":"Lost","result_date":result_date,"our_rank":2,"our_bid_value":110,
+                "prices":[
+                    {"bidder_name":"Competitor "+bid["bid_id"],"rank":1,"bid_value":100,"currency":"INR","is_ours":False},
+                    {"bidder_name":"L&T","rank":2,"bid_value":110,"currency":"INR","is_ours":True},
+                ],
+            },
+        )
+        assert response.status_code==200
+    filtered=client.get("/api/v1/historical-bids/intelligence",params={"result_from":"2026-01-01","result_to":"2026-12-31"})
+    assert filtered.status_code==200
+    assert filtered.json()["summary"]["completed"]==1
+    assert filtered.json()["applied_filters"]["result_from"]=="2026-01-01"
+    invalid=client.get("/api/v1/historical-bids/intelligence",params={"result_from":"2026-12-31","result_to":"2026-01-01"})
+    assert invalid.status_code==422
