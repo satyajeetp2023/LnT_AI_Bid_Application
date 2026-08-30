@@ -77,7 +77,7 @@ export function Sidebar({mobileOpen=false,onClose}:{mobileOpen?:boolean;onClose?
  ],[bidId]);
 
  const canUseCurrentBid=!bidId||bidAccess.isAdmin||bidAccess.ids.has(Number(bidId));
- const visibleGroups=useMemo(()=>groups.map(group=>({...group,items:group.items.filter(item=>{const roleAllowed=!item.permissions||(permissions!==null&&item.permissions.some(p=>permissions.has(p)));const bidSpecific=Boolean(bidId&&item.h?.startsWith(`/bids/${bidId}/`));return roleAllowed&&(!bidSpecific||canUseCurrentBid)});})).filter(group=>group.items.length>0),[groups,permissions,bidId,canUseCurrentBid]);
+ const visibleGroups=useMemo(()=>groups.map(group=>({...group,items:group.items.filter(item=>{const roleAllowed=!item.permissions||(permissions!==null&&item.permissions.some(p=>permissions.has(p)));const bidSpecific=Boolean(bidId&&item.h?.startsWith(`/bids/${bidId}/`));return roleAllowed&&(!bidSpecific||canUseCurrentBid)})})).filter(group=>group.items.length>0),[groups,permissions,bidId,canUseCurrentBid]);
  const allItems=useMemo(()=>visibleGroups.flatMap(g=>g.items.map(item=>({...item,group:g.n,groupId:g.id}))),[visibleGroups]);
  const normalized=query.trim().toLowerCase();
  const searchResults=useMemo(()=>normalized?allItems.filter(x=>
