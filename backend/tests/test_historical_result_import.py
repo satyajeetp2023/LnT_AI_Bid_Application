@@ -74,3 +74,15 @@ def test_xlsx_preview_rejects_excessive_uncompressed_archive(monkeypatch):
     monkeypatch.setattr(historical_result_import,"MAX_XLSX_UNCOMPRESSED_BYTES",1)
     with pytest.raises(ValueError,match="uncompressed workbook content"):
         preview_historical_result("xlsx",out.getvalue(),"large.xlsx")
+
+
+def test_pdf_preview_rejects_invalid_signature():
+    import pytest
+    with pytest.raises(ValueError,match="PDF content signature is invalid"):
+        preview_historical_result("pdf",b"not-a-pdf","fake.pdf")
+
+
+def test_csv_preview_rejects_binary_content():
+    import pytest
+    with pytest.raises(ValueError,match="CSV content appears to be binary"):
+        preview_historical_result("csv",b"Rank\x00Bidder","fake.csv")
