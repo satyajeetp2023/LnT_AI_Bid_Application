@@ -130,6 +130,15 @@ def _bounded_rows(rows):
  return matrix
 
 
+def _validate_preview_signature(extension:str,content:bytes):
+ if extension=="pdf" and not content.startswith(b"%PDF-"):
+  raise ValueError("Historical result preview rejected because PDF content signature is invalid.")
+ if extension=="xlsx" and not content.startswith(b"PK\x03\x04"):
+  raise ValueError("Historical result preview rejected because XLSX content signature is invalid.")
+ if extension=="csv" and b"\x00" in content[:8192]:
+  raise ValueError("Historical result preview rejected because CSV content appears to be binary.")
+
+
 def _matrix(extension,content):
  if extension=="csv":
   return _bounded_rows(csv.reader(io.StringIO(content.decode("utf-8-sig",errors="replace"))))
@@ -143,6 +152,7 @@ def _matrix(extension,content):
 
 def preview_historical_result(extension:str,content:bytes,filename:str=""):
  extension=extension.lower()
+ _validate_preview_signature(extension,content)
  if extension=="pdf":return _preview_pdf(content,filename)
  matrix=_matrix(extension,content)
  best=None
