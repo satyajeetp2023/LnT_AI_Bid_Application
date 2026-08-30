@@ -183,7 +183,22 @@ def parse_xlsx_template(content:bytes)->dict:
             hits=sum(1 for x in TABLE_HINTS if x in lower)
             if hits<2:continue
             table_type,confidence=_table_type(headers)
-            if table_type=="statement_of_compliance" and len(header_rows)>1:confidence=.99
+            # Employer templates often place "STATEMENT OF COMPLIANCE" in a
+            # merged title row above the actual multi-row Yes/No table.
+            title_context=" ".join(
+                _norm(ws.cell(r,col).value)
+                for r in range(max(1,row_index-3),row_index)
+                for col in range(1,ws.max_column+1)
+                if _norm(ws.cell(r,col).value)
+            ).lower()
+            if (
+                "statement of compliance" in title_context
+                and "clause" in lower
+                and ("compliant" in lower or "compliance" in lower)
+            ):
+                table_type,confidence="statement_of_compliance",.99
+            elif table_type=="statement_of_compliance" and len(header_rows)>1:
+                confidence=.99
             start_row=max(header_rows)+1
             end_row=max(header_rows)
             for scan in range(start_row,min(ws.max_row,start_row+50)+1):
