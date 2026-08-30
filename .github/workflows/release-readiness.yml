@@ -48,6 +48,10 @@ jobs:
           SECRET_KEY: 0123456789abcdef0123456789abcdef
           DATABASE_URL: postgresql+psycopg://railway:release-test-password@localhost:5432/railway_bid
           CORS_ORIGINS: https://bid-intelligence.example.internal
+          AUTH_MODE: oidc
+          OIDC_ISSUER: https://identity.example.internal/
+          OIDC_AUDIENCE: railway-bid-intelligence
+          OIDC_JWKS_URL: https://identity.example.internal/.well-known/jwks.json
         run: |
           PYTHONPATH=. python - <<'PY'
           from app.core.config import Settings
@@ -55,6 +59,8 @@ jobs:
           assert settings.environment=="production"
           assert len(settings.secret_key)>=32
           assert settings.cors_origin_list==["https://bid-intelligence.example.internal"]
+          assert settings.auth_mode=="oidc"
+          assert settings.oidc_jwks_url.startswith("https://")
           print("production configuration validation passed")
           PY
 
