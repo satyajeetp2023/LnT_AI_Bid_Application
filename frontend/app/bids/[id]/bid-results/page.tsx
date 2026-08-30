@@ -149,10 +149,10 @@ export default function BidResultsPage({params}:{params:Promise<{id:string}>}){
 
   <section className="mb-3 rounded border border-slate-200 bg-white p-3">
    <div className="flex flex-wrap items-center justify-between gap-3">
-    <div><div className="text-sm font-bold text-slate-900">Import Tender Result</div><div className="text-xs text-slate-500">Upload CSV/XLSX result tabulation. The system prepares a preview only. Nothing is saved until you review and click Save Result.</div></div>
+    <div><div className="text-sm font-bold text-slate-900">Import Tender Result</div><div className="text-xs text-slate-500">Upload CSV/XLSX or text-based PDF result tabulation. The system prepares a preview only. Nothing is saved until you review and click Save Result.</div></div>
     <label className="cursor-pointer rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:border-[#d5aa35]">
      {importing?"Reading...":"Choose Result File"}
-     <input type="file" accept=".csv,.xlsx" className="hidden" disabled={importing} onChange={e=>{const file=e.target.files?.[0];if(file)previewImport(file);e.currentTarget.value=""}}/>
+     <input type="file" accept=".csv,.xlsx,.pdf" className="hidden" disabled={importing} onChange={e=>{const file=e.target.files?.[0];if(file)previewImport(file);e.currentTarget.value=""}}/>
     </label>
    </div>
    {importPreview&&<div className="mt-3 rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
