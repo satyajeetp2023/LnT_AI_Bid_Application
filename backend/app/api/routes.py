@@ -1,3 +1,4 @@
+import hashlib
 from pathlib import Path
 from dataclasses import asdict
 from datetime import date,timedelta
@@ -96,7 +97,10 @@ async def preview_bid_outcome_import(bid_id:int,file:UploadFile=File(...),db:Ses
  content=await file.read()
  if not content:raise HTTPException(422,"Uploaded result file is empty")
  if len(content)>10*1024*1024:raise HTTPException(413,"Historical result preview file exceeds 10 MB")
- try:return preview_historical_result(ext,content,filename)
+ try:
+  preview=preview_historical_result(ext,content,filename)
+  db.add(AuditEvent(user_id=user.id,bid_project_id=bid_id,event_type="historical_bid.import_previewed",entity_type="BidProject",entity_id=str(bid_id),details={"filename":filename,"sha256":hashlib.sha256(content).hexdigest(),"detected":preview.get("detected",False),"price_rows":len(preview.get("prices",[]))}))
+  db.commit();return preview
  except ValueError as exc:raise HTTPException(422,str(exc))
 
 @router.get("/historical-bids/intelligence")
