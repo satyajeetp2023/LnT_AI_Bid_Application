@@ -81,7 +81,7 @@ export default function BidResultsPage({params}:{params:Promise<{id:string}>}){
  };
 
  if(loading)return <LoadingState label="Loading bid result"/>;
- if(error&&!bid)return <ErrorState title="Bid result unavailable" message={error}/>;
+ if(error&&!bid)return <ErrorState message={error}/>;
 
  return <div className="mx-auto max-w-[1500px]">
   <BidWorkspaceHeader bid={bid} active="Bid Results"/>
@@ -91,7 +91,7 @@ export default function BidResultsPage({params}:{params:Promise<{id:string}>}){
    description="Capture the final tender outcome and ranked bidder prices for historical intelligence."
    action={<button onClick={save} disabled={saving} className="rounded bg-[#304354] px-4 py-2 text-xs font-semibold text-white disabled:opacity-50">{saving?"Saving...":"Save Result"}</button>}
   />
-  {error&&<div className="mb-3"><ErrorState title="Unable to save" message={error}/></div>}
+  {error&&<div className="mb-3"><ErrorState message={error}/></div>}
   {result?.warnings.length?<div className="mb-3 space-y-2">{result.warnings.map((x,i)=><div key={i} className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">{x}</div>)}</div>:null}
 
   <div className="mb-3 grid grid-cols-2 gap-3 md:grid-cols-5">
