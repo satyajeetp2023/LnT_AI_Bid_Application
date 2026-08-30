@@ -102,7 +102,7 @@ async def preview_bid_outcome_import(bid_id:int,file:UploadFile=File(...),db:Ses
  require_project_access(db,user,bid_id,Permission.EDIT_BID);get_bid(db,bid_id)
  filename=Path(file.filename or "").name
  ext=Path(filename).suffix.lower().lstrip(".")
- if ext not in {"csv","xlsx"}:raise HTTPException(415,"Historical result preview supports CSV and XLSX only")
+ if ext not in {"csv","xlsx","pdf"}:raise HTTPException(415,"Historical result preview supports CSV, XLSX and text-based PDF files")
  content=await file.read()
  if not content:raise HTTPException(422,"Uploaded result file is empty")
  if len(content)>10*1024*1024:raise HTTPException(413,"Historical result preview file exceeds 10 MB")
