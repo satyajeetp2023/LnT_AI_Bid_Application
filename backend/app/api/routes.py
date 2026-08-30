@@ -7,7 +7,7 @@ from sqlalchemy import func,select
 from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.database.session import get_db
-from app.models import AuditEvent,BidClauseRiskFinding,BidDocument,BidMissingInput,BidPreBidQuery,BidPreparedArtifact,BidProject,BidRequirement,DrawingBoqFinding,ProductivityBenchmark,ProjectMembership,ScheduleScopeItem,User
+from app.models import AuditEvent,BidClauseRiskFinding,BidDocument,BidMissingInput,BidPreBidQuery,BidPreparedArtifact,BidProject,BidRequirement,DrawingBoqFinding,PlanningPackageFinding,ProductivityBenchmark,ProjectMembership,ScheduleScopeItem,User
 from app.schemas.requirements import RequirementCreate,RequirementExtractionSummary,RequirementRead,RequirementUpdate
 from app.schemas.bids import AutoClassifyRequest,BidCreate,BidRead,BidUpdate,ClassificationUpdate,DocumentMetadataUpdate,DocumentRead,NotesUpdate,RevisionCreate
 from app.security.auth import Permission,current_user,is_admin,require_permission,require_project_access
@@ -32,7 +32,7 @@ from app.services.boq_document_extraction import extract_boq_rows
 from app.services.schedule_skeleton import build_schedule_skeleton
 from app.services.productivity_benchmarks import activity_key,benchmark_summary
 from app.services.planning_package_ingestion import ingest_planning_resource_document,planning_resource_summary
-from app.services.planning_package_reconciliation import reconcile_planning_package
+from app.services.planning_package_reconciliation import planning_package_findings,reconcile_planning_package,review_planning_package_finding,sync_planning_package_findings
 from app.services.clause_risk_intelligence import bid_clause_risk_summary,firm_risk_library,promote_finding_to_firm_pattern,review_clause_risk,scan_document_clause_risks
 from app.services.contract_clause_variation import contract_clause_variations
 from app.services.drawing_boq_verification import drawing_boq_summary,record_drawing_observations,review_drawing_boq_finding,verify_drawing_boq
@@ -203,6 +203,35 @@ def prepared_artifact_ready(artifact_id:int,request:Request,db:Session=Depends(g
 def approve_prepared_artifact(artifact_id:int,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
  item=get_prepared_artifact(db,artifact_id);require_project_access(db,user,item.bid_project_id,Permission.PREPARED_ARTIFACT_APPROVE)
  return artifact_dict(approve_artifact(db,item,user.id,metadata(request)))
+
+@router.post("/documents/{document_id}/refresh-planning-package-findings")
+def refresh_planning_package_findings(document_id:int,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ doc=get_doc(db,document_id);require_project_access(db,user,doc.bid_project_id,Permission.REQUIREMENT_MANAGE)
+ if not doc.storage_path or doc.file_extension.lower() not in SCHEDULE_EXTENSIONS:
+  raise HTTPException(422,"Supported schedule content is required")
+ ingestion=ingest_schedule(doc.file_extension,LocalSecureStorage(get_settings().storage_root).read(doc.storage_path))
+ if not ingestion["detected"]:raise HTTPException(422,"No reliable structured schedule activity table could be extracted")
+ analysis=reconcile_planning_package(db,doc.bid_project_id,ingestion["tables"],ingestion["capabilities"])
+ sync=sync_planning_package_findings(db,doc.bid_project_id,doc.id,analysis)
+ db.add(AuditEvent(user_id=user.id,bid_project_id=doc.bid_project_id,event_type="planning_package.findings_refreshed",entity_type="BidDocument",entity_id=str(doc.id),request_metadata=metadata(request),details=sync))
+ db.commit()
+ return {"analysis":analysis,"sync":sync,"findings":planning_package_findings(db,doc.bid_project_id)}
+
+@router.get("/bids/{bid_id}/planning-package-findings")
+def get_planning_package_findings(bid_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.REQUIREMENT_VIEW);get_bid(db,bid_id)
+ return planning_package_findings(db,bid_id)
+
+@router.post("/planning-package-findings/{finding_id}/review")
+def review_planning_package(finding_id:int,payload:dict,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ finding=db.get(PlanningPackageFinding,finding_id)
+ if not finding:raise HTTPException(404,"Planning-package finding not found")
+ require_project_access(db,user,finding.bid_project_id,Permission.REQUIREMENT_MANAGE)
+ try:result=review_planning_package_finding(db,finding_id,str(payload.get("disposition") or ""),payload.get("comment"),user.id)
+ except ValueError as exc:raise HTTPException(422,str(exc)) from None
+ db.add(AuditEvent(user_id=user.id,bid_project_id=finding.bid_project_id,event_type="planning_package.finding_reviewed",entity_type="PlanningPackageFinding",entity_id=str(finding_id),request_metadata=metadata(request),details={"disposition":result["disposition"],"status":result["status"]}))
+ db.commit()
+ return result
 
 @router.get("/documents/{document_id}/planning-package-analysis")
 def planning_package_analysis(document_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)):
@@ -609,6 +638,7 @@ def assign_work_item_person(bid_id:int,payload:dict,request:Request,db:Session=D
  elif entity_type=="Schedule Scope":model=ScheduleScopeItem;permission=Permission.REQUIREMENT_MANAGE
  elif entity_type=="Clause Risk":model=BidClauseRiskFinding;permission=Permission.REQUIREMENT_MANAGE
  elif entity_type=="Drawing BOQ":model=DrawingBoqFinding;permission=Permission.REQUIREMENT_MANAGE
+ elif entity_type=="Planning Package":model=PlanningPackageFinding;permission=Permission.REQUIREMENT_MANAGE
  else:raise HTTPException(422,"Unsupported work item type")
  require_project_access(db,user,bid_id,permission)
  item=db.get(model,entity_id)
