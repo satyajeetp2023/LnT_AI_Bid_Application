@@ -250,13 +250,26 @@ jobs:
             -e OIDC_JWKS_URL=https://identity.example.internal/.well-known/jwks.json \
             railway-bid-backend:release-test
           trap 'docker rm -f railway-bid-backend-smoke >/dev/null 2>&1 || true' EXIT
+          READY=0
           for i in {1..30}; do
             if curl -fsS http://127.0.0.1:8000/api/v1/health/ready >/dev/null; then
               echo "backend container runtime smoke passed"
+              READY=1
               break
+            fi
+            if ! docker ps --format '{{.Names}}' | grep -qx railway-bid-backend-smoke; then
+              echo "backend container exited before becoming ready"
+              docker ps -a --filter name=railway-bid-backend-smoke
+              docker logs railway-bid-backend-smoke || true
+              exit 1
             fi
             sleep 1
           done
+          if [ "$READY" != "1" ]; then
+            docker ps -a --filter name=railway-bid-backend-smoke
+            docker logs railway-bid-backend-smoke || true
+            exit 1
+          fi
           curl -fsS -D /tmp/backend-headers.txt http://127.0.0.1:8000/api/v1/health/ready >/dev/null
           grep -qi '^strict-transport-security: max-age=31536000; includeSubDomains' /tmp/backend-headers.txt
           grep -qi '^x-request-id:' /tmp/backend-headers.txt
