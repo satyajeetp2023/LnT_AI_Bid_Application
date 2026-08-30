@@ -263,6 +263,10 @@ def ingest_schedule(extension:str,content:bytes):
         tables=_spreadsheet(ext,content);source_kind="Schedule Spreadsheet";fidelity="Structured Table"
     elif ext in {"pdf","docx","txt"}:
         tables=_report_text(ext,content);source_kind="Schedule Report";fidelity="Report / Limited"
+    elif ext=="mpp":
+        tables=None;source_kind="Microsoft Project MPP";fidelity="Native Binary / Parser Required"
+    elif ext in {"xls","doc"}:
+        tables=None;source_kind=f"Legacy {ext.upper()} Schedule";fidelity="Legacy Binary / Conversion Required"
     else:
         tables=None;source_kind=f"{ext.upper()} Schedule";fidelity="Unsupported Structure"
 
@@ -274,7 +278,7 @@ def ingest_schedule(extension:str,content:bytes):
             "fidelity":fidelity,
             "capabilities":{"activities":False,"logic":False,"float":False,"resources":False,"calendars":False,"wbs":False},
             "limitations":["No reliable structured activity table could be extracted from this source."],
-            "parser_version":"phase6-unified-schedule-ingestion-v1",
+            "parser_version":"phase6-unified-schedule-ingestion-v2",
         }
 
     task_fields={k for row in tables.get("TASK",[]) for k,v in row.items() if v not in (None,"")}
@@ -296,5 +300,5 @@ def ingest_schedule(extension:str,content:bytes):
         "fidelity":fidelity,
         "capabilities":capabilities,
         "limitations":limitations,
-        "parser_version":"phase6-unified-schedule-ingestion-v1",
+        "parser_version":"phase6-unified-schedule-ingestion-v2",
     }
