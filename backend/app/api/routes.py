@@ -31,6 +31,7 @@ from app.services.boq_scope_adapter import ingest_boq_scope
 from app.services.boq_document_extraction import extract_boq_rows
 from app.services.schedule_skeleton import build_schedule_skeleton
 from app.services.productivity_benchmarks import activity_key,benchmark_summary
+from app.services.planning_package_ingestion import ingest_planning_resource_document,planning_resource_summary
 from app.services.clause_risk_intelligence import bid_clause_risk_summary,firm_risk_library,promote_finding_to_firm_pattern,review_clause_risk,scan_document_clause_risks
 from app.services.contract_clause_variation import contract_clause_variations
 from app.services.drawing_boq_verification import drawing_boq_summary,record_drawing_observations,review_drawing_boq_finding,verify_drawing_boq
@@ -504,6 +505,17 @@ def review_drawing_boq(finding_id:int,payload:dict,request:Request,db:Session=De
  db.add(AuditEvent(user_id=user.id,bid_project_id=finding.bid_project_id,event_type="drawing_boq.reviewed",entity_type="DrawingBoqFinding",entity_id=str(finding_id),request_metadata=metadata(request),details={"disposition":result["reviewer_disposition"]}))
  db.commit()
  return result
+
+@router.post("/documents/{document_id}/ingest-planning-resource-plan")
+def ingest_planning_resource_plan(document_id:int,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ doc=get_doc(db,document_id);require_project_access(db,user,doc.bid_project_id,Permission.REQUIREMENT_MANAGE)
+ try:return ingest_planning_resource_document(db,doc,LocalSecureStorage(get_settings().storage_root),user.id,metadata(request))
+ except ValueError as exc:raise HTTPException(422,str(exc)) from None
+
+@router.get("/bids/{bid_id}/planning-resources")
+def get_planning_resources(bid_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.REQUIREMENT_VIEW);get_bid(db,bid_id)
+ return planning_resource_summary(db,bid_id)
 
 @router.get("/bids/{bid_id}/schedule-skeleton")
 def get_schedule_skeleton(bid_id:int,request:Request,sync_scope:bool=Query(True),db:Session=Depends(get_db),user:User=Depends(user_dep)):
