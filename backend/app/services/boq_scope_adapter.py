@@ -57,9 +57,11 @@ def ingest_boq_scope(
             skipped+=1;continue
         quantity=row.get("quantity")
         unit=row.get("unit")
+        work_front=str(row.get("work_front") or "").strip() or None
         evidence=f"BOQ {reference}: {description}"
         if quantity not in (None,""):evidence+=f" | Qty: {quantity}"
         if unit not in (None,""):evidence+=f" {unit}"
+        if work_front:evidence+=f" | Work Front: {work_front}"
 
         base=_base_scope(description)
         key=(reference,base.lower())
