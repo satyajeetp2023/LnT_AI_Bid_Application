@@ -43,6 +43,7 @@ export function Sidebar({mobileOpen=false,onClose}:{mobileOpen?:boolean;onClose?
    {n:"Bid Results",h:bidId?`/bids/${bidId}/bid-results`:undefined,i:BarChart3,keywords:"win loss result l1 l2 l3 l4"},
    {n:"Execution Learning",h:bidId?`/bids/${bidId}/execution-learning`:undefined,i:History,keywords:"bid actual execution margin cost learning"},
    {n:"Historical Intelligence",h:"/historical-intelligence",i:History,keywords:"history previous bids benchmark win loss competitor"},
+   {n:"Execution Learning Portfolio",h:"/execution-learning",i:History,keywords:"actual execution portfolio learning margin cost eot"},
    {n:"Reports & Analytics",i:BarChart3,keywords:"dashboard reports analytics"},
   ]},
  ],[bidId]);
