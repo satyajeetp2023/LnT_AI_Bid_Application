@@ -10,6 +10,7 @@ from app.database.session import get_db
 from app.models import AuditEvent,BidClauseRiskFinding,BidDocument,BidMissingInput,BidPreBidQuery,BidPreparedArtifact,BidProject,BidRequirement,DrawingBoqFinding,PlanningPackageFinding,ProductivityBenchmark,ProjectMembership,ScheduleScopeItem,User
 from app.schemas.requirements import RequirementCreate,RequirementExtractionSummary,RequirementRead,RequirementUpdate
 from app.schemas.bids import AutoClassifyRequest,BidCreate,BidRead,BidUpdate,ClassificationUpdate,DocumentMetadataUpdate,DocumentRead,NotesUpdate,RevisionCreate
+from app.schemas.historical_bids import BidOutcomeUpsert
 from app.security.auth import Permission,current_user,is_admin,require_permission,require_project_access
 from app.services.bids import create_bid,list_bids,update_bid
 from app.services.requirements import create_requirement,list_requirements,update_requirement
@@ -44,6 +45,7 @@ from app.services.tender_semantic_retrieval import tender_semantic_status
 from app.services.schedule_ingestion import SCHEDULE_EXTENSIONS,ingest_schedule
 from app.services.documents import DOCUMENT_CATEGORIES,archive,classify,mark_revision,update_document_metadata,update_notes,upload_document
 from app.services.document_classification import auto_classify_document
+from app.services.historical_bid_intelligence import get_bid_outcome,historical_bid_intelligence,upsert_bid_outcome
 from app.storage.base import LocalSecureStorage
 router=APIRouter()
 def user_dep(db:Session=Depends(get_db),x_user_id:int=Header(default=1,alias="X-User-ID")): return current_user(db,x_user_id)
@@ -71,6 +73,22 @@ def add_bid(payload:BidCreate,db:Session=Depends(get_db),user:User=Depends(user_
 def bid_detail(bid_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)): require_project_access(db,user,bid_id,Permission.VIEW_DOCUMENT); return get_bid(db,bid_id)
 @router.patch("/bids/{bid_id}",response_model=BidRead)
 def edit_bid(bid_id:int,payload:BidUpdate,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)): require_project_access(db,user,bid_id,Permission.EDIT_BID); return update_bid(db,get_bid(db,bid_id),payload,user.id,metadata(request))
+
+@router.get("/bids/{bid_id}/outcome")
+def bid_outcome(bid_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.VIEW_DOCUMENT);get_bid(db,bid_id)
+ return get_bid_outcome(db,bid_id)
+
+@router.put("/bids/{bid_id}/outcome")
+def save_bid_outcome(bid_id:int,payload:BidOutcomeUpsert,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.EDIT_BID)
+ return upsert_bid_outcome(db,get_bid(db,bid_id),payload,user.id,metadata(request))
+
+@router.get("/historical-bids/intelligence")
+def portfolio_historical_bid_intelligence(db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ visible=list_bids(db,user)
+ return historical_bid_intelligence(db,[x.id for x in visible])
+
 @router.get("/dashboard/summary")
 def dashboard(db:Session=Depends(get_db),user:User=Depends(user_dep)):
  visible=list_bids(db,user); ids=[b.id for b in visible]; today=date.today(); due=today+timedelta(days=30)
