@@ -6,3 +6,4 @@ from .productivity import *
 from .clause_risk import *
 from .drawing_boq import *
 from .tender_knowledge import *
+from .planning_resources import *
