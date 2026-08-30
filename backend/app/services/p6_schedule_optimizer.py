@@ -114,18 +114,19 @@ def build_schedule_optimization_from_tables(
 
     active_non_milestone=[x for x in tasks if x.get("task_type") not in milestone_types]
     completeness_checks=[]
-    def add_check(name,predicate,required=True):
+    def add_check(name,predicate,required=True,available=True):
         denominator=len(active_non_milestone)
-        populated=sum(1 for task in active_non_milestone if predicate(task))
+        populated=sum(1 for task in active_non_milestone if predicate(task)) if available else 0
         completeness_checks.append({
             "parameter":name,
             "required":required,
+            "available":available,
             "populated":populated,
             "total":denominator,
-            "percent":100.0 if denominator==0 else round(populated*100/denominator,1),
+            "percent":None if not available else (100.0 if denominator==0 else round(populated*100/denominator,1)),
             "missing_activity_codes":[
                 task.get("task_code") or task.get("task_id")
-                for task in active_non_milestone if not predicate(task)
+                for task in active_non_milestone if available and not predicate(task)
             ][:100],
         })
     add_check("Activity ID / Code",lambda t:bool(str(t.get("task_code") or "").strip()))
@@ -136,12 +137,12 @@ def build_schedule_optimization_from_tables(
     add_check("Duration",lambda t:_float(t.get("target_drtn_hr_cnt"))>0 or _float(t.get("remain_drtn_hr_cnt"))>0)
     add_check("Start Date",lambda t:any(str(t.get(k) or "").strip() for k in ("act_start_date","early_start_date","target_start_date","late_start_date")))
     add_check("Finish Date",lambda t:any(str(t.get(k) or "").strip() for k in ("act_end_date","early_end_date","target_end_date","late_end_date")))
-    add_check("Total Float",lambda t:str(t.get("total_float_hr_cnt") or "").strip()!="")
-    add_check("Logic",lambda t:bool(preds.get(t.get("task_id")) or succs.get(t.get("task_id"))))
+    add_check("Total Float",lambda t:str(t.get("total_float_hr_cnt") or "").strip()!="",available=float_available)
+    add_check("Logic",lambda t:bool(preds.get(t.get("task_id")) or succs.get(t.get("task_id"))),available=logic_available)
     if assignments:
         add_check("Resource Assignment",lambda t:t.get("task_id") in assigned_task_ids,required=False)
-    required_checks=[x for x in completeness_checks if x["required"]]
-    data_completeness_score=100.0 if not required_checks else round(sum(x["percent"] for x in required_checks)/len(required_checks),1)
+    required_checks=[x for x in completeness_checks if x["required"] and x["available"]]
+    data_completeness_score=100.0 if not required_checks else round(sum(x["percent"] for x in required_checks if x["percent"] is not None)/len(required_checks),1)
 
     complete_statuses={"TK_Complete","Complete","Completed"}
 
