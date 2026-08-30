@@ -201,6 +201,33 @@ jobs:
       - name: Build backend container
         run: docker build -t railway-bid-backend:release-test ./backend
 
+      - name: Backend container runtime smoke
+        env:
+          PGPASSWORD: release-test-password
+        run: |
+          docker run -d --name railway-bid-backend-smoke --network host \
+            -e ENVIRONMENT=production \
+            -e SECRET_KEY=0123456789abcdef0123456789abcdef \
+            -e DATABASE_URL=postgresql+psycopg://railway:release-test-password@127.0.0.1:5432/railway_bid \
+            -e STORAGE_ROOT=/tmp/railway-bid-container-storage \
+            -e CORS_ORIGINS=https://bid-intelligence.example.internal \
+            -e AUTH_MODE=oidc \
+            -e OIDC_ISSUER=https://identity.example.internal/ \
+            -e OIDC_AUDIENCE=railway-bid-intelligence \
+            -e OIDC_JWKS_URL=https://identity.example.internal/.well-known/jwks.json \
+            railway-bid-backend:release-test
+          trap 'docker rm -f railway-bid-backend-smoke >/dev/null 2>&1 || true' EXIT
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:8000/api/v1/health/ready >/dev/null; then
+              echo "backend container runtime smoke passed"
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8000/api/v1/health/ready >/dev/null
+          docker rm -f railway-bid-backend-smoke >/dev/null
+          trap - EXIT
+
       - name: Build frontend container
         run: |
           docker build \
@@ -211,6 +238,21 @@ jobs:
             --build-arg NEXT_PUBLIC_OIDC_REDIRECT_URI=https://bid-intelligence.example.internal/auth/callback \
             --build-arg NEXT_PUBLIC_OIDC_SCOPE="openid profile email" \
             -t railway-bid-frontend:release-test ./frontend
+
+      - name: Frontend container runtime smoke
+        run: |
+          docker run -d --name railway-bid-frontend-smoke -p 3000:3000 railway-bid-frontend:release-test
+          trap 'docker rm -f railway-bid-frontend-smoke >/dev/null 2>&1 || true' EXIT
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:3000 >/dev/null; then
+              echo "frontend container runtime smoke passed"
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:3000 >/dev/null
+          docker rm -f railway-bid-frontend-smoke >/dev/null
+          trap - EXIT
 
       - name: Runtime smoke backend container
         env:
