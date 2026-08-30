@@ -17,7 +17,7 @@ export default function HistoricalIntelligencePage(){
  },[]);
 
  if(loading)return <LoadingState label="Loading historical intelligence"/>;
- if(error)return <ErrorState title="Historical intelligence unavailable" message={error}/>;
+ if(error)return <ErrorState message={error}/>;
  if(!data)return null;
 
  return <div className="mx-auto max-w-[1500px]">
