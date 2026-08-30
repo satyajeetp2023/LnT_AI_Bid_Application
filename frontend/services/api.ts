@@ -10,7 +10,7 @@ function timeoutMessage(timeoutMs:number){
  return `The service did not respond within ${seconds} seconds. Please try again.`;
 }
 
-export async function request<T>(path:string,init:ApiRequestInit={}):Promise<T>{
+async function authHeaders(init:ApiRequestInit){
  const mode=authMode();
  const headers=new Headers(init.headers||{});
  if(!(init.body instanceof FormData)&&!headers.has("Content-Type"))headers.set("Content-Type","application/json");
@@ -26,7 +26,11 @@ export async function request<T>(path:string,init:ApiRequestInit={}):Promise<T>{
  }else{
   throw new Error("Unsupported frontend authentication mode");
  }
+ return {mode,headers};
+}
 
+export async function authenticatedFetch(path:string,init:ApiRequestInit={}):Promise<Response>{
+ const {mode,headers}=await authHeaders(init);
  const timeoutMs=Math.max(1,init.timeoutMs??DEFAULT_REQUEST_TIMEOUT_MS);
  const controller=new AbortController();
  let timedOut=false;
@@ -37,7 +41,6 @@ export async function request<T>(path:string,init:ApiRequestInit={}):Promise<T>{
   if(externalSignal.aborted)controller.abort();
   else externalSignal.addEventListener("abort",abortFromCaller,{once:true});
  }
-
  const {timeoutMs:_timeoutMs,signal:_signal,...fetchInit}=init;
  try{
   const r=await fetch(API+path,{...fetchInit,headers,signal:controller.signal});
@@ -45,11 +48,7 @@ export async function request<T>(path:string,init:ApiRequestInit={}):Promise<T>{
    await beginLogin(window.location.pathname+window.location.search);
    throw new Error("Enterprise session expired");
   }
-  if(!r.ok){
-   const e=await r.json().catch(()=>({detail:"Request failed"}));
-   throw new Error(e.detail||"Request failed");
-  }
-  return r.json();
+  return r;
  }catch(error){
   if(timedOut)throw new Error(timeoutMessage(timeoutMs));
   if(controller.signal.aborted){
@@ -61,4 +60,33 @@ export async function request<T>(path:string,init:ApiRequestInit={}):Promise<T>{
   clearTimeout(timeoutId);
   externalSignal?.removeEventListener("abort",abortFromCaller);
  }
+}
+
+async function responseError(r:Response,fallback="Request failed"){
+ const e=await r.json().catch(()=>({detail:fallback}));
+ return new Error(e.detail||fallback);
+}
+
+export async function request<T>(path:string,init:ApiRequestInit={}):Promise<T>{
+ const r=await authenticatedFetch(path,init);
+ if(!r.ok)throw await responseError(r);
+ return r.json();
+}
+
+export async function downloadFile(path:string,fallbackFilename:string,init:ApiRequestInit={}):Promise<string>{
+ const r=await authenticatedFetch(path,init);
+ if(!r.ok)throw await responseError(r,"Download failed");
+ const blob=await r.blob();
+ const disposition=r.headers.get("content-disposition")||"";
+ const match=disposition.match(/filename\*?=(?:UTF-8''|")?([^";]+)"?/i);
+ const filename=decodeURIComponent((match?.[1]||fallbackFilename).trim());
+ const url=URL.createObjectURL(blob);
+ try{
+  const a=document.createElement("a");
+  a.href=url;a.download=filename;a.style.display="none";
+  document.body.appendChild(a);a.click();a.remove();
+ }finally{
+  URL.revokeObjectURL(url);
+ }
+ return filename;
 }
