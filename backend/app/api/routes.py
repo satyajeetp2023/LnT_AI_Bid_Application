@@ -31,7 +31,7 @@ from app.services.boq_scope_adapter import ingest_boq_scope
 from app.services.boq_document_extraction import extract_boq_rows
 from app.services.schedule_skeleton import build_schedule_skeleton
 from app.services.productivity_benchmarks import activity_key,benchmark_summary
-from app.services.clause_risk_intelligence import bid_clause_risk_summary,review_clause_risk,scan_document_clause_risks
+from app.services.clause_risk_intelligence import bid_clause_risk_summary,firm_risk_library,promote_finding_to_firm_pattern,review_clause_risk,scan_document_clause_risks
 from app.services.tender_qa import tender_question_answer
 from app.services.schedule_ingestion import SCHEDULE_EXTENSIONS,ingest_schedule
 from app.services.documents import DOCUMENT_CATEGORIES,archive,classify,mark_revision,update_document_metadata,update_notes,upload_document
@@ -408,6 +408,19 @@ def review_clause_risk_finding(finding_id:int,payload:dict,request:Request,db:Se
  db.add(AuditEvent(user_id=user.id,bid_project_id=finding.bid_project_id,event_type="clause_risk.reviewed",entity_type="BidClauseRiskFinding",entity_id=str(finding_id),request_metadata=metadata(request),details={"disposition":result["reviewer_disposition"]}))
  db.commit()
  return result
+
+@router.get("/firm-risk-library")
+def get_firm_risk_library(db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_permission(user,Permission.REQUIREMENT_VIEW)
+ return firm_risk_library(db)
+
+@router.post("/clause-risks/{finding_id}/promote-pattern")
+def promote_clause_risk_pattern(finding_id:int,payload:dict,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ finding=db.get(BidClauseRiskFinding,finding_id)
+ if not finding:raise HTTPException(404,"Clause-risk finding not found")
+ require_project_access(db,user,finding.bid_project_id,Permission.REQUIREMENT_MANAGE)
+ try:return promote_finding_to_firm_pattern(db,finding_id,payload,user.id)
+ except ValueError as exc:raise HTTPException(422,str(exc)) from None
 
 @router.get("/bids/{bid_id}/schedule-skeleton")
 def get_schedule_skeleton(bid_id:int,request:Request,sync_scope:bool=Query(True),db:Session=Depends(get_db),user:User=Depends(user_dep)):
