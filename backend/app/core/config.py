@@ -21,8 +21,18 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_production_security(self):
-        if self.environment.strip().lower()=="production" and self.secret_key=="development-only-change-me":
-            raise ValueError("Production SECRET_KEY must be explicitly configured")
+        if self.environment.strip().lower()=="production":
+            if self.secret_key=="development-only-change-me" or len(self.secret_key)<32:
+                raise ValueError("Production SECRET_KEY must be explicitly configured and at least 32 characters")
+            if "change-me" in self.database_url.lower():
+                raise ValueError("Production DATABASE_URL cannot use placeholder credentials")
+            origins=self.cors_origin_list
+            if not origins or "*" in origins:
+                raise ValueError("Production CORS_ORIGINS must explicitly list approved origins")
+            if any("localhost" in x.lower() or "127.0.0.1" in x for x in origins):
+                raise ValueError("Production CORS_ORIGINS cannot use localhost origins")
+            if self.max_file_size_mb>200 or self.max_batch_size_mb>1000:
+                raise ValueError("Production upload limits exceed the approved safety ceiling")
         return self
 
 @lru_cache
