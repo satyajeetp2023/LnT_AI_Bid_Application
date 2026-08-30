@@ -39,7 +39,7 @@ jobs:
         with:
           node-version: "22"
       - run: npm install
-      - name: Critical dependency audit
-        run: npm audit --audit-level=critical
+      - name: High severity dependency audit
+        run: npm audit --audit-level=high
       - run: npm test
       - run: npm run build
