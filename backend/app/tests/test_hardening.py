@@ -97,3 +97,10 @@ def test_historical_comparison_uses_completed_visible_bid(client,bid_payload):
     assert body["matches"][0]["similarity_score"]==100
     assert set(body["matches"][0]["matched_fields"])=={"project_type","client","contract_type","location"}
     assert "no win prediction" in body["methodology"].lower()
+    intelligence=client.get("/api/v1/historical-bids/intelligence")
+    assert intelligence.status_code==200
+    competitor=next(x for x in intelligence.json()["competitors"] if x["name"]=="Competitor A")
+    assert competitor["appearances"]==1
+    assert competitor["l1_wins"]==1
+    assert competitor["l1_rate_percent"]==100.0
+    assert competitor["average_rank"]==1.0
