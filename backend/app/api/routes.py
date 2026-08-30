@@ -45,7 +45,7 @@ from app.services.tender_qa import tender_question_answer
 from app.services.tender_knowledge_index import index_tender_document,tender_knowledge_status
 from app.services.tender_semantic_retrieval import tender_semantic_status
 from app.services.schedule_ingestion import SCHEDULE_EXTENSIONS,ingest_schedule
-from app.services.documents import DOCUMENT_CATEGORIES,archive,classify,mark_revision,update_document_metadata,update_notes,upload_document
+from app.services.documents import DOCUMENT_CATEGORIES,archive,classify,mark_revision,preflight_document_upload,update_document_metadata,update_notes,upload_document
 from app.services.document_classification import auto_classify_document
 from app.services.historical_bid_intelligence import get_bid_outcome,historical_bid_intelligence,upsert_bid_outcome
 from app.services.historical_bid_comparison import historical_comparison
@@ -151,10 +151,13 @@ def documents(bid_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep),
 async def upload(bid_id:int,files:list[UploadFile]=File(...),db:Session=Depends(get_db),user:User=Depends(user_dep)):
  require_project_access(db,user,bid_id,Permission.UPLOAD_DOCUMENT); cfg=get_settings()
  if len(files)>cfg.max_files_per_batch: raise HTTPException(413,"Too many files in batch")
- result=[]; total=0
+ prepared=[];total=0
  file_limit=cfg.max_file_size_mb*1024*1024;batch_limit=cfg.max_batch_size_mb*1024*1024
  for file in files:
   data,size=await read_limited_upload(file,file_limit,batch_limit-total);total+=size
+  preflight_document_upload(file.filename or "",data);prepared.append((file,data))
+ result=[]
+ for file,data in prepared:
   result.append(upload_document(db,bid_id,file.filename or "",file.content_type,data,user.id))
  return result
 @router.patch("/documents/{document_id}/classification",response_model=DocumentRead)
