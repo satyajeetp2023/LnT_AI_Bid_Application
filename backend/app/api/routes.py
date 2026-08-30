@@ -98,7 +98,7 @@ def health(db:Session=Depends(get_db)):
 def upload_config():
  c=get_settings(); return {"max_file_size_mb":c.max_file_size_mb,"max_batch_size_mb":c.max_batch_size_mb,"max_files_per_batch":c.max_files_per_batch,"allowed_extensions":sorted(c.allowed_extensions),"document_categories":DOCUMENT_CATEGORIES}
 @router.get("/auth/me")
-def me(user:User=Depends(user_dep)): return {"id":user.id,"name":user.full_name,"roles":[r.name.value for r in user.roles],"permissions":sorted(x.value for x in effective_permissions(user))}
+def me(db:Session=Depends(get_db),user:User=Depends(user_dep)):\n memberships=[] if is_admin(user) else list(db.scalars(select(ProjectMembership.bid_project_id).where(ProjectMembership.user_id==user.id)).all())\n return {"id":user.id,"name":user.full_name,"roles":[r.name.value for r in user.roles],"permissions":sorted(x.value for x in effective_permissions(user)),"is_admin":is_admin(user),"bid_project_ids":memberships}
 @router.get("/bids",response_model=list[BidRead])
 def bids(db:Session=Depends(get_db),user:User=Depends(user_dep)): return list_bids(db,user)
 @router.post("/bids",response_model=BidRead,status_code=201)
