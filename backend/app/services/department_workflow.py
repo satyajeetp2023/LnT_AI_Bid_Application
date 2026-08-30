@@ -4,7 +4,7 @@ from datetime import date,timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import BidClauseRiskFinding,BidMissingInput,BidPreBidQuery,BidRequirement
+from app.models import BidClauseRiskFinding,BidMissingInput,BidPreBidQuery,BidRequirement,DrawingBoqFinding
 from app.services.missing_input_taxonomy import RESOLVED_STATUSES
 from app.services.responsibility_assignment import suggest_responsible_function
 from app.services.schedule_scope_coverage import schedule_scope_catalog
@@ -113,6 +113,28 @@ def department_work_queue(db:Session,bid_id:int,responsible_function:str|None=No
             "source_page":risk.source_page,"source_clause":risk.source_clause,
         })
 
+    drawing_findings=db.scalars(select(DrawingBoqFinding).where(
+        DrawingBoqFinding.bid_project_id==bid_id,
+        DrawingBoqFinding.review_status=="Open",
+    )).all()
+    for finding in drawing_findings:
+        owner=finding.responsible_function or "Engineering"
+        person=finding.responsible_person
+        if responsible_function and owner!=responsible_function:continue
+        if responsible_person and person!=responsible_person:continue
+        items.append({
+            "entity_type":"Drawing BOQ","entity_id":finding.id,
+            "title":f"{finding.finding_status}: {finding.boq_reference or 'Drawing quantity'}",
+            "priority":"High" if finding.finding_status in {"Quantity Variance","No BOQ Match"} else "Medium",
+            "responsible_function":owner,"responsible_person":person,
+            "status":finding.finding_status,"due_date":None,"is_overdue":False,
+            "action":"Review drawing / BOQ quantity",
+            "reason":"Drawing-derived quantity evidence does not cleanly reconcile with the BOQ and requires estimator/engineering review.",
+            "route":f"/bids/{bid_id}/copilot",
+            "source_document":finding.boq_description,
+            "source_page":None,"source_clause":finding.boq_reference,
+        })
+
     scope_catalog=schedule_scope_catalog(db,bid_id)
     for scope in scope_catalog.get("groups",[]):
         if not scope.get("group_blocking"):continue
@@ -191,6 +213,8 @@ def department_work_queue(db:Session,bid_id:int,responsible_function:str|None=No
         owner=_owner(q.query_category,q.query_text,q.responsible_function);functions.add(owner)
     all_risks=db.scalars(select(BidClauseRiskFinding).where(BidClauseRiskFinding.bid_project_id==bid_id)).all()
     if all_risks:functions.add("Contracts")
+    all_drawing_findings=db.scalars(select(DrawingBoqFinding).where(DrawingBoqFinding.bid_project_id==bid_id)).all()
+    if all_drawing_findings:functions.add("Engineering")
     mandatory_scope=[x for x in scope_catalog.get("groups",[]) if x.get("mandatory")]
     if mandatory_scope:functions.add("Planning")
 
@@ -216,6 +240,10 @@ def department_work_queue(db:Session,bid_id:int,responsible_function:str|None=No
             for risk in all_risks:
                 total+=1
                 if risk.review_status=="Closed":completed+=1
+        if function_name=="Engineering":
+            for finding in all_drawing_findings:
+                total+=1
+                if finding.review_status!="Open":completed+=1
         if function_name=="Planning":
             for scope in mandatory_scope:
                 total+=1
@@ -250,5 +278,5 @@ def department_work_queue(db:Session,bid_id:int,responsible_function:str|None=No
         "department_control":department_control,
         "department_progress":progress_rows,
         "filter":{"responsible_function":responsible_function,"responsible_person":responsible_person},
-        "version":"phase4-department-work-queue-v8",
+        "version":"phase4-department-work-queue-v9",
     }
