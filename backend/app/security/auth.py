@@ -2,6 +2,7 @@ from enum import StrEnum
 from fastapi import Header, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from app.core.config import get_settings
 from app.models import ProjectMembership, RoleName, User
 
 class Permission(StrEnum):
@@ -15,6 +16,7 @@ ROLE_PERMISSIONS={
  RoleName.PLANNING:{Permission.VIEW_DOCUMENT,Permission.DOWNLOAD_DOCUMENT,Permission.REQUIREMENT_VIEW}|VIEW, RoleName.ENGINEERING:{Permission.VIEW_DOCUMENT,Permission.DOWNLOAD_DOCUMENT,Permission.REQUIREMENT_VIEW}|VIEW, RoleName.CONTRACTS:{Permission.VIEW_DOCUMENT,Permission.DOWNLOAD_DOCUMENT,Permission.CLASSIFY_DOCUMENT,Permission.REQUIREMENT_VIEW,Permission.REQUIREMENT_MANAGE}|MANAGE, RoleName.COMMERCIAL:{Permission.VIEW_DOCUMENT,Permission.DOWNLOAD_DOCUMENT,Permission.REQUIREMENT_VIEW}|VIEW, RoleName.PROCUREMENT:{Permission.VIEW_DOCUMENT,Permission.DOWNLOAD_DOCUMENT,Permission.REQUIREMENT_VIEW}|VIEW, RoleName.FINANCE:{Permission.VIEW_DOCUMENT,Permission.DOWNLOAD_DOCUMENT,Permission.REQUIREMENT_VIEW}|VIEW, RoleName.MANAGEMENT_REVIEWER:{Permission.VIEW_DOCUMENT,Permission.DOWNLOAD_DOCUMENT,Permission.REQUIREMENT_VIEW,Permission.PRE_BID_QUERY_APPROVE,Permission.PREPARED_ARTIFACT_APPROVE}|VIEW, RoleName.READ_ONLY:{Permission.VIEW_DOCUMENT,Permission.DOWNLOAD_DOCUMENT,Permission.REQUIREMENT_VIEW}|VIEW,
 }
 def current_user(db:Session,x_user_id:int=Header(alias="X-User-ID"))->User:
+ if get_settings().environment.strip().lower()=="production": raise HTTPException(503,"Development identity is disabled in production; enterprise identity provider is required")
  user=db.get(User,x_user_id)
  if not user or not user.is_active: raise HTTPException(401,"Invalid development identity")
  return user
