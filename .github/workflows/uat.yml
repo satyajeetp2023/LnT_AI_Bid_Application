@@ -1,0 +1,43 @@
+name: Internal UAT
+
+on:
+  push:
+    branches:
+      - codex/phase-2-pre-bid-queries
+  workflow_dispatch:
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: railway
+          POSTGRES_PASSWORD: change-me
+          POSTGRES_DB: railway_bid
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U railway -d railway_bid"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=12
+    env:
+      DATABASE_URL: postgresql+psycopg://railway:change-me@localhost:5432/railway_bid
+      STORAGE_ROOT: /tmp/railway-bid-uat-storage
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: python -m pip install --upgrade pip
+      - run: pip install -r requirements.txt
+      - run: PYTHONPATH=. alembic upgrade head
+      - run: PYTHONPATH=. python -m app.seed
+      - run: PYTHONPATH=. pytest -q uat
