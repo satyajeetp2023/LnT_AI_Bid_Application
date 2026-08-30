@@ -1,7 +1,7 @@
 from datetime import date,datetime,timezone
 from decimal import Decimal
 
-from sqlalchemy import Boolean,Date,DateTime,ForeignKey,Numeric,String,Text,UniqueConstraint
+from sqlalchemy import Boolean,CheckConstraint,Date,DateTime,ForeignKey,Numeric,String,Text,UniqueConstraint
 from sqlalchemy.orm import Mapped,mapped_column
 
 from app.database.session import Base
@@ -12,6 +12,12 @@ def now():return datetime.now(timezone.utc)
 
 class BidOutcome(Base):
  __tablename__="bid_outcomes"
+ __table_args__=(
+  CheckConstraint("result_status IN ('Pending','Won','Lost','No Bid','Cancelled','Result Awaited')",name="ck_bid_outcome_status"),
+  CheckConstraint("our_rank IS NULL OR (our_rank >= 1 AND our_rank <= 100)",name="ck_bid_outcome_rank"),
+  CheckConstraint("our_bid_value IS NULL OR our_bid_value >= 0",name="ck_bid_outcome_value"),
+  CheckConstraint("our_margin_percent IS NULL OR (our_margin_percent >= -100 AND our_margin_percent <= 100)",name="ck_bid_outcome_margin"),
+ )
  id:Mapped[int]=mapped_column(primary_key=True)
  bid_project_id:Mapped[int]=mapped_column(ForeignKey("bid_projects.id",ondelete="CASCADE"),unique=True,index=True)
  result_status:Mapped[str]=mapped_column(String(40),default="Pending",index=True)
@@ -35,6 +41,8 @@ class BidPriceRecord(Base):
  __table_args__=(
   UniqueConstraint("bid_project_id","rank",name="uq_bid_price_rank"),
   UniqueConstraint("bid_project_id","bidder_name",name="uq_bid_price_bidder"),
+  CheckConstraint("rank >= 1 AND rank <= 100",name="ck_bid_price_rank"),
+  CheckConstraint("bid_value >= 0",name="ck_bid_price_value"),
  )
  id:Mapped[int]=mapped_column(primary_key=True)
  bid_project_id:Mapped[int]=mapped_column(ForeignKey("bid_projects.id",ondelete="CASCADE"),index=True)
