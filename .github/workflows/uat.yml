@@ -39,5 +39,18 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: pip install -r requirements.txt
       - run: PYTHONPATH=. alembic upgrade head
+      - name: Verify migrated schema through application connection
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          from sqlalchemy import inspect,text
+          from app.database.session import engine
+          with engine.connect() as conn:
+              db=conn.execute(text("select current_database()")).scalar_one()
+              tables=set(inspect(conn).get_table_names())
+              print(f"database={db}; tables={len(tables)}")
+              required={"roles","users","bid_projects","bid_documents","bid_requirements","bid_missing_inputs","bid_pre_bid_queries","planning_resource_entries","planning_package_findings","bid_outcomes","bid_price_records"}
+              missing=required-tables
+              assert not missing,f"Missing migrated tables: {sorted(missing)}"
+          PY
       - run: PYTHONPATH=. python -m app.seed
       - run: PYTHONPATH=. pytest -q uat
