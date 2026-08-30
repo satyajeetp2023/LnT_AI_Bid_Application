@@ -1,3 +1,6 @@
+from fastapi.testclient import TestClient
+from app.main import app
+
 def test_security_headers_are_present(client):
     response=client.get("/api/v1/health")
     assert response.status_code==200
@@ -34,3 +37,10 @@ def test_read_only_member_cannot_preview_or_save_bid_result(client,bid_payload):
         headers={"X-User-ID":"2"},
     )
     assert save.status_code==403
+
+
+def test_sensitive_api_requires_explicit_identity_header():
+    anonymous=TestClient(app)
+    response=anonymous.get("/api/v1/auth/me")
+    assert response.status_code==422
+    assert "X-User-ID" in response.text
