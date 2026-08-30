@@ -8,7 +8,7 @@ vi.mock("@/services/auth",()=>({
 
 describe("GAP-002 API request timeout and cancellation",()=>{
  beforeEach(()=>{vi.useFakeTimers()});
- afterEach(()=>{vi.useRealTimers();vi.restoreAllMocks()});
+ afterEach(()=>{vi.useRealTimers();vi.restoreAllMocks();vi.unstubAllGlobals()});
 
  test("aborts an unresponsive request with a clear timeout error",async()=>{
   vi.stubGlobal("fetch",vi.fn((_url:RequestInfo|URL,init?:RequestInit)=>new Promise((_resolve,reject)=>{
@@ -37,5 +37,19 @@ describe("GAP-002 API request timeout and cancellation",()=>{
   const {request}=await import("./api");
   await expect(request<{ok:boolean}>("/ok",{timeoutMs:1000})).resolves.toEqual({ok:true});
   expect(clearSpy).toHaveBeenCalled();
+ });
+ test("downloads through the authenticated API client",async()=>{
+  const click=vi.fn();
+  const appendChild=vi.spyOn(document.body,"appendChild").mockImplementation((node:any)=>node);
+  vi.spyOn(document,"createElement").mockReturnValue({click,remove:vi.fn(),style:{},set href(_v:string){},set download(_v:string){}} as any);
+  vi.stubGlobal("URL",{...URL,createObjectURL:vi.fn(()=>"blob:test"),revokeObjectURL:vi.fn()});
+  const fetchMock=vi.fn().mockResolvedValue(new Response(new Blob(["abc"]),{status:200,headers:{"content-disposition":'attachment; filename="result.csv"'}}));
+  vi.stubGlobal("fetch",fetchMock);
+  const {downloadFile}=await import("./api");
+  await expect(downloadFile("/export","fallback.csv")).resolves.toBe("result.csv");
+  const headers=new Headers(fetchMock.mock.calls[0][1].headers);
+  expect(headers.get("X-User-ID")).toBe("1");
+  expect(click).toHaveBeenCalledOnce();
+  appendChild.mockRestore();
  });
 });
