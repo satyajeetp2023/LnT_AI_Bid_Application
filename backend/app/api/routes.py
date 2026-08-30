@@ -7,7 +7,7 @@ from sqlalchemy import func,select
 from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.database.session import get_db
-from app.models import AuditEvent,BidDocument,BidMissingInput,BidPreBidQuery,BidPreparedArtifact,BidProject,BidRequirement,ProductivityBenchmark,ProjectMembership,ScheduleScopeItem,User
+from app.models import AuditEvent,BidClauseRiskFinding,BidDocument,BidMissingInput,BidPreBidQuery,BidPreparedArtifact,BidProject,BidRequirement,ProductivityBenchmark,ProjectMembership,ScheduleScopeItem,User
 from app.schemas.requirements import RequirementCreate,RequirementExtractionSummary,RequirementRead,RequirementUpdate
 from app.schemas.bids import AutoClassifyRequest,BidCreate,BidRead,BidUpdate,ClassificationUpdate,DocumentMetadataUpdate,DocumentRead,NotesUpdate,RevisionCreate
 from app.security.auth import Permission,current_user,is_admin,require_permission,require_project_access
@@ -31,6 +31,8 @@ from app.services.boq_scope_adapter import ingest_boq_scope
 from app.services.boq_document_extraction import extract_boq_rows
 from app.services.schedule_skeleton import build_schedule_skeleton
 from app.services.productivity_benchmarks import activity_key,benchmark_summary
+from app.services.clause_risk_intelligence import bid_clause_risk_summary,review_clause_risk,scan_document_clause_risks
+from app.services.tender_qa import tender_question_answer
 from app.services.schedule_ingestion import SCHEDULE_EXTENSIONS,ingest_schedule
 from app.services.documents import DOCUMENT_CATEGORIES,archive,classify,mark_revision,update_document_metadata,update_notes,upload_document
 from app.services.document_classification import auto_classify_document
@@ -368,6 +370,44 @@ def add_productivity_benchmark(bid_id:int,payload:dict,request:Request,db:Sessio
  db.add(AuditEvent(user_id=user.id,bid_project_id=bid_id,event_type="schedule.productivity_benchmark_added",entity_type="ProductivityBenchmark",entity_id=str(row.id),request_metadata=metadata(request),details={"activity_name":activity_name,"unit":unit,"rate_per_working_day":str(rate),"source_type":"User Confirmed"}))
  db.commit();db.refresh(row)
  return {"id":row.id,"activity_name":row.activity_name,"unit":row.unit,"rate_per_working_day":float(row.rate_per_working_day),"confidence":float(row.confidence),"source_type":row.source_type}
+
+@router.post("/bids/{bid_id}/tender-qa")
+def ask_tender(bid_id:int,payload:dict,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.REQUIREMENT_VIEW);get_bid(db,bid_id)
+ question=str(payload.get("question") or "").strip()
+ if not question:raise HTTPException(422,"question is required")
+ result=tender_question_answer(db,bid_id,question,LocalSecureStorage(get_settings().storage_root),user.id,metadata(request))
+ db.add(AuditEvent(user_id=user.id,bid_project_id=bid_id,event_type="tender_qa.asked",entity_type="BidProject",entity_id=str(bid_id),request_metadata=metadata(request),details={"question":question[:500],"grounded":result["grounded"],"confidence":result["confidence"],"evidence_count":len(result["evidence"])}))
+ db.commit()
+ return result
+
+@router.post("/documents/{document_id}/scan-clause-risks")
+def scan_clause_risks(document_id:int,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ doc=get_doc(db,document_id);require_project_access(db,user,doc.bid_project_id,Permission.REQUIREMENT_MANAGE)
+ if doc.file_extension.lower() not in {"pdf","docx","txt"}:
+  return {"document_id":doc.id,"created":0,"patterns_checked":0,"supported":False,"reason":"Clause-risk text scan currently supports PDF, DOCX and TXT."}
+ try:
+  result=scan_document_clause_risks(db,doc,LocalSecureStorage(get_settings().storage_root),user.id,metadata(request))
+  result["supported"]=True
+  return result
+ except ValueError as exc:raise HTTPException(422,str(exc)) from None
+
+@router.get("/bids/{bid_id}/clause-risks")
+def get_clause_risks(bid_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.REQUIREMENT_VIEW);get_bid(db,bid_id)
+ return bid_clause_risk_summary(db,bid_id)
+
+@router.post("/clause-risks/{finding_id}/review")
+def review_clause_risk_finding(finding_id:int,payload:dict,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ finding=db.get(BidClauseRiskFinding,finding_id)
+ if not finding:raise HTTPException(404,"Clause-risk finding not found")
+ require_project_access(db,user,finding.bid_project_id,Permission.REQUIREMENT_MANAGE)
+ try:
+  result=review_clause_risk(db,finding_id,str(payload.get("disposition") or ""),payload.get("comment"),user.id)
+ except ValueError as exc:raise HTTPException(422,str(exc)) from None
+ db.add(AuditEvent(user_id=user.id,bid_project_id=finding.bid_project_id,event_type="clause_risk.reviewed",entity_type="BidClauseRiskFinding",entity_id=str(finding_id),request_metadata=metadata(request),details={"disposition":result["reviewer_disposition"]}))
+ db.commit()
+ return result
 
 @router.get("/bids/{bid_id}/schedule-skeleton")
 def get_schedule_skeleton(bid_id:int,request:Request,sync_scope:bool=Query(True),db:Session=Depends(get_db),user:User=Depends(user_dep)):
