@@ -292,3 +292,66 @@ def test_rejected_historical_result_preview_is_audited(client,bid_payload):
     assert event["details"]["filename"]=="bad.pdf"
     assert len(event["details"]["sha256"])==64
     assert "signature" in event["details"]["reason"].lower()
+
+
+def test_phase8_execution_actuals_require_won_bid_and_review_before_learning(client,bid_payload):
+    lost=client.post("/api/v1/bids",json={**bid_payload,"bid_id":"EXEC-LOST","tender_reference_no":"EXEC-LOST"}).json()
+    assert client.put(
+        f"/api/v1/bids/{lost['id']}/outcome",
+        json={"result_status":"Lost","our_rank":2,"our_bid_value":1000,"prices":[]},
+    ).status_code==200
+    rejected=client.put(
+        f"/api/v1/bids/{lost['id']}/execution-outcome",
+        json={"execution_status":"In Progress","data_date":"2026-08-30","actual_cost":500},
+    )
+    assert rejected.status_code==409
+
+    won=client.post("/api/v1/bids",json={**bid_payload,"bid_id":"EXEC-WON","tender_reference_no":"EXEC-WON"}).json()
+    assert client.put(
+        f"/api/v1/bids/{won['id']}/outcome",
+        json={"result_status":"Won","result_date":"2025-01-01","our_rank":1,"our_bid_value":1000,"our_margin_percent":8.0,"prices":[{"bidder_name":"L&T","rank":1,"bid_value":1000,"currency":"INR","is_ours":True}]},
+    ).status_code==200
+
+    draft=client.put(
+        f"/api/v1/bids/{won['id']}/execution-outcome",
+        json={"execution_status":"Completed","actual_start_date":"2024-01-01","actual_completion_date":"2025-01-01","final_contract_value":1150,"actual_cost":1035,"final_margin_percent":10.0},
+    )
+    assert draft.status_code==200
+    assert draft.json()["execution"]["review_status"]=="Draft"
+    assert draft.json()["learning_eligible"] is False
+    assert client.post(f"/api/v1/bids/{won['id']}/execution-outcome/review").status_code==409
+    assert client.get("/api/v1/execution-learning/intelligence").json()["summary"]["reviewed_projects"]==0
+
+    updated=client.put(
+        f"/api/v1/bids/{won['id']}/execution-outcome",
+        json={
+            "execution_status":"Completed","data_date":"2025-01-15",
+            "actual_start_date":"2024-01-01","actual_completion_date":"2025-01-01",
+            "final_contract_value":1150,"actual_cost":1035,"final_margin_percent":10.0,
+            "approved_variations":100,"claims_recovered":25,"eot_days":45,
+            "source_reference":"Certified Final Account / Completion Record",
+        },
+    )
+    assert updated.status_code==200
+    reviewed=client.post(f"/api/v1/bids/{won['id']}/execution-outcome/review")
+    assert reviewed.status_code==200
+    body=reviewed.json()
+    assert body["learning_eligible"] is True
+    assert body["comparison"]["revenue_change_vs_bid_percent"]==15.0
+    assert body["comparison"]["margin_change_percentage_points"]==2.0
+    portfolio=client.get("/api/v1/execution-learning/intelligence")
+    assert portfolio.status_code==200
+    assert portfolio.json()["summary"]["reviewed_projects"]==1
+
+
+def test_phase8_read_only_member_cannot_edit_or_review_execution_actuals(client,bid_payload):
+    bid=client.post("/api/v1/bids",json={**bid_payload,"bid_id":"EXEC-RBAC","tender_reference_no":"EXEC-RBAC"}).json()
+    assert client.put(
+        f"/api/v1/bids/{bid['id']}/outcome",
+        json={"result_status":"Won","our_rank":1,"our_bid_value":1000,"prices":[{"bidder_name":"L&T","rank":1,"bid_value":1000,"currency":"INR","is_ours":True}]},
+    ).status_code==200
+    assert client.post(f"/api/v1/bids/{bid['id']}/members",json={"user_id":2,"role":"Read Only"}).status_code==200
+    headers={"X-User-ID":"2"}
+    assert client.get(f"/api/v1/bids/{bid['id']}/execution-outcome",headers=headers).status_code==200
+    assert client.put(f"/api/v1/bids/{bid['id']}/execution-outcome",json={"execution_status":"In Progress"},headers=headers).status_code==403
+    assert client.post(f"/api/v1/bids/{bid['id']}/execution-outcome/review",headers=headers).status_code==403
