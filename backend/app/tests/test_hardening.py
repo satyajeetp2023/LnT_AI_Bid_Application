@@ -163,6 +163,9 @@ def test_historical_intelligence_filters_are_server_side(client,bid_payload):
     assert "Metro Competitor" not in names
     assert body["data_quality"]["outcome_source_coverage_percent"]==100.0
     assert body["data_quality"]["price_source_coverage_percent"]==100.0
+    competitor=next(x for x in body["competitors"] if x["name"]=="Rail Competitor")
+    assert competitor["top_client"]=="DFCCIL"
+    assert competitor["top_project_type"]=="OHE"
 
 
 def test_failed_historical_result_save_rolls_back_previous_state(client,bid_payload,monkeypatch):
