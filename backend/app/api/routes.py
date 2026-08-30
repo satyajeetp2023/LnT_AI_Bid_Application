@@ -74,8 +74,26 @@ async def read_limited_upload(file:UploadFile,file_limit:int,batch_remaining:int
   if size>file_limit:raise HTTPException(413,"File exceeds configured size limit")
   if size>batch_remaining:raise HTTPException(413,"Batch exceeds configured size limit")
  return b"".join(chunks),size
+@router.get("/health/live")
+def liveness(): return {"status":"ok"}
+
+@router.get("/health/ready")
+def readiness(db:Session=Depends(get_db)):
+ db.execute(select(1))
+ settings=get_settings()
+ root=Path(settings.storage_root)
+ try:
+  root.mkdir(parents=True,exist_ok=True)
+  probe=root/".readiness-probe"
+  probe.write_bytes(b"ok")
+  probe.unlink(missing_ok=True)
+ except OSError as exc:
+  raise HTTPException(503,"Storage is not writable") from exc
+ return {"status":"ready","database":"connected","storage":"writable","environment":settings.environment}
+
 @router.get("/health")
-def health(db:Session=Depends(get_db)): db.execute(select(1)); return {"status":"ok","database":"connected"}
+def health(db:Session=Depends(get_db)):
+ db.execute(select(1));return {"status":"ok","database":"connected"}
 @router.get("/config/upload")
 def upload_config():
  c=get_settings(); return {"max_file_size_mb":c.max_file_size_mb,"max_batch_size_mb":c.max_batch_size_mb,"max_files_per_batch":c.max_files_per_batch,"allowed_extensions":sorted(c.allowed_extensions),"document_categories":DOCUMENT_CATEGORIES}
