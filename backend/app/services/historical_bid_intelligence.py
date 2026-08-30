@@ -11,21 +11,35 @@ def _f(value):
  return float(value) if value is not None else None
 
 
+def _pct_gap(value,base):
+ value=_f(value);base=_f(base)
+ if value is None or not base:return None
+ return round((value-base)*100/base,2)
+
+
 def price_summary(prices:list[dict]):
  rows=sorted(prices,key=lambda x:x["rank"])
- l1=next((x for x in rows if x["rank"]==1),None)
+ by_rank={x["rank"]:x for x in rows}
+ l1=by_rank.get(1)
  ours=next((x for x in rows if x.get("is_ours")),None)
  gap=None;gap_pct=None
  if l1 and ours:
   gap=_f(ours["bid_value"])-_f(l1["bid_value"])
   if _f(l1["bid_value"]):
    gap_pct=round(gap*100/_f(l1["bid_value"]),2)
+ market_spread={
+  "l2_to_l1_percent":_pct_gap(by_rank.get(2,{}).get("bid_value") if by_rank.get(2) else None,l1.get("bid_value") if l1 else None),
+  "l3_to_l1_percent":_pct_gap(by_rank.get(3,{}).get("bid_value") if by_rank.get(3) else None,l1.get("bid_value") if l1 else None),
+  "l4_to_l1_percent":_pct_gap(by_rank.get(4,{}).get("bid_value") if by_rank.get(4) else None,l1.get("bid_value") if l1 else None),
+  "recorded_bidders":len(rows),
+ }
  return {
   "l1_to_l4":[x for x in rows if x["rank"]<=4],
   "our_price":ours,
   "l1":l1,
   "our_gap_to_l1":round(gap,2) if gap is not None else None,
   "our_gap_to_l1_percent":gap_pct,
+  "market_spread":market_spread,
  }
 
 
@@ -96,19 +110,20 @@ def upsert_bid_outcome(db:Session,bid:BidProject,payload,user_id:int,request_met
 
 def historical_bid_intelligence(db:Session,bid_ids:list[int]):
  if not bid_ids:
-  return {"summary":{"recorded":0,"won":0,"lost":0,"win_rate_percent":None},"by_project_type":[],"by_client":[],"competitors":[],"version":"phase7-historical-bid-intelligence-v1","note":"Descriptive only. No predictive judgement is produced."}
+  return {"summary":{"recorded":0,"won":0,"lost":0,"win_rate_percent":None},"by_project_type":[],"by_client":[],"competitors":[],"market_spread":{"samples":0,"average_l2_to_l1_percent":None,"average_l3_to_l1_percent":None,"average_l4_to_l1_percent":None},"version":"phase7-historical-bid-intelligence-v2","note":"Descriptive only. No predictive judgement is produced."}
  outcomes=db.scalars(select(BidOutcome).where(BidOutcome.bid_project_id.in_(bid_ids))).all()
  projects={x.id:x for x in db.scalars(select(BidProject).where(BidProject.id.in_(bid_ids))).all()}
  prices=db.scalars(select(BidPriceRecord).where(BidPriceRecord.bid_project_id.in_(bid_ids))).all()
  completed=[x for x in outcomes if x.result_status in {"Won","Lost"}]
  won=[x for x in completed if x.result_status=="Won"]
- gaps=[];margins=[];ranks=[]
+ gaps=[];margins=[];ranks=[];market_spreads=[]
  for outcome in completed:
   rows=[x for x in prices if x.bid_project_id==outcome.bid_project_id]
   summary=price_summary([{"bidder_name":x.bidder_name,"rank":x.rank,"bid_value":_f(x.bid_value),"currency":x.currency,"is_ours":x.is_ours} for x in rows])
   if summary["our_gap_to_l1_percent"] is not None:gaps.append(summary["our_gap_to_l1_percent"])
   if outcome.our_margin_percent is not None:margins.append(_f(outcome.our_margin_percent))
   if outcome.our_rank is not None:ranks.append(outcome.our_rank)
+  if summary["market_spread"]["l2_to_l1_percent"] is not None:market_spreads.append(summary["market_spread"])
  def grouped(field):
   bucket=defaultdict(list)
   for outcome in completed:
@@ -121,6 +136,9 @@ def historical_bid_intelligence(db:Session,bid_ids:list[int]):
   clean=" ".join(row.bidder_name.split());key=clean.casefold();display_names.setdefault(key,clean)
   appearances[key]+=1;rank_totals[key]+=row.rank
   if row.rank==1:wins[key]+=1
+ def spread_average(key):
+  values=[x[key] for x in market_spreads if x[key] is not None]
+  return round(sum(values)/len(values),2) if values else None
  return {
   "summary":{
    "recorded":len(outcomes),"completed":len(completed),"won":len(won),"lost":len(completed)-len(won),
@@ -131,6 +149,12 @@ def historical_bid_intelligence(db:Session,bid_ids:list[int]):
   },
   "by_project_type":grouped("project_type"),"by_client":grouped("client"),
   "competitors":[{"name":display_names[name],"appearances":count,"l1_wins":wins[name],"l1_rate_percent":round(wins[name]*100/count,1),"average_rank":round(rank_totals[name]/count,2)} for name,count in appearances.most_common(20)],
-  "version":"phase7-historical-bid-intelligence-v1",
-  "note":"This is descriptive historical intelligence from recorded bid outcomes and ranked prices. It does not predict future results.",
+  "market_spread":{
+   "samples":len(market_spreads),
+   "average_l2_to_l1_percent":spread_average("l2_to_l1_percent"),
+   "average_l3_to_l1_percent":spread_average("l3_to_l1_percent"),
+   "average_l4_to_l1_percent":spread_average("l4_to_l1_percent"),
+  },
+  "version":"phase7-historical-bid-intelligence-v2",
+  "note":"This is descriptive historical intelligence from recorded bid outcomes and ranked prices. Market spread is calculated only from recorded ranked prices. It does not predict future results.",
  }
