@@ -4,7 +4,7 @@ import {use,useEffect,useState} from "react";
 import {BidWorkspaceHeader} from "@/components/BidWorkspaceHeader";
 import {ErrorState,LoadingState,PageHeader,StatusBadge,SummaryCard} from "@/components/design-system";
 import {request} from "@/services/api";
-import type {Bid,ClauseRiskFinding,ClauseRiskSummary,DrawingBoqFinding,DrawingBoqSummary,DrawingVisionStatus,FirmRiskLibrary,TenderQAResponse} from "@/types";
+import type {Bid,ClauseRiskFinding,ClauseRiskSummary,DrawingBoqFinding,DrawingBoqSummary,DrawingVisionStatus,FirmRiskLibrary,TenderKnowledgeStatus,TenderQAResponse} from "@/types";
 
 const dispositions=["Open","Escalate","Mitigated / Qualified","Accept Risk","Not Applicable","False Positive"];
 const drawingDispositions=["Confirmed Variance","BOQ Correct","Drawing Correct","Different Scope","Unit Conversion Required","False Match","Escalate"];
@@ -16,6 +16,7 @@ export default function CopilotPage({params}:{params:Promise<{id:string}>}){
  const [drawing,setDrawing]=useState<DrawingBoqSummary|null>(null);
  const [library,setLibrary]=useState<FirmRiskLibrary|null>(null);
  const [visionStatus,setVisionStatus]=useState<DrawingVisionStatus|null>(null);
+ const [knowledgeStatus,setKnowledgeStatus]=useState<TenderKnowledgeStatus|null>(null);
  const [loading,setLoading]=useState(true);
  const [error,setError]=useState("");
  const [question,setQuestion]=useState("");
@@ -35,9 +36,10 @@ export default function CopilotPage({params}:{params:Promise<{id:string}>}){
    request<ClauseRiskSummary>("/bids/"+id+"/clause-risks"),
    request<DrawingBoqSummary>("/bids/"+id+"/drawing-boq"),
    request<FirmRiskLibrary>("/firm-risk-library"),
-   request<DrawingVisionStatus>("/bids/"+id+"/drawing-vision-status")
+   request<DrawingVisionStatus>("/bids/"+id+"/drawing-vision-status"),
+   request<TenderKnowledgeStatus>("/bids/"+id+"/tender-knowledge-status")
   ])
-   .then(([b,r,d,l,v])=>{setBid(b);setRisks(r);setDrawing(d);setLibrary(l);setVisionStatus(v)})
+   .then(([b,r,d,l,v,k])=>{setBid(b);setRisks(r);setDrawing(d);setLibrary(l);setVisionStatus(v);setKnowledgeStatus(k)})
    .catch(()=>setError("Unable to load Bid Intelligence Copilot."))
    .finally(()=>setLoading(false));
  },[id]);
@@ -84,7 +86,7 @@ export default function CopilotPage({params}:{params:Promise<{id:string}>}){
   {error&&<div className="mb-3"><ErrorState message={error}/></div>}
 
   <div className="mb-3 grid gap-3 sm:grid-cols-3">
-   <div className="rounded border border-slate-200 bg-white p-3"><div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Tender Q&A</div><div className="mt-1 text-sm font-semibold text-slate-900">Bid-scoped · Source linked</div><div className="mt-1 text-[10px] text-slate-500">Conflicting numeric values are surfaced instead of silently resolved.</div></div>
+   <div className="rounded border border-slate-200 bg-white p-3"><div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Tender Q&A</div><div className="mt-1 text-sm font-semibold text-slate-900">Bid-scoped · Source linked</div><div className="mt-1 text-[10px] text-slate-500">Conflicting numeric values are surfaced instead of silently resolved.</div>{knowledgeStatus&&<div className={knowledgeStatus.summary.index_coverage_percent>=100?"mt-2 text-[10px] font-semibold text-emerald-700":"mt-2 text-[10px] font-semibold text-amber-700"}>Knowledge index: {Math.round(knowledgeStatus.summary.index_coverage_percent)}% · {knowledgeStatus.summary.chunks} chunks</div>}</div>
    <div className="rounded border border-slate-200 bg-white p-3"><div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Firm Risk Library</div><div className="mt-1 text-sm font-semibold text-slate-900">{library?library.summary.patterns:"—"} active patterns</div><div className="mt-1 text-[10px] text-slate-500">{library?library.summary.firm_reviewed:0} human-promoted precedent pattern{library?.summary.firm_reviewed===1?"":"s"}.</div></div>
    <div className="rounded border border-slate-200 bg-white p-3"><div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Drawing ↔ BOQ</div><div className="mt-1 text-sm font-semibold text-slate-900">{drawing?drawing.summary.open_reviews:"—"} review item{drawing?.summary.open_reviews===1?"":"s"}</div><div className="mt-1 text-[10px] text-slate-500">Quantity evidence never overwrites the BOQ automatically.</div>{visionStatus&&<div className={visionStatus.available?"mt-2 text-[10px] font-semibold text-emerald-700":"mt-2 text-[10px] font-semibold text-amber-700"}>Vision: {visionStatus.mode}</div>}</div>
   </div>
@@ -106,7 +108,7 @@ export default function CopilotPage({params}:{params:Promise<{id:string}>}){
      </div>
      <div className="p-4">
       <div className="text-sm leading-6 text-slate-800">{answer.answer}</div>{answer.conflicts.length>0&&<div className="mt-3 rounded border border-red-200 bg-red-50 p-3"><div className="text-[10px] font-bold uppercase tracking-wide text-red-700">Conflicting Tender Values</div><div className="mt-2 space-y-2">{answer.conflicts.map((group,i)=><div key={i}>{group.values.map((v,j)=><div key={j} className="text-xs text-red-800">• {v.display}{v.document_name?(" · "+v.document_name):""}{v.page?(" · p."+v.page):""}{v.clause?(" · Cl."+v.clause):""}</div>)}</div>)}</div><div className="mt-2 text-[10px] text-red-700">Do not rely on one value until the governing document/addendum is confirmed.</div></div>}
-      <div className="mt-4 text-[10px] text-slate-500">{answer.note}</div>
+      <div className="mt-4 text-[10px] text-slate-500">{answer.note}</div><div className="mt-1 text-[10px] text-slate-400">{answer.knowledge_index_used?`Indexed retrieval · ${answer.indexed_chunk_count} chunks available`:"Direct document fallback retrieval"}</div>
       {answer.evidence.length>0&&<div className="mt-4 space-y-2">
        <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Source Evidence</div>
        {answer.evidence.map((e,i)=><div key={i} className="rounded border border-slate-200 bg-slate-50 p-3 text-xs">
