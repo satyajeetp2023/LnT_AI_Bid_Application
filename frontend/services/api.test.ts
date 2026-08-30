@@ -12,6 +12,7 @@ describe("GAP-002 API request timeout and cancellation",()=>{
 
  test("aborts an unresponsive request with a clear timeout error",async()=>{
   vi.stubGlobal("fetch",vi.fn((_url:RequestInfo|URL,init?:RequestInit)=>new Promise((_resolve,reject)=>{
+   if(init?.signal?.aborted){reject(new DOMException("Aborted","AbortError"));return}
    init?.signal?.addEventListener("abort",()=>reject(new DOMException("Aborted","AbortError")),{once:true});
   })));
   const {request}=await import("./api");
@@ -22,6 +23,7 @@ describe("GAP-002 API request timeout and cancellation",()=>{
 
  test("honours caller cancellation without reporting a timeout",async()=>{
   vi.stubGlobal("fetch",vi.fn((_url:RequestInfo|URL,init?:RequestInit)=>new Promise((_resolve,reject)=>{
+   if(init?.signal?.aborted){reject(new DOMException("Aborted","AbortError"));return}
    init?.signal?.addEventListener("abort",()=>reject(new DOMException("Aborted","AbortError")),{once:true});
   })));
   const {request}=await import("./api");
