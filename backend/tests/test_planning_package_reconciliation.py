@@ -78,3 +78,16 @@ def test_per_resource_shortfall_math_supports_minimum_resource_quantity():
     minimum=__import__("math").ceil(required_rate/capacity["rate"])
     assert minimum==3
     assert minimum-int(capacity["resource_quantity"])==1
+
+
+def test_contract_staff_phase_timing_gap_becomes_reviewable_finding():
+    analysis={
+        "issues":[{"severity":"High","type":"Staff Phase Timing","message":"1 contract-required staff deployment entry does not cover the matching schedule phase window."}],
+        "activity_resource_coverage":[],
+        "separate_plan_matching":[],
+        "staff_plan":{"missing_contract_required_roles":[]},
+    }
+    findings=_finding_candidates(analysis)
+    assert findings[0]["finding_key"]=="issue:staff-phase-timing"
+    assert findings[0]["severity"]=="High"
+    assert findings[0]["finding_type"]=="Staff Phase Timing"
