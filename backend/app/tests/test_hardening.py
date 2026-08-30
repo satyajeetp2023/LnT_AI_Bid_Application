@@ -1,3 +1,5 @@
+import io
+import zipfile
 from fastapi.testclient import TestClient
 from app.main import app
 
@@ -54,3 +56,16 @@ def test_known_file_signature_mismatch_is_rejected(client,bid_payload):
     )
     assert response.status_code==415
     assert "does not match" in response.text
+
+
+def test_invalid_office_zip_package_is_rejected(client,bid_payload):
+    bid=client.post("/api/v1/bids",json=bid_payload).json()
+    buffer=io.BytesIO()
+    with zipfile.ZipFile(buffer,"w") as archive:
+        archive.writestr("random.txt","not an xlsx workbook")
+    response=client.post(
+        f"/api/v1/bids/{bid['id']}/documents",
+        files=[("files",("fake.xlsx",buffer.getvalue(),"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))],
+    )
+    assert response.status_code==415
+    assert "XLSX package structure is invalid" in response.text
