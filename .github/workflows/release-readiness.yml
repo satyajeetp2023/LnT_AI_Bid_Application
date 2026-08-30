@@ -1,0 +1,134 @@
+name: Release Readiness
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/phase-2-pre-bid-queries
+
+jobs:
+  release-readiness:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: railway
+          POSTGRES_PASSWORD: release-test-password
+          POSTGRES_DB: railway_bid
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U railway -d railway_bid"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=12
+    env:
+      DATABASE_URL: postgresql+psycopg://railway:release-test-password@localhost:5432/railway_bid
+      STORAGE_ROOT: /tmp/railway-bid-release-storage
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pip-audit
+
+      - name: Validate production configuration
+        working-directory: backend
+        env:
+          ENVIRONMENT: production
+          SECRET_KEY: 0123456789abcdef0123456789abcdef
+          DATABASE_URL: postgresql+psycopg://railway:release-test-password@localhost:5432/railway_bid
+          CORS_ORIGINS: https://bid-intelligence.example.internal
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          from app.core.config import Settings
+          settings=Settings()
+          assert settings.environment=="production"
+          assert len(settings.secret_key)>=32
+          assert settings.cors_origin_list==["https://bid-intelligence.example.internal"]
+          print("production configuration validation passed")
+          PY
+
+      - name: Apply migrations
+        working-directory: backend
+        run: PYTHONPATH=. alembic upgrade head
+
+      - name: Verify Phase 1-9 schema
+        working-directory: backend
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          from sqlalchemy import inspect
+          from app.database.session import engine
+          required={
+            "roles","users","bid_projects","bid_documents","bid_requirements","bid_missing_inputs",
+            "bid_pre_bid_queries","planning_resource_entries","planning_package_findings",
+            "bid_outcomes","bid_price_records","execution_outcomes","execution_learning_factors"
+          }
+          with engine.connect() as conn:
+              tables=set(inspect(conn).get_table_names())
+          missing=required-tables
+          assert not missing,f"Missing migrated tables: {sorted(missing)}"
+          print(f"schema verification passed: {len(tables)} tables")
+          PY
+
+      - name: Migration rollback and reapply smoke
+        working-directory: backend
+        run: |
+          PYTHONPATH=. alembic downgrade 0021
+          PYTHONPATH=. alembic upgrade head
+
+      - name: Backend dependency audit
+        working-directory: backend
+        run: pip-audit -r requirements.txt --progress-spinner off
+
+      - name: Backend regression tests
+        working-directory: backend
+        run: |
+          PYTHONPATH=. pytest -q app/tests
+          PYTHONPATH=. pytest -q tests
+
+      - name: PostgreSQL internal UAT
+        working-directory: backend
+        run: |
+          PYTHONPATH=. python -m app.seed
+          PYTHONPATH=. pytest -q uat
+
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Frontend install
+        working-directory: frontend
+        run: npm ci
+
+      - name: Frontend dependency audit
+        working-directory: frontend
+        run: npm audit --audit-level=high
+
+      - name: Frontend regression tests
+        working-directory: frontend
+        run: npm test
+
+      - name: Frontend production build
+        working-directory: frontend
+        run: npm run build
+
+      - name: Build backend container
+        run: docker build -t railway-bid-backend:release-test ./backend
+
+      - name: Build frontend container
+        run: docker build -t railway-bid-frontend:release-test ./frontend
+
+      - name: Validate compose model
+        run: docker compose config >/tmp/compose.rendered.yml
