@@ -13,6 +13,7 @@ from app.models import AuditEvent,BidClauseRiskFinding,BidDocument,BidMissingInp
 from app.schemas.requirements import RequirementCreate,RequirementExtractionSummary,RequirementRead,RequirementUpdate
 from app.schemas.bids import AutoClassifyRequest,BidCreate,BidRead,BidUpdate,ClassificationUpdate,DocumentMetadataUpdate,DocumentRead,NotesUpdate,RevisionCreate
 from app.schemas.historical_bids import BidOutcomeUpsert
+from app.schemas.execution_learning import ExecutionOutcomeUpsert
 from app.security.auth import Permission,current_user,is_admin,require_permission,require_project_access
 from app.services.bids import create_bid,list_bids,update_bid
 from app.services.requirements import create_requirement,list_requirements,update_requirement
@@ -50,6 +51,7 @@ from app.services.document_classification import auto_classify_document
 from app.services.historical_bid_intelligence import get_bid_outcome,historical_bid_intelligence,upsert_bid_outcome
 from app.services.historical_bid_comparison import historical_comparison
 from app.services.historical_result_import import preview_historical_result
+from app.services.execution_learning import execution_learning_intelligence,get_execution_outcome,review_execution_outcome,save_execution_outcome
 from app.storage.base import LocalSecureStorage
 router=APIRouter()
 def user_dep(db:Session=Depends(get_db),x_user_id:int=Header(alias="X-User-ID")): return current_user(db,x_user_id)
@@ -136,6 +138,26 @@ def bid_historical_comparison(bid_id:int,limit:int=Query(10,ge=1,le=50),db:Sessi
  require_project_access(db,user,bid_id,Permission.VIEW_DOCUMENT)
  current=get_bid(db,bid_id);visible=list_bids(db,user)
  return historical_comparison(db,current,[x.id for x in visible],limit)
+
+@router.get("/bids/{bid_id}/execution-outcome")
+def bid_execution_outcome(bid_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.VIEW_DOCUMENT);get_bid(db,bid_id)
+ return get_execution_outcome(db,bid_id)
+
+@router.put("/bids/{bid_id}/execution-outcome")
+def upsert_execution_outcome(bid_id:int,payload:ExecutionOutcomeUpsert,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.EDIT_BID)
+ return save_execution_outcome(db,get_bid(db,bid_id),payload,user.id,metadata(request))
+
+@router.post("/bids/{bid_id}/execution-outcome/review")
+def mark_execution_outcome_reviewed(bid_id:int,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ require_project_access(db,user,bid_id,Permission.EDIT_BID)
+ return review_execution_outcome(db,get_bid(db,bid_id),user.id,metadata(request))
+
+@router.get("/execution-learning/intelligence")
+def portfolio_execution_learning(db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ visible=list_bids(db,user)
+ return execution_learning_intelligence(db,[x.id for x in visible])
 
 @router.get("/dashboard/summary")
 def dashboard(db:Session=Depends(get_db),user:User=Depends(user_dep)):
