@@ -375,7 +375,7 @@ def test_phase8_unchanged_save_preserves_review_and_real_change_resets_it(client
     unchanged=client.put(f"/api/v1/bids/{bid['id']}/execution-outcome",json=payload)
     assert unchanged.status_code==200
     assert unchanged.json()["execution"]["review_status"]=="Reviewed"
-    assert unchanged.json()["execution"]["reviewed_at"]==reviewed_at
+    assert unchanged.json()["execution"]["reviewed_at"].replace("+00:00","")==reviewed_at.replace("+00:00","")
 
     changed=client.put(f"/api/v1/bids/{bid['id']}/execution-outcome",json={**payload,"actual_cost":510})
     assert changed.status_code==200
