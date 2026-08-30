@@ -22,9 +22,11 @@ export default function CopilotPage({params}:{params:Promise<{id:string}>}){
  const [answer,setAnswer]=useState<TenderQAResponse|null>(null);
  const [riskState,setRiskState]=useState<Record<number,{disposition:string;comment:string}>>({});
  const [drawingState,setDrawingState]=useState<Record<number,{disposition:string;comment:string}>>({});
+ const [patternPhrase,setPatternPhrase]=useState<Record<number,string>>({});
 
  const loadRisks=()=>request<ClauseRiskSummary>("/bids/"+id+"/clause-risks").then(setRisks);
  const loadDrawing=()=>request<DrawingBoqSummary>("/bids/"+id+"/drawing-boq").then(setDrawing);
+ const loadLibrary=()=>request<FirmRiskLibrary>("/firm-risk-library").then(setLibrary);
  useEffect(()=>{
   setLoading(true);
   Promise.all([
@@ -60,6 +62,16 @@ export default function CopilotPage({params}:{params:Promise<{id:string}>}){
    await request("/drawing-boq/"+item.id+"/review",{method:"POST",body:JSON.stringify(state)});
    await loadDrawing();
   }catch{setError("Unable to save drawing/BOQ review.")}
+ };
+
+ const promoteRisk=async(item:ClauseRiskFinding)=>{
+  const phrase=(patternPhrase[item.id]||"").trim();
+  if(!phrase)return;
+  try{
+   await request("/clause-risks/"+item.id+"/promote-pattern",{method:"POST",body:JSON.stringify({pattern_terms:[phrase]})});
+   setPatternPhrase({...patternPhrase,[item.id]:""});
+   await loadLibrary();
+  }catch(e){setError(e instanceof Error?e.message:"Unable to add this clause pattern to the firm library.")}
  };
 
  if(loading)return <div className="mx-auto max-w-[1500px]"><LoadingState label="Loading Bid Intelligence Copilot…"/></div>;
@@ -134,7 +146,7 @@ export default function CopilotPage({params}:{params:Promise<{id:string}>}){
        </div>
        <div className="mt-3 rounded bg-slate-50 p-3 text-xs leading-5 text-slate-700"><span className="font-semibold">Source:</span> {item.source_excerpt}</div>
        {item.explanation&&<div className="mt-2 text-xs leading-5 text-slate-600"><span className="font-semibold text-slate-700">Why flagged:</span> {item.explanation}</div>}
-       {item.reviewer_guidance&&<div className="mt-2 rounded bg-blue-50 p-3 text-xs leading-5 text-slate-700"><span className="font-semibold">Reviewer guidance:</span> {item.reviewer_guidance}</div>}
+       {item.reviewer_guidance&&<div className="mt-2 rounded bg-blue-50 p-3 text-xs leading-5 text-slate-700"><span className="font-semibold">Reviewer guidance:</span> {item.reviewer_guidance}</div>}{item.review_status==="Closed"&&["Accept Risk","Mitigated / Qualified"].includes(item.reviewer_disposition||"")&&<div className="mt-2 rounded border border-emerald-200 bg-emerald-50/40 p-3"><div className="text-[10px] font-bold uppercase tracking-wide text-emerald-700">Promote to Firm Risk Library</div><div className="mt-1 text-[10px] leading-4 text-slate-600">Enter one distinctive phrase future tenders should be checked for. This is a deliberate human-learning action.</div><div className="mt-2 flex flex-col gap-2 sm:flex-row"><input value={patternPhrase[item.id]||""} onChange={e=>setPatternPhrase({...patternPhrase,[item.id]:e.target.value})} className="min-w-0 flex-1 rounded border border-slate-300 bg-white px-2 py-2 text-xs" placeholder="Example: liability shall be unlimited"/><button onClick={()=>promoteRisk(item)} disabled={!(patternPhrase[item.id]||"").trim()} className="rounded bg-emerald-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">Add Firm Pattern</button></div></div>}
        <div className="mt-3 grid gap-2 lg:grid-cols-[220px_1fr_auto] lg:items-end">
         <div>
          <label className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Disposition</label>
