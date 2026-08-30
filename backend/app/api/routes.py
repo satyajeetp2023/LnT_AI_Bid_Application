@@ -245,6 +245,27 @@ def sync_schedule_scope(bid_id:int,request:Request,db:Session=Depends(get_db),us
  require_project_access(db,user,bid_id,Permission.REQUIREMENT_MANAGE);get_bid(db,bid_id)
  return sync_scope_from_requirements(db,bid_id,user.id,metadata(request))
 
+@router.get("/documents/{document_id}/schedule-source-profile")
+def schedule_source_profile(document_id:int,db:Session=Depends(get_db),user:User=Depends(user_dep)):
+ doc=get_doc(db,document_id);require_project_access(db,user,doc.bid_project_id,Permission.VIEW_DOCUMENT)
+ ext=doc.file_extension.lower()
+ if ext not in SCHEDULE_EXTENSIONS:
+  return {"recognized":False,"structured":False,"source_kind":f"{ext.upper()} Document","fidelity":"Unsupported","capabilities":{"activities":False,"logic":False,"float":False,"resources":False,"calendars":False,"wbs":False},"limitations":["This file type is not currently recognized as a schedule source."]}
+ if not doc.storage_path:
+  return {"recognized":True,"structured":False,"source_kind":f"{ext.upper()} Schedule","fidelity":"Content Unavailable","capabilities":{"activities":False,"logic":False,"float":False,"resources":False,"calendars":False,"wbs":False},"limitations":["Document content is not available in storage."]}
+ ingestion=ingest_schedule(ext,LocalSecureStorage(get_settings().storage_root).read(doc.storage_path))
+ filename=(doc.original_filename or "").lower()
+ filename_signal=any(x in filename for x in ("schedule","programme","program","primavera","baseline","work plan","time schedule"))
+ return {
+  "recognized":bool(ingestion["detected"] or filename_signal or (doc.document_type or "").lower().startswith("schedule -")),
+  "structured":bool(ingestion["detected"]),
+  "source_kind":ingestion["source_kind"],
+  "fidelity":ingestion["fidelity"],
+  "capabilities":ingestion["capabilities"],
+  "limitations":ingestion["limitations"],
+  "parser_version":ingestion["parser_version"],
+ }
+
 @router.post("/documents/{document_id}/detect-schedule")
 def detect_schedule_document(document_id:int,request:Request,db:Session=Depends(get_db),user:User=Depends(user_dep)):
  doc=get_doc(db,document_id);require_project_access(db,user,doc.bid_project_id,Permission.CLASSIFY_DOCUMENT)
