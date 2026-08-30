@@ -223,7 +223,7 @@ def schedule_comparison(document_id:int,request:Request,baseline_document_id:int
  base_ing=ingest_schedule(baseline.file_extension,storage.read(baseline.storage_path))
  cur_ing=ingest_schedule(current.file_extension,storage.read(current.storage_path))
  if not base_ing["detected"] or not cur_ing["detected"]:raise HTTPException(422,"Both documents must contain a reliable structured activity table")
- result=compare_schedule_tables(base_ing["tables"],cur_ing["tables"])
+ result=compare_schedule_tables(base_ing["tables"],cur_ing["tables"],base_ing["capabilities"],cur_ing["capabilities"])
  result["source_fidelity"]={"baseline":base_ing["fidelity"],"current":cur_ing["fidelity"]}
  db.add(AuditEvent(user_id=user.id,bid_project_id=current.bid_project_id,event_type="schedule.compared",entity_type="BidDocument",entity_id=str(current.id),request_metadata=metadata(request),details={"baseline_document_id":baseline.id,"current_document_id":current.id,"baseline_format":baseline.file_extension,"current_format":current.file_extension,**result.get("summary",{})}))
  db.commit()
