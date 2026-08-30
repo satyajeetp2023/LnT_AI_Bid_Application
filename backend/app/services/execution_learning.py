@@ -186,6 +186,9 @@ def update_execution_factor(db:Session,factor:ExecutionLearningFactor,payload,us
 
 
 def review_execution_factor(db:Session,factor:ExecutionLearningFactor,user_id:int,request_metadata:dict|None=None):
+ execution=db.get(ExecutionOutcome,factor.execution_outcome_id)
+ if not execution or execution.review_status!="Reviewed":
+  raise HTTPException(409,"Execution learning factor cannot be reviewed until parent execution actuals are Reviewed")
  missing=[]
  if not (factor.source_reference or "").strip():missing.append("source reference")
  if not (factor.lesson_for_future_bids or "").strip():missing.append("lesson for future bids")
