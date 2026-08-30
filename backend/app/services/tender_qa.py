@@ -13,9 +13,31 @@ STOP={
  "this","that","with","from","our","bid","tender","contract","please","tell","me","show","give"
 }
 
+SYNONYM_EXPANSIONS={
+ "ld":{"ld","liquidated","damages","delay"},
+ "liquidated":{"ld","liquidated","damages","delay"},
+ "retention":{"retention","withholding","withheld"},
+ "dlp":{"dlp","defects","liability","warranty"},
+ "defects":{"dlp","defects","liability","warranty"},
+ "pbg":{"pbg","performance","security","guarantee"},
+ "guarantee":{"pbg","performance","security","guarantee"},
+ "mobilization":{"mobilization","mobilisation","advance"},
+ "mobilisation":{"mobilization","mobilisation","advance"},
+ "emd":{"emd","security","earnest"},
+ "gst":{"gst","tax","taxes"},
+ "indemnity":{"indemnity","indemnify"},
+ "indemnify":{"indemnity","indemnify"},
+ "termination":{"termination","terminate"},
+}
+
+
 
 def _terms(text:str):
- return {x for x in re.findall(r"[a-z0-9%]+",str(text or "").lower()) if len(x)>1 and x not in STOP}
+ raw={x for x in re.findall(r"[a-z0-9%]+",str(text or "").lower()) if len(x)>1 and x not in STOP}
+ expanded=set(raw)
+ for token in list(raw):
+  expanded.update(SYNONYM_EXPANSIONS.get(token,set()))
+ return expanded
 
 
 def _sentences(text:str):
@@ -207,6 +229,6 @@ def tender_question_answer(
    "document_id":x.document_id,"document_name":x.document_name,"page":x.page,"clause":x.clause,"section":x.section,
    "excerpt":x.text,"score":round(x.score,3),"source_kind":x.source_kind,
   } for x in ranked],
-  "retrieval_version":"tender-qa-indexed-v3",
+  "retrieval_version":"tender-qa-indexed-v4",
   "note":"The answer is limited to bid-scoped source evidence. The persistent tender index is used when available; weak evidence returns Not Found, and materially conflicting numeric values are surfaced rather than silently resolved.",
  }
