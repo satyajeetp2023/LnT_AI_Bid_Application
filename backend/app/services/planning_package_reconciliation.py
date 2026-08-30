@@ -412,6 +412,27 @@ def _finding_candidates(analysis:dict):
    "description":f"{role} is explicitly indicated by tender requirement evidence but is not identifiable in the bidder Staff Plan.",
    "task_code":None,"task_name":None,"source_reference":role,
   })
+ for check in analysis.get("resource_feasibility",{}).get("productivity_checks",[]):
+  shortfalls=[x for x in check.get("comparisons",[]) if x.get("status")=="Below Implied Requirement"]
+  if not shortfalls:continue
+  candidates.append({
+   "finding_key":f"productivity:{check.get('boq_scope_item_id')}",
+   "finding_type":"Productivity Feasibility","severity":"High",
+   "title":"Bidder-stated productivity is below BOQ/schedule implied requirement",
+   "description":f"{check.get('boq_reference') or check.get('boq_activity')} requires about {check.get('required_implied_rate_per_day')} {check.get('boq_unit')}/day over the scheduled duration; bidder-stated resource productivity is lower.",
+   "task_code":check.get("task_code"),"task_name":check.get("task_name"),
+   "source_reference":check.get("boq_reference"),
+  })
+ for index,review in enumerate(analysis.get("resource_feasibility",{}).get("concurrency_reviews",[])):
+  key=f"concurrency:{review.get('resource_name')}:{review.get('left_task_code')}:{review.get('right_task_code')}"
+  candidates.append({
+   "finding_key":re.sub(r"\s+","-",key.lower())[:300],
+   "finding_type":"Concurrent Resource Deployment","severity":review.get("severity") or "Medium",
+   "title":review.get("status") or "Concurrent resource deployment review",
+   "description":f"{review.get('resource_name')} is shown against overlapping activities {review.get('left_task_code')} and {review.get('right_task_code')} from {review.get('overlap_start')} to {review.get('overlap_finish')}. Confirm whether sufficient separate units are available.",
+   "task_code":review.get("left_task_code"),"task_name":review.get("left_task_name"),
+   "source_reference":review.get("resource_name"),
+  })
  # Dedupe by stable key, keeping highest severity.
  priority={"High":2,"Medium":1,"Low":0}
  dedup={}
@@ -480,7 +501,7 @@ def planning_package_findings(db:Session,bid_id:int):
    "medium_open":sum(1 for x in rows if x.status=="Open" and x.severity=="Medium"),
    "cleared":sum(1 for x in rows if x.status=="Cleared by Re-analysis"),
   },
-  "version":"integrated-planning-package-findings-v1",
+  "version":"integrated-planning-package-findings-v2",
  }
 
 
